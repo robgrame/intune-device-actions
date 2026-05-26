@@ -1,0 +1,328 @@
+From: Roberto Gramellini <robertogramellini@hotmail.com>
+To: Cliente <cliente@example.com>
+Subject: Proposta tecnica - Soluzione "Intune Device Self-Wipe" su Azure
+Date: Tue, 26 May 2026 19:15:00 +0200
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="----=_BOUNDARY_INTWIPE_001"
+X-Mailer: Microsoft Outlook
+
+------=_BOUNDARY_INTWIPE_001
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Buongiorno,
+
+come anticipato, di seguito una sintesi tecnica della soluzione "Intune
+Device Self-Wipe" che abbiamo progettato e di cui abbiamo gia' completato
+un primo deploy in ambiente di sviluppo.
+
+OBIETTIVO
+---------
+Consentire ad un utente finale (o ad un processo automatico sul client)
+di richiedere in autonomia il wipe del proprio dispositivo gestito da
+Intune, mantenendo controlli di sicurezza forti, tracciabilita' completa
+e processo asincrono e resiliente.
+
+ARCHITETTURA IN BREVE
+---------------------
+La soluzione e' interamente serverless su Azure ed e' composta da:
+
+  1. Client PowerShell 5.1 (distribuito via Intune)
+     - Mostra all'utente un dialog di conferma che spiega che
+       l'operazione e' irreversibile e che il device sara' inutilizzabile
+       per circa 90 minuti. Richiede di digitare "WIPE" per confermare.
+     - Raccoglie automaticamente:
+         * nome del computer
+         * Entra Device Id (da dsregcmd /status)
+         * Intune Device Id (dal registro di enrollment MDM)
+     - Si autentica all'API tramite il certificato dispositivo
+       distribuito da Intune via SCEP/PKCS (mutual TLS).
+
+  2. Azure Function HTTP "WipeRequest" (endpoint pubblico)
+     - Riceve la richiesta dal client.
+     - Valida il certificato client (issuer + thumbprint allow-list).
+     - Valida il payload JSON.
+     - NON esegue il wipe: si limita a mettere in coda un messaggio
+       (Azure Storage Queue) e risponde 202 Accepted con un
+       correlationId.
+
+  3. Azure Storage Queue "wipe-requests"
+     - Disaccoppia ricezione ed esecuzione.
+     - Garantisce retry automatici e dead-lettering verso una coda
+       "-poison" in caso di errori persistenti.
+
+  4. Azure Function "WipeProcessor" (queue trigger, non esposta)
+     - Legge il messaggio dalla coda.
+     - Risolve via Microsoft Graph l'oggetto device nell'Entra ID a
+       partire dall'azureADDeviceId.
+     - Verifica che il device sia membro (anche transitivo) di uno
+       specifico gruppo di sicurezza Entra ID ("Intune-Wipe-Authorized"
+       o nome a vostra scelta).
+     - Verifica che l'Intune Device Id appartenga effettivamente al
+       device Entra dichiarato (controllo di ownership su
+       managedDevice.azureADDeviceId).
+     - Solo se tutti i controlli passano, invoca l'API Graph
+       POST /deviceManagement/managedDevices/{id}/wipe.
+
+  5. Identita' e permessi
+     - Una User-Assigned Managed Identity e' associata alla Function
+       App. Tutti gli accessi a Storage e a Microsoft Graph avvengono
+       con questa identita' (nessun secret, nessuna chiave gestita
+       manualmente).
+     - Permessi Microsoft Graph (application, consent admin):
+         * DeviceManagementManagedDevices.PrivilegedOperations.All
+         * DeviceManagementManagedDevices.Read.All
+         * Device.Read.All
+
+  6. Osservabilita'
+     - Application Insights raccoglie ogni richiesta, accettata o
+       negata, con CorrelationId, nome device, Entra/Intune Id,
+       thumbprint del certificato presentato ed esito finale.
+     - Le query KQL su App Insights consentono audit completo "chi ha
+       chiesto cosa, quando, con che esito".
+
+CONTROLLI DI SICUREZZA IN PROFONDITA'
+-------------------------------------
+Per autorizzare un wipe, una richiesta deve superare TUTTI questi
+controlli, eseguiti in ordine:
+
+  [1] Function key sulla chiamata HTTP (segreto applicativo).
+  [2] Certificato client valido, emesso dalla CA Intune autorizzata
+      (validazione su issuer e/o thumbprint allow-list).
+  [3] Payload ben formato con tre GUID validi.
+  [4] Device presente nell'Entra ID del tenant.
+  [5] Device membro del gruppo di sicurezza autorizzato (la
+      "allow-list" e' quindi gestita semplicemente come membership di
+      gruppo Entra: si puo' aggiungere o rimuovere un device dal
+      portale, via PowerShell o tramite assignment dinamico).
+  [6] Match di ownership: l'Intune Device Id passato deve riferirsi
+      esattamente all'Entra Device Id passato.
+  [7] Solo a quel punto viene effettivamente chiamata l'API di wipe.
+
+Inoltre:
+  - L'endpoint accetta solo HTTPS, TLS 1.2 minimo.
+  - La Function App ha clientCertEnabled = true.
+  - La Managed Identity ha solo i permessi minimi necessari.
+  - Nessuna credenziale e' memorizzata in codice o configurazione.
+
+FLUSSO UTENTE TIPICO
+--------------------
+  1. L'utente (o un task automatico) lancia lo script PowerShell
+     distribuito da Intune.
+  2. Compare un dialog elegante che spiega cosa sta per accadere,
+     l'irreversibilita' dell'operazione, i circa 90 minuti di
+     indisponibilita', e richiede di digitare la parola "WIPE" e di
+     spuntare una checkbox di consapevolezza.
+  3. Lo script chiama l'API, riceve 202 Accepted con il correlationId
+     da mostrare all'utente (utile per il supporto).
+  4. La seconda Function processa la coda, esegue tutti i controlli
+     descritti sopra e invia il comando di wipe a Intune.
+  5. Intune avvia il reset del dispositivo.
+
+DEPLOY E STATO ATTUALE
+----------------------
+  - Infrastruttura completamente descritta in Bicep (Infrastructure as
+    Code), redeployabile in qualsiasi sottoscrizione/RG.
+  - Codice .NET 8 isolated, pubblicato via zip deploy.
+  - Primo deploy gia' completato sul tenant di test: tutte le risorse
+    sono attive, lo smoke test contro l'endpoint senza certificato
+    risponde correttamente 401 Unauthorized.
+  - Restano da configurare lato cliente:
+      * la CA SCEP/PKCS effettiva (issuer DN del cert dispositivo);
+      * il gruppo di sicurezza Entra "Intune-Wipe-Authorized";
+      * la distribuzione dello script via Intune Win32 / Proactive
+        Remediation.
+
+VANTAGGI DELL'APPROCCIO
+-----------------------
+  - Asincrono e resiliente: una eventuale indisponibilita' temporanea
+    di Microsoft Graph non perde la richiesta, viene ritentata.
+  - Separazione netta tra "ricevere" ed "eseguire": l'endpoint
+    pubblico fa solo validazione e accodamento, riducendo la
+    superficie di attacco.
+  - Gestione "allow-list" tramite gruppo Entra: semplice, nativa,
+    integrabile con membership dinamica o processi di approvazione
+    esistenti.
+  - Audit trail completo e ricercabile (App Insights / Log Analytics).
+  - Nessun secret da gestire: tutto Managed Identity.
+
+PROSSIMI PASSI PROPOSTI
+-----------------------
+  1. Sessione tecnica di 30-45 minuti per condividere la demo e
+     concordare:
+        - issuer effettivo della CA SCEP Intune;
+        - naming convention finale di gruppo Entra e risorse Azure;
+        - sottoscrizione target di produzione.
+  2. Pilot su 5-10 dispositivi reali.
+  3. Rollout controllato.
+
+Resto a disposizione per qualunque chiarimento o per pianificare la
+sessione di demo.
+
+Cordiali saluti,
+Roberto Gramellini
+
+------=_BOUNDARY_INTWIPE_001
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: Segoe UI, Calibri, Arial, sans-serif; font-size: 14px; color: #1f2328; line-height: 1.55; }
+  h2 { color: #0b5cab; border-bottom: 1px solid #d0d7de; padding-bottom: 4px; margin-top: 24px; }
+  h3 { color: #0b5cab; margin-top: 18px; }
+  ol, ul { margin-top: 4px; }
+  li { margin-bottom: 4px; }
+  code { background: #f6f8fa; padding: 1px 4px; border-radius: 3px; font-size: 13px; }
+  .box { background: #f6f8fa; border-left: 4px solid #0b5cab; padding: 10px 14px; margin: 14px 0; }
+  .warn { background: #fff8e1; border-left: 4px solid #c79100; padding: 10px 14px; margin: 14px 0; }
+  table.flow { border-collapse: collapse; margin: 10px 0; }
+  table.flow td { border: 1px solid #d0d7de; padding: 8px 12px; vertical-align: top; }
+  .step { background: #eaf2fb; font-weight: 600; width: 50px; text-align: center; }
+</style>
+</head>
+<body>
+
+<p>Buongiorno,</p>
+
+<p>come anticipato, di seguito una sintesi tecnica della soluzione
+<b>&laquo;Intune Device Self-Wipe&raquo;</b> che abbiamo progettato e di cui abbiamo
+gi&agrave; completato un primo deploy in ambiente di sviluppo.</p>
+
+<h2>Obiettivo</h2>
+<p>Consentire ad un utente finale (o ad un processo automatico sul client) di
+richiedere in autonomia il <b>wipe del proprio dispositivo</b> gestito da Intune,
+mantenendo controlli di sicurezza forti, tracciabilit&agrave; completa e processo
+asincrono e resiliente.</p>
+
+<h2>Architettura</h2>
+
+<div class="box">
+<pre style="margin:0; font-family: Consolas, monospace; font-size: 13px;">
+  PS 5.1 client (Intune Win32)
+        |
+        |  HTTPS + mTLS (cert dispositivo SCEP/PKCS)
+        v
+  +-----------------------+        +----------------------+
+  |  Function "WipeRequest"|  -->  |  Storage Queue       |
+  |  (HTTP, pubblica)      |       |  "wipe-requests"     |
+  +-----------------------+        +----------+-----------+
+                                              |
+                                              v
+                              +------------------------------+
+                              |  Function "WipeProcessor"    |
+                              |  (queue trigger, interna)    |
+                              +---------------+--------------+
+                                              |
+                       Managed Identity       v
+                              +------------------------------+
+                              |   Microsoft Graph            |
+                              |   - check Entra group        |
+                              |   - check ownership          |
+                              |   - POST .../wipe            |
+                              +------------------------------+
+</pre>
+</div>
+
+<h3>Componenti</h3>
+<ol>
+  <li><b>Client PowerShell 5.1</b> distribuito via Intune. Mostra all'utente un dialog
+      di conferma che spiega irreversibilit&agrave; e circa <b>90 minuti</b> di
+      indisponibilit&agrave;, e richiede di digitare <code>WIPE</code> per procedere.
+      Raccoglie nome computer, <i>Entra Device Id</i> (da <code>dsregcmd /status</code>) e
+      <i>Intune Device Id</i> (dal registro MDM). Si autentica all'API tramite il
+      certificato dispositivo Intune (mutual TLS).</li>
+  <li><b>Azure Function HTTP &laquo;WipeRequest&raquo;</b> &mdash; endpoint pubblico.
+      Valida certificato e payload, accoda il messaggio e risponde
+      <code>202 Accepted</code> con un <code>correlationId</code>. Non esegue mai il wipe.</li>
+  <li><b>Azure Storage Queue &laquo;wipe-requests&raquo;</b> &mdash; disaccoppia ricezione ed
+      esecuzione, con retry automatici e dead-letter (<code>-poison</code>).</li>
+  <li><b>Azure Function &laquo;WipeProcessor&raquo;</b> (queue trigger, non esposta):
+      verifica via Graph che il device sia membro di uno specifico gruppo di
+      sicurezza Entra ID, controlla l'ownership Intune/Entra ed esegue
+      l'<code>POST /deviceManagement/managedDevices/{id}/wipe</code>.</li>
+  <li><b>User-Assigned Managed Identity</b> per tutti gli accessi (Storage e
+      Graph). Nessun secret nel codice o nella configurazione.</li>
+  <li><b>Application Insights</b> con audit completo (chi, quando, esito,
+      <code>correlationId</code>).</li>
+</ol>
+
+<h2>Controlli di sicurezza in profondit&agrave;</h2>
+<table class="flow">
+  <tr><td class="step">1</td><td>Function key sulla chiamata HTTP</td></tr>
+  <tr><td class="step">2</td><td>Certificato client valido, emesso dalla CA Intune autorizzata (issuer / thumbprint allow-list)</td></tr>
+  <tr><td class="step">3</td><td>Payload ben formato (tre GUID validi)</td></tr>
+  <tr><td class="step">4</td><td>Device esistente nell'Entra ID del tenant</td></tr>
+  <tr><td class="step">5</td><td>Device membro del gruppo di sicurezza autorizzato (gestione &laquo;allow-list&raquo; nativa Entra, anche dinamica)</td></tr>
+  <tr><td class="step">6</td><td>Ownership match: <code>managedDevice.azureADDeviceId</code> = Entra Device Id dichiarato</td></tr>
+  <tr><td class="step">7</td><td>Solo a questo punto viene chiamata l'API di wipe</td></tr>
+</table>
+
+<p>In aggiunta: solo HTTPS, TLS 1.2 minimo, <code>clientCertEnabled = true</code>,
+Managed Identity con permessi minimi.</p>
+
+<h3>Permessi Microsoft Graph (application)</h3>
+<ul>
+  <li><code>DeviceManagementManagedDevices.PrivilegedOperations.All</code></li>
+  <li><code>DeviceManagementManagedDevices.Read.All</code></li>
+  <li><code>Device.Read.All</code></li>
+</ul>
+
+<h2>Esperienza utente</h2>
+<ol>
+  <li>L'utente lancia lo script (o viene eseguito automaticamente come SYSTEM).</li>
+  <li>Compare un dialog elegante con avviso di irreversibilit&agrave; e ~90 minuti di
+      indisponibilit&agrave;; conferma richiede checkbox + parola <code>WIPE</code> digitata.</li>
+  <li>Lo script invoca l'API e mostra il <code>correlationId</code> per il supporto.</li>
+  <li>Il processor esegue tutti i controlli ed invia il comando a Intune.</li>
+  <li>Intune avvia il reset del dispositivo.</li>
+</ol>
+
+<h2>Stato attuale</h2>
+<ul>
+  <li>Infrastruttura completamente descritta in <b>Bicep</b> (IaC), redeployabile.</li>
+  <li>Codice <b>.NET 8 isolated</b>, gi&agrave; pubblicato in ambiente di sviluppo.</li>
+  <li>Smoke test endpoint senza certificato: risponde correttamente
+      <code>401 Unauthorized</code> &rarr; validazione cert attiva.</li>
+  <li>Restano da configurare lato cliente:
+    <ul>
+      <li>la CA SCEP/PKCS effettiva (issuer DN del cert dispositivo);</li>
+      <li>il gruppo di sicurezza Entra &laquo;Intune-Wipe-Authorized&raquo;;</li>
+      <li>la distribuzione dello script tramite Intune Win32 / Proactive Remediation.</li>
+    </ul>
+  </li>
+</ul>
+
+<h2>Vantaggi dell'approccio</h2>
+<ul>
+  <li><b>Asincrono e resiliente</b>: indisponibilit&agrave; momentanea di Graph non perde la richiesta.</li>
+  <li><b>Separazione netta</b> tra ricezione ed esecuzione: superficie di attacco ridotta sull'endpoint pubblico.</li>
+  <li><b>Allow-list nativa Entra</b>: gestione semplice, integrabile con membership dinamica o approval workflow esistenti.</li>
+  <li><b>Audit trail completo</b> e ricercabile via KQL.</li>
+  <li><b>Zero secret</b> da gestire grazie a Managed Identity.</li>
+</ul>
+
+<div class="warn">
+<b>Nota importante:</b> il wipe Intune &egrave; un'operazione <b>distruttiva e
+irreversibile</b>. La soluzione e' progettata con difesa in profondit&agrave; proprio
+per evitare attivazioni accidentali o non autorizzate.
+</div>
+
+<h2>Prossimi passi proposti</h2>
+<ol>
+  <li>Sessione tecnica di 30-45 minuti per demo e per concordare issuer CA, naming e sottoscrizione di produzione.</li>
+  <li>Pilot su 5-10 dispositivi reali.</li>
+  <li>Rollout controllato.</li>
+</ol>
+
+<p>Resto a disposizione per qualunque chiarimento o per pianificare la sessione di demo.</p>
+
+<p>Cordiali saluti,<br>
+<b>Roberto Gramellini</b></p>
+
+</body>
+</html>
+
+------=_BOUNDARY_INTWIPE_001--
