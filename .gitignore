@@ -4,3 +4,8 @@ obj/
 local.settings.json
 *.user
 .vs/
+
+# Build/publish artifacts
+publish/
+publish.zip
+
