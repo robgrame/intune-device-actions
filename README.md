@@ -233,9 +233,14 @@ Tutte le impostazioni sono app settings della Function App:
 | Setting | Default | Descrizione |
 |---|---|---|
 | `Queue__WipeQueueName` | `wipe-requests` | Nome coda |
-| `ClientCert__AllowedIssuer` | `CN=Intune SCEP CA` | DN issuer cert dispositivo |
-| `ClientCert__AllowedThumbprints` | _(vuoto)_ | CSV thumbprint allow-list (opzionale) |
-| `ClientCert__RequireClientCert` | `true` | Impone cert client |
+| `ClientCert__TrustedCaThumbprints` | _(vuoto)_ | CSV thumbprint root/intermediate CA che devono comparire nella chain. **Richiesto** (o `TrustedCaCertificates`) |
+| `ClientCert__TrustedCaCertificates` | _(vuoto)_ | CSV di CA in base64 DER caricate in `CustomTrustStore` (no machine store) |
+| `ClientCert__AllowedLeafThumbprints` | _(vuoto)_ | CSV pin opzionale del thumbprint del certificato leaf |
+| `ClientCert__CheckRevocation` | `false` | Abilita check CRL/OCSP sulla chain |
+| `ClientCert__RevocationMode` | `Online` | `Online`\|`Offline`\|`NoCheck` |
+| `ClientCert__RevocationFlag` | `ExcludeRoot` | `ExcludeRoot`\|`EntireChain`\|`EndCertificateOnly` |
+| `ClientCert__RequireClientAuthEku` | `true` | Richiede EKU Client Authentication (1.3.6.1.5.5.7.3.2) |
+| `ClientCert__RequireClientCert` | `true` | Impone cert client (fail-closed se mancante) |
 | `Wipe__AllowedGroupId` | _(obbligatorio)_ | ObjectId gruppo Entra |
 | `Wipe__KeepEnrollmentData` | `false` | Mantiene enrollment Intune |
 | `Wipe__KeepUserData` | `false` | Mantiene dati utente |

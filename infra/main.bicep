@@ -9,11 +9,29 @@ param location string = resourceGroup().location
 @description('Tenant ID where Graph calls are made')
 param graphTenantId string = subscription().tenantId
 
-@description('Issuer DN allowed for client certificates (Intune SCEP CA)')
-param allowedCertIssuer string = 'CN=Intune SCEP CA'
+@description('Comma-separated list of trusted CA certificate thumbprints (root and/or intermediate). At least one must appear in the client certificate chain. Required unless trustedCaCertificatesBase64 is provided.')
+param trustedCaThumbprints string = ''
 
-@description('Comma-separated list of allowed client cert thumbprints (optional)')
-param allowedCertThumbprints string = ''
+@description('Comma-separated list of base64-encoded DER CA certificates loaded into a custom trust store (no dependency on the machine trust store). Optional alternative or complement to trustedCaThumbprints.')
+@secure()
+param trustedCaCertificatesBase64 string = ''
+
+@description('Optional comma-separated list of leaf certificate thumbprints to pin (defense-in-depth). Empty disables leaf pinning.')
+param allowedLeafThumbprints string = ''
+
+@description('Enable CRL/OCSP revocation checks on the client certificate chain.')
+param checkRevocation bool = false
+
+@description('Revocation lookup mode: Online | Offline | NoCheck')
+@allowed([ 'Online', 'Offline', 'NoCheck' ])
+param revocationMode string = 'Online'
+
+@description('Revocation scope: ExcludeRoot | EntireChain | EndCertificateOnly')
+@allowed([ 'ExcludeRoot', 'EntireChain', 'EndCertificateOnly' ])
+param revocationFlag string = 'ExcludeRoot'
+
+@description('Require Client Authentication EKU (1.3.6.1.5.5.7.3.2) on the client certificate.')
+param requireClientAuthEku bool = true
 
 @description('Object Id of the Entra ID security group whose member devices are authorized to self-wipe')
 param allowedGroupId string
@@ -111,9 +129,14 @@ resource func 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: ai.properties.ConnectionString }
         { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
         { name: 'Queue__WipeQueueName', value: wipeQueueName }
-        { name: 'ClientCert__AllowedThumbprints', value: allowedCertThumbprints }
-        { name: 'ClientCert__AllowedIssuer',      value: allowedCertIssuer }
-        { name: 'ClientCert__RequireClientCert',  value: 'true' }
+        { name: 'ClientCert__TrustedCaThumbprints',    value: trustedCaThumbprints }
+        { name: 'ClientCert__TrustedCaCertificates',   value: trustedCaCertificatesBase64 }
+        { name: 'ClientCert__AllowedLeafThumbprints',  value: allowedLeafThumbprints }
+        { name: 'ClientCert__CheckRevocation',         value: string(checkRevocation) }
+        { name: 'ClientCert__RevocationMode',          value: revocationMode }
+        { name: 'ClientCert__RevocationFlag',          value: revocationFlag }
+        { name: 'ClientCert__RequireClientAuthEku',    value: string(requireClientAuthEku) }
+        { name: 'ClientCert__RequireClientCert',       value: 'true' }
         { name: 'Graph__TenantId', value: graphTenantId }
         { name: 'Wipe__AllowedGroupId',     value: allowedGroupId }
         { name: 'Wipe__KeepEnrollmentData', value: string(keepEnrollmentData) }

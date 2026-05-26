@@ -2,12 +2,16 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "namePrefix": { "value": "intwipe" },
-    "allowedCertIssuer": { "value": "CN=Intune SCEP CA" },
-    "allowedCertThumbprints": { "value": "" },
-    "allowedGroupId": { "value": "REPLACE_WITH_ENTRA_GROUP_OBJECT_ID" },
-    "keepEnrollmentData": { "value": false },
-    "keepUserData": { "value": false }
+    "namePrefix":                  { "value": "intwipe" },
+    "trustedCaThumbprints":        { "value": "REPLACE_WITH_INTUNE_SCEP_ROOT_AND_OR_INTERMEDIATE_THUMBPRINT" },
+    "trustedCaCertificatesBase64": { "value": "" },
+    "allowedLeafThumbprints":      { "value": "" },
+    "checkRevocation":             { "value": false },
+    "revocationMode":              { "value": "Online" },
+    "revocationFlag":              { "value": "ExcludeRoot" },
+    "requireClientAuthEku":        { "value": true },
+    "allowedGroupId":              { "value": "REPLACE_WITH_ENTRA_GROUP_OBJECT_ID" },
+    "keepEnrollmentData":          { "value": false },
+    "keepUserData":                { "value": false }
   }
 }
-

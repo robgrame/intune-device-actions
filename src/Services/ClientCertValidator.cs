@@ -7,42 +7,82 @@ namespace IntuneWipeApi.Services;
 
 public sealed class ClientCertValidator
 {
-    private readonly HashSet<string> _allowedThumbprints;
-    private readonly string? _allowedIssuer;
+    private const string ClientAuthEku = "1.3.6.1.5.5.7.3.2";
+
+    private readonly HashSet<string> _trustedCaThumbprints;
+    private readonly HashSet<string> _allowedLeafThumbprints;
+    private readonly List<X509Certificate2> _customTrustStore;
+    private readonly bool _checkRevocation;
+    private readonly X509RevocationMode _revocationMode;
+    private readonly X509RevocationFlag _revocationFlag;
+    private readonly bool _requireClientAuthEku;
     private readonly bool _required;
     private readonly ILogger<ClientCertValidator> _log;
 
     public ClientCertValidator(IConfiguration cfg, ILogger<ClientCertValidator> log)
     {
         _log = log;
-        _allowedThumbprints = (cfg["ClientCert:AllowedThumbprints"] ?? string.Empty)
-            .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(t => t.Trim().ToUpperInvariant())
+
+        _trustedCaThumbprints = ParseCsv(cfg["ClientCert:TrustedCaThumbprints"])
+            .Select(NormalizeThumbprint)
+            .Where(t => t.Length > 0)
             .ToHashSet();
-        _allowedIssuer = cfg["ClientCert:AllowedIssuer"];
-        _required = bool.TryParse(cfg["ClientCert:RequireClientCert"], out var r) ? r : true;
+
+        _allowedLeafThumbprints = ParseCsv(cfg["ClientCert:AllowedLeafThumbprints"]
+                ?? cfg["ClientCert:AllowedThumbprints"])
+            .Select(NormalizeThumbprint)
+            .Where(t => t.Length > 0)
+            .ToHashSet();
+
+        _customTrustStore = new List<X509Certificate2>();
+        foreach (var b64 in ParseCsv(cfg["ClientCert:TrustedCaCertificates"]))
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(StripPem(b64));
+                var ca = X509CertificateLoader.LoadCertificate(bytes);
+                _customTrustStore.Add(ca);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Failed to load configured trusted CA certificate (skipped)");
+            }
+        }
+
+        _checkRevocation = bool.TryParse(cfg["ClientCert:CheckRevocation"], out var cr) && cr;
+        _revocationMode = Enum.TryParse<X509RevocationMode>(cfg["ClientCert:RevocationMode"], true, out var rm)
+            ? rm
+            : (_checkRevocation ? X509RevocationMode.Online : X509RevocationMode.NoCheck);
+        _revocationFlag = Enum.TryParse<X509RevocationFlag>(cfg["ClientCert:RevocationFlag"], true, out var rf)
+            ? rf
+            : X509RevocationFlag.ExcludeRoot;
+
+        _requireClientAuthEku = !bool.TryParse(cfg["ClientCert:RequireClientAuthEku"], out var eku) || eku;
+        _required = !bool.TryParse(cfg["ClientCert:RequireClientCert"], out var r) || r;
     }
 
     /// <summary>
     /// Validates the client certificate. Returns (ok, cert, reason).
-    /// Looks for the cert in HttpContext.Connection.ClientCertificate or X-ARR-ClientCert header.
     /// </summary>
     public (bool Ok, X509Certificate2? Cert, string? Reason) Validate(HttpContext ctx)
     {
+        if (_trustedCaThumbprints.Count == 0 && _customTrustStore.Count == 0)
+        {
+            _log.LogError("ClientCertValidator misconfigured: no TrustedCaThumbprints and no TrustedCaCertificates. Failing closed.");
+            return (false, null, "client certificate trust anchor not configured");
+        }
+
         X509Certificate2? cert = ctx.Connection.ClientCertificate;
 
         if (cert is null && ctx.Request.Headers.TryGetValue("X-ARR-ClientCert", out var header))
         {
             try
             {
-                var raw = header.ToString()
-                    .Replace("-----BEGIN CERTIFICATE-----", string.Empty)
-                    .Replace("-----END CERTIFICATE-----", string.Empty)
-                    .Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+                var raw = StripPem(header.ToString());
                 if (!string.IsNullOrEmpty(raw))
                 {
                     var bytes = Convert.FromBase64String(raw);
-                    cert = new X509Certificate2(bytes);
+                    cert = X509CertificateLoader.LoadCertificate(bytes);
                 }
             }
             catch (Exception ex)
@@ -54,20 +94,79 @@ public sealed class ClientCertValidator
         if (cert is null)
             return (!_required, null, _required ? "client certificate missing" : null);
 
-        // Validity period
         var now = DateTime.UtcNow;
         if (now < cert.NotBefore.ToUniversalTime() || now > cert.NotAfter.ToUniversalTime())
             return (false, cert, "certificate expired or not yet valid");
 
-        var thumb = cert.Thumbprint?.ToUpperInvariant() ?? string.Empty;
+        if (_requireClientAuthEku && !HasClientAuthEku(cert))
+            return (false, cert, "certificate missing Client Authentication EKU (1.3.6.1.5.5.7.3.2)");
 
-        if (_allowedThumbprints.Count > 0 && !_allowedThumbprints.Contains(thumb))
-            return (false, cert, $"thumbprint {thumb} not in allow-list");
+        if (_allowedLeafThumbprints.Count > 0)
+        {
+            var leafTp = NormalizeThumbprint(cert.Thumbprint ?? string.Empty);
+            if (!_allowedLeafThumbprints.Contains(leafTp))
+                return (false, cert, "leaf certificate thumbprint not in allow-list");
+        }
 
-        if (!string.IsNullOrWhiteSpace(_allowedIssuer) &&
-            !string.Equals(cert.Issuer, _allowedIssuer, StringComparison.OrdinalIgnoreCase))
-            return (false, cert, $"issuer '{cert.Issuer}' not allowed");
+        using var chain = new X509Chain();
+        chain.ChainPolicy.RevocationMode = _checkRevocation ? _revocationMode : X509RevocationMode.NoCheck;
+        chain.ChainPolicy.RevocationFlag = _revocationFlag;
+        chain.ChainPolicy.VerificationTime = now;
+        chain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(15);
+
+        if (_customTrustStore.Count > 0)
+        {
+            chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+            chain.ChainPolicy.CustomTrustStore.AddRange(_customTrustStore.ToArray());
+            chain.ChainPolicy.ExtraStore.AddRange(_customTrustStore.ToArray());
+        }
+
+        var built = chain.Build(cert);
+        if (!built)
+        {
+            var reasons = string.Join("; ",
+                chain.ChainStatus.Select(s => $"{s.Status}: {s.StatusInformation.Trim()}"));
+            return (false, cert, $"certificate chain build failed ({reasons})");
+        }
+
+        if (_trustedCaThumbprints.Count > 0)
+        {
+            var chainThumbs = chain.ChainElements
+                .Cast<X509ChainElement>()
+                .Skip(1) // exclude leaf
+                .Select(e => NormalizeThumbprint(e.Certificate.Thumbprint ?? string.Empty))
+                .ToHashSet();
+
+            if (!_trustedCaThumbprints.Overlaps(chainThumbs))
+                return (false, cert, "no trusted CA thumbprint found in the certificate chain");
+        }
 
         return (true, cert, null);
     }
+
+    private static bool HasClientAuthEku(X509Certificate2 cert)
+    {
+        foreach (var ext in cert.Extensions.OfType<X509EnhancedKeyUsageExtension>())
+        {
+            foreach (var oid in ext.EnhancedKeyUsages)
+                if (oid.Value == ClientAuthEku) return true;
+        }
+        return false;
+    }
+
+    private static IEnumerable<string> ParseCsv(string? value)
+        => (value ?? string.Empty)
+            .Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0);
+
+    private static string NormalizeThumbprint(string t)
+        => new string(t.Where(c => !char.IsWhiteSpace(c) && c != ':').ToArray()).ToUpperInvariant();
+
+    private static string StripPem(string s)
+        => s.Replace("-----BEGIN CERTIFICATE-----", string.Empty)
+            .Replace("-----END CERTIFICATE-----", string.Empty)
+            .Replace("\r", string.Empty)
+            .Replace("\n", string.Empty)
+            .Trim();
 }
