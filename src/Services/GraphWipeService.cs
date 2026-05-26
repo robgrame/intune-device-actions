@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.DeviceManagement.ManagedDevices.Item.Wipe;
 using Microsoft.Graph.Devices.Item.CheckMemberGroups;
+using Microsoft.Graph.Models.ODataErrors;
 
 namespace IntuneWipeApi.Services;
 
@@ -29,6 +30,9 @@ public sealed class GraphWipeService
     /// </summary>
     public async Task<string?> GetDeviceObjectIdAsync(string entraDeviceId, CancellationToken ct)
     {
+        if (!Guid.TryParse(entraDeviceId, out _))
+            throw new ArgumentException("entraDeviceId must be a GUID", nameof(entraDeviceId));
+
         var page = await _graph.Devices.GetAsync(rc =>
         {
             rc.QueryParameters.Filter = $"deviceId eq '{entraDeviceId}'";
@@ -44,7 +48,9 @@ public sealed class GraphWipeService
     public async Task<bool> IsDeviceInAllowedGroupAsync(string deviceObjectId, CancellationToken ct)
     {
         var body = new CheckMemberGroupsPostRequestBody { GroupIds = new List<string> { _allowedGroupId } };
-        var result = await _graph.Devices[deviceObjectId].CheckMemberGroups.PostAsync(body, cancellationToken: ct);
+        var result = await _graph.Devices[deviceObjectId]
+            .CheckMemberGroups
+            .PostAsCheckMemberGroupsPostResponseAsync(body, cancellationToken: ct);
         var matches = result?.Value ?? new List<string>();
         return matches.Contains(_allowedGroupId, StringComparer.OrdinalIgnoreCase);
     }
@@ -78,4 +84,24 @@ public sealed class GraphWipeService
         await _graph.DeviceManagement.ManagedDevices[managedDeviceId].Wipe.PostAsync(body, cancellationToken: ct);
         _log.LogInformation("Wipe issued for managedDevice {Id}", managedDeviceId);
     }
+
+    /// <summary>
+    /// Classifies a Microsoft Graph exception as Transient (retry) or Permanent (do not retry).
+    /// </summary>
+    public static GraphErrorKind Classify(Exception ex)
+    {
+        if (ex is OperationCanceledException) return GraphErrorKind.Transient;
+
+        if (ex is ODataError oe)
+        {
+            var status = oe.ResponseStatusCode;
+            if (status == 408 || status == 429 || status >= 500) return GraphErrorKind.Transient;
+            if (status >= 400 && status < 500) return GraphErrorKind.Permanent;
+        }
+        // Network / DNS / TLS — let it retry.
+        if (ex is HttpRequestException or TimeoutException) return GraphErrorKind.Transient;
+        return GraphErrorKind.Transient;
+    }
+
+    public enum GraphErrorKind { Transient, Permanent }
 }

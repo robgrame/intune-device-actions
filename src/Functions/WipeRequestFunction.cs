@@ -6,24 +6,27 @@ using IntuneWipeApi.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace IntuneWipeApi.Functions;
 
 /// <summary>
-/// Public HTTP endpoint: validates the client (cert + payload) and enqueues a wipe request.
-/// All heavy lifting (group membership, Graph wipe) happens asynchronously in WipeProcessorFunction.
+/// Public HTTP endpoint: validates the client (cert + payload + replay headers + cert↔device binding)
+/// and enqueues a wipe request. All heavy lifting (group membership, Graph wipe) happens
+/// asynchronously in WipeProcessorFunction.
 /// </summary>
 public sealed class WipeRequestFunction
 {
     private readonly ClientCertValidator _cert;
+    private readonly ReplayProtector _replay;
     private readonly QueueClient _queue;
     private readonly ILogger<WipeRequestFunction> _log;
 
-    public WipeRequestFunction(ClientCertValidator cert, QueueClient queue, ILogger<WipeRequestFunction> log)
+    public WipeRequestFunction(ClientCertValidator cert, ReplayProtector replay,
+        QueueClient queue, ILogger<WipeRequestFunction> log)
     {
         _cert = cert;
+        _replay = replay;
         _queue = queue;
         _log = log;
     }
@@ -36,14 +39,27 @@ public sealed class WipeRequestFunction
         var correlationId = Guid.NewGuid().ToString("N");
         using var scope = _log.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId });
 
+        // 1) Replay protection (timestamp + nonce)
+        var ts = req.Headers["X-Request-Timestamp"].ToString();
+        var nonce = req.Headers["X-Request-Nonce"].ToString();
+        var (replayOk, replayReason) = _replay.Validate(ts, nonce);
+        if (!replayOk)
+        {
+            _log.LogWarning("AUDIT denied reason=replay-check {Reason} corr={Corr}", replayReason, correlationId);
+            return new ObjectResult(new { status = "denied", message = replayReason, correlationId })
+                { StatusCode = (int)HttpStatusCode.BadRequest };
+        }
+
+        // 2) Client certificate (chain validation + EKU + optional revocation)
         var (ok, cert, reason) = _cert.Validate(req.HttpContext);
         if (!ok)
         {
-            _log.LogWarning("Cert validation failed: {Reason}", reason);
+            _log.LogWarning("AUDIT denied reason=cert-validation {Reason} corr={Corr}", reason, correlationId);
             return new ObjectResult(new { status = "denied", message = $"client cert: {reason}", correlationId })
                 { StatusCode = (int)HttpStatusCode.Unauthorized };
         }
 
+        // 3) Payload
         WipeRequest? body;
         try
         {
@@ -79,6 +95,33 @@ public sealed class WipeRequestFunction
             });
         }
 
+        // 4) Certificate <-> device binding (defends against IDOR)
+        if (_cert.BindingEnabled)
+        {
+            var boundDeviceId = _cert.GetBoundDeviceId(cert!);
+            if (string.IsNullOrEmpty(boundDeviceId))
+            {
+                _log.LogWarning("AUDIT denied reason=binding-claim-missing thumb={Thumb} corr={Corr}",
+                    cert!.Thumbprint, correlationId);
+                return new ObjectResult(new { status = "denied",
+                    message = "client certificate is missing the configured device-id binding claim",
+                    correlationId })
+                    { StatusCode = (int)HttpStatusCode.Unauthorized };
+            }
+
+            if (!string.Equals(boundDeviceId, body.EntraDeviceId, StringComparison.OrdinalIgnoreCase))
+            {
+                _log.LogWarning(
+                    "AUDIT denied reason=cert-device-mismatch certBound={Bound} reqEntra={Req} thumb={Thumb} corr={Corr}",
+                    boundDeviceId, body.EntraDeviceId, cert!.Thumbprint, correlationId);
+                return new ObjectResult(new { status = "denied",
+                    message = "client certificate is not bound to the requested device",
+                    correlationId })
+                    { StatusCode = (int)HttpStatusCode.Forbidden };
+            }
+        }
+
+        // 5) Enqueue
         var msg = new WipeQueueMessage
         {
             DeviceName = body.DeviceName!,
@@ -93,7 +136,8 @@ public sealed class WipeRequestFunction
         await _queue.CreateIfNotExistsAsync(cancellationToken: ct);
         await _queue.SendMessageAsync(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payload)), ct);
 
-        _log.LogInformation("AUDIT wipe-request enqueued device={DeviceName} entra={EntraId} intune={IntuneId} cert={Thumb} corr={Corr}",
+        _log.LogInformation(
+            "AUDIT wipe-request enqueued device={DeviceName} entra={EntraId} intune={IntuneId} cert={Thumb} corr={Corr}",
             msg.DeviceName, msg.EntraDeviceId, msg.IntuneDeviceId, msg.ClientCertThumbprint, correlationId);
 
         return new AcceptedResult(string.Empty, new

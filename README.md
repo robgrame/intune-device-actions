@@ -24,31 +24,9 @@
 
 ## Architettura
 
-```
-  PS 5.1 client (Intune Win32)
-        │
-        │  HTTPS + mTLS (cert dispositivo SCEP/PKCS)
-        ▼
-  ┌────────────────────────┐        ┌──────────────────────┐
-  │  Function "WipeRequest"│  ───▶  │  Storage Queue       │
-  │  (HTTP, pubblica)      │        │  "wipe-requests"     │
-  └────────────────────────┘        └──────────┬───────────┘
-                                                │
-                                                ▼
-                              ┌──────────────────────────────┐
-                              │  Function "WipeProcessor"    │
-                              │  (queue trigger, interna)    │
-                              └───────────────┬──────────────┘
-                                              │  Managed Identity
-                                              ▼
-                              ┌──────────────────────────────┐
-                              │   Microsoft Graph            │
-                              │   ├─ resolve device          │
-                              │   ├─ checkMemberGroups       │
-                              │   ├─ verify ownership        │
-                              │   └─ POST .../wipe           │
-                              └──────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/architecture.png" alt="Wipe request workflow: PS 5.1 client → mTLS → WipeRequest HTTP function → Storage Queue → WipeProcessor queue trigger → Microsoft Graph (resolve device, check member groups, verify ownership, POST /wipe)" width="640" />
+</p>
 
 L'endpoint pubblico fa **solo** validazione (certificato + payload) e
 accodamento. L'esecuzione effettiva avviene in un secondo processo,
@@ -59,24 +37,29 @@ e chiama Microsoft Graph.
 
 | # | Componente | Ruolo |
 |---|---|---|
-| 1 | **`Invoke-DeviceWipe.ps1`** (PowerShell 5.1) | Raccoglie identità device, mostra UI WinForms di conferma (irreversibilità + ~90 min di indisponibilità + parola `WIPE` da digitare), invoca l'API in mTLS. |
-| 2 | **`WipeRequest`** (HTTP Function) | Valida cert client (issuer/thumbprint), valida payload, accoda messaggio, risponde `202 Accepted` con `correlationId`. |
+| 1 | **`Invoke-DeviceWipe.ps1`** (PowerShell 5.1) | Raccoglie identità device, mostra UI WinForms di conferma (irreversibilità + ~90 min di indisponibilità + parola `WIPE` da digitare), invoca l'API in mTLS con timestamp + nonce anti-replay. |
+| 2 | **`WipeRequest`** (HTTP Function) | Valida headers anti-replay, valida cert client (X509 chain + EKU + CRL opzionale), verifica binding cert↔device, valida payload, accoda messaggio, risponde `202 Accepted` con `correlationId`. |
 | 3 | **Azure Storage Queue** `wipe-requests` | Disaccoppia ricezione ed esecuzione; retry automatici, dead-letter su `wipe-requests-poison`. |
-| 4 | **`WipeProcessor`** (Queue trigger, non esposta) | Risolve device Entra, verifica membership gruppo, verifica ownership Intune↔Entra, esegue `POST /deviceManagement/managedDevices/{id}/wipe`. |
-| 5 | **User-Assigned Managed Identity** | Identità unica per Storage e Graph. Nessun secret. |
-| 6 | **Application Insights** | Audit completo con `correlationId`. |
+| 4 | **`WipeProcessor`** (Queue trigger, non esposta) | Risolve device Entra, verifica membership gruppo, verifica ownership Intune↔Entra, **riserva slot idempotency su blob ledger**, esegue `POST /deviceManagement/managedDevices/{id}/wipe`. Classifica errori Graph transient/permanent. |
+| 5 | **Blob `wipe-ledger`** | Ledger idempotency: un blob per `intuneDeviceId` con stato `Reserved`/`Issued`/`Failed` per garantire un singolo wipe anche a fronte di retry queue at-least-once. |
+| 6 | **User-Assigned Managed Identity** | Identità unica per Storage (Blob+Queue Data) e Graph. Nessun secret. |
+| 7 | **Application Insights** | Audit completo con `correlationId`. |
 
 ## Controlli di sicurezza in profondità
 
 Una richiesta deve superare **tutti** questi controlli, nell'ordine:
 
-1. **Function key** sull'HTTP call (`x-functions-key`)
-2. **Client certificate** valido, emesso dalla CA Intune SCEP/PKCS autorizzata (validazione issuer e/o thumbprint allow-list)
-3. **Payload ben formato** (tre GUID validi)
-4. **Device presente** nell'Entra ID del tenant
-5. **Device membro** (anche transitivo) del gruppo di sicurezza Entra autorizzato → allow-list nativa, integrabile con membership dinamica
-6. **Ownership match**: `managedDevice.azureADDeviceId` deve uguagliare l'`entraDeviceId` dichiarato
-7. **Solo allora** viene chiamata l'API di wipe Microsoft Graph
+1. **TLS mutual auth** a livello platform (`clientCertMode: Required`) — handshake rifiutato senza cert
+2. **Function key** sull'HTTP call (`x-functions-key`)
+3. **Anti-replay**: `X-Request-Timestamp` (skew ±5 min) + `X-Request-Nonce` (GUID, dedup cache)
+4. **X509 chain validation** del cert client: validità, EKU `Client Authentication`, chain build con `CustomTrustStore` pinnato su CA Intune SCEP/PKCS, pinning per thumbprint CA, **CRL/OCSP** opzionale
+5. **Cert ↔ device binding**: il claim configurato del cert (default `Subject CN`) deve uguagliare `entraDeviceId` nel body → previene IDOR
+6. **Payload ben formato** (tre GUID validi)
+7. **Device presente** nell'Entra ID del tenant
+8. **Device membro** (anche transitivo) del gruppo di sicurezza Entra autorizzato → allow-list nativa, integrabile con membership dinamica
+9. **Ownership match**: `managedDevice.azureADDeviceId` deve uguagliare l'`entraDeviceId` dichiarato
+10. **Idempotency reservation** sul blob ledger (conditional `If-None-Match: *`) → un solo wipe per device anche con retry
+11. **Solo allora** viene chiamata l'API di wipe Microsoft Graph; errori 4xx permanenti non vengono ritentati
 
 Inoltre: HTTPS-only, TLS 1.2 minimo, `clientCertEnabled = true`,
 Managed Identity con permessi minimi, nessuna credenziale in codice.
@@ -88,6 +71,7 @@ Assegnati come **application permissions** alla Managed Identity (richiede conse
 - `DeviceManagementManagedDevices.PrivilegedOperations.All`
 - `DeviceManagementManagedDevices.Read.All`
 - `Device.Read.All`
+- `GroupMember.Read.All` _(per `checkMemberGroups`)_
 
 ## Quickstart deploy
 
@@ -116,10 +100,13 @@ az deployment group create `
   -g rg-intwipe-dev `
   -f infra/main.bicep `
   -p infra/main.parameters.json `
-  -p allowedGroupId=$groupId
+  -p allowedGroupId=$groupId `
+  -p trustedCaThumbprints='<THUMB_ROOT_OR_INTERMEDIATE>'
 ```
 
-Output utili: `functionAppName`, `uamiPrincipalId`, `storageAccount`, `wipeQueueName`.
+> **Importante**: `trustedCaThumbprints` (o `trustedCaCertificatesBase64`) **deve** essere valorizzato: senza un trust anchor configurato la validazione cert fallisce in modo fail-closed.
+
+Output utili: `functionAppName`, `uamiPrincipalId`, `storageAccount`, `wipeQueueName`, `ledgerContainerName`.
 
 ### 3. Concedi i permessi Graph alla Managed Identity
 
@@ -130,7 +117,8 @@ $graphSpId   = az ad sp list --filter "appId eq '00000003-0000-0000-c000-0000000
 foreach ($r in @(
   'DeviceManagementManagedDevices.PrivilegedOperations.All',
   'DeviceManagementManagedDevices.Read.All',
-  'Device.Read.All'
+  'Device.Read.All',
+  'GroupMember.Read.All'
 )) {
   $rid = az ad sp show --id $graphSpId --query "appRoles[?value=='$r'].id | [0]" -o tsv
   $body = "{`"principalId`":`"$principalId`",`"resourceId`":`"$graphSpId`",`"appRoleId`":`"$rid`"}"
@@ -241,10 +229,27 @@ Tutte le impostazioni sono app settings della Function App:
 | `ClientCert__RevocationFlag` | `ExcludeRoot` | `ExcludeRoot`\|`EntireChain`\|`EndCertificateOnly` |
 | `ClientCert__RequireClientAuthEku` | `true` | Richiede EKU Client Authentication (1.3.6.1.5.5.7.3.2) |
 | `ClientCert__RequireClientCert` | `true` | Impone cert client (fail-closed se mancante) |
+| `ClientCert__TrustForwardedHeader` | `false` | Se `true` accetta `X-ARR-ClientCert` (consigliato `false` con `clientCertMode=Required`) |
+| `ClientCert__DeviceIdBindingClaim` | `SubjectCN` | `SubjectCN`\|`SanDns`\|`SanUri`\|`Disabled` — claim del cert che identifica l'`entraDeviceId` |
+| `Replay__MaxTimestampSkewSeconds` | `300` | Skew massimo (s) per `X-Request-Timestamp` |
+| `Idempotency__StorageAccount` | _(da bicep)_ | Storage account del ledger blob |
+| `Idempotency__BlobContainer` | `wipe-ledger` | Container blob del ledger idempotency |
 | `Wipe__AllowedGroupId` | _(obbligatorio)_ | ObjectId gruppo Entra |
 | `Wipe__KeepEnrollmentData` | `false` | Mantiene enrollment Intune |
 | `Wipe__KeepUserData` | `false` | Mantiene dati utente |
-| `Graph__TenantId` | tenant corrente | Tenant Graph |
+| `Graph__TenantId` | tenant corrente | Tenant per i token Graph |
+| `Graph__ManagedIdentityClientId` | _(da bicep)_ | clientId della UAMI |
+
+### Headers HTTP richiesti dal client
+
+| Header | Esempio | Note |
+|---|---|---|
+| `x-functions-key` | `<function key>` | Auth livello Function |
+| `Content-Type` | `application/json` | |
+| `X-Request-Timestamp` | `2026-05-26T19:30:00.000Z` | ISO-8601 UTC, ±5 min |
+| `X-Request-Nonce` | GUID | Dedupe in cache 10 min |
+
+Inoltre la richiesta **deve** presentare un certificato client valido in TLS handshake (mTLS): `clientCertMode: Required` rigetta a livello platform le connessioni senza cert.
 
 ## Osservabilità & audit
 

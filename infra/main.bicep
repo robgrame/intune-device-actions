@@ -33,6 +33,13 @@ param revocationFlag string = 'ExcludeRoot'
 @description('Require Client Authentication EKU (1.3.6.1.5.5.7.3.2) on the client certificate.')
 param requireClientAuthEku bool = true
 
+@description('Which claim from the client certificate identifies the device. SubjectCN expects CN=<entraDeviceId GUID>. Disabled turns off cert<->device binding (NOT recommended).')
+@allowed([ 'SubjectCN', 'SanDns', 'SanUri', 'Disabled' ])
+param deviceIdBindingClaim string = 'SubjectCN'
+
+@description('Maximum acceptable clock skew (seconds) between client X-Request-Timestamp and server time.')
+param maxTimestampSkewSeconds int = 300
+
 @description('Object Id of the Entra ID security group whose member devices are authorized to self-wipe')
 param allowedGroupId string
 
@@ -42,6 +49,9 @@ param keepUserData bool = false
 
 @description('Storage queue name for wipe requests')
 param wipeQueueName string = 'wipe-requests'
+
+@description('Blob container name used as the idempotency ledger for wipe operations')
+param ledgerContainerName string = 'wipe-ledger'
 
 var suffix = uniqueString(resourceGroup().id)
 var storageNameRaw = toLower('${namePrefix}st${suffix}')
@@ -73,7 +83,9 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   properties: {
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
-    allowSharedKeyAccess: true
+    allowSharedKeyAccess: false
+    publicNetworkAccess: 'Enabled'
+    supportsHttpsTrafficOnly: true
   }
 }
 
@@ -85,6 +97,17 @@ resource queueSvc 'Microsoft.Storage/storageAccounts/queueServices@2023-05-01' =
 resource wipeQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2023-05-01' = {
   parent: queueSvc
   name: wipeQueueName
+}
+
+resource blobSvc 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: storage
+  name: 'default'
+}
+
+resource ledgerContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobSvc
+  name: ledgerContainerName
+  properties: { publicAccess: 'None' }
 }
 
 resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
@@ -112,13 +135,15 @@ resource func 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: plan.id
     httpsOnly: true
     clientCertEnabled: true
-    clientCertMode: 'Optional'
+    clientCertMode: 'Required'
+    clientCertExclusionPaths: '/api/healthz'
     keyVaultReferenceIdentity: uami.id
     siteConfig: {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
-      netFrameworkVersion: 'v8.0'
+      netFrameworkVersion: 'v10.0'
       use32BitWorkerProcess: false
+      scmIpSecurityRestrictionsUseMain: true
       appSettings: [
         { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
         { name: 'FUNCTIONS_WORKER_RUNTIME',    value: 'dotnet-isolated' }
@@ -129,6 +154,8 @@ resource func 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: ai.properties.ConnectionString }
         { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
         { name: 'Queue__WipeQueueName', value: wipeQueueName }
+        { name: 'Idempotency__BlobContainer', value: ledgerContainerName }
+        { name: 'Idempotency__StorageAccount', value: storage.name }
         { name: 'ClientCert__TrustedCaThumbprints',    value: trustedCaThumbprints }
         { name: 'ClientCert__TrustedCaCertificates',   value: trustedCaCertificatesBase64 }
         { name: 'ClientCert__AllowedLeafThumbprints',  value: allowedLeafThumbprints }
@@ -137,7 +164,11 @@ resource func 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'ClientCert__RevocationFlag',          value: revocationFlag }
         { name: 'ClientCert__RequireClientAuthEku',    value: string(requireClientAuthEku) }
         { name: 'ClientCert__RequireClientCert',       value: 'true' }
+        { name: 'ClientCert__TrustForwardedHeader',    value: 'false' }
+        { name: 'ClientCert__DeviceIdBindingClaim',    value: deviceIdBindingClaim }
+        { name: 'Replay__MaxTimestampSkewSeconds',     value: string(maxTimestampSkewSeconds) }
         { name: 'Graph__TenantId', value: graphTenantId }
+        { name: 'Graph__ManagedIdentityClientId', value: uami.properties.clientId }
         { name: 'Wipe__AllowedGroupId',     value: allowedGroupId }
         { name: 'Wipe__KeepEnrollmentData', value: string(keepEnrollmentData) }
         { name: 'Wipe__KeepUserData',       value: string(keepUserData) }
@@ -146,16 +177,10 @@ resource func 'Microsoft.Web/sites@2023-12-01' = {
   }
 }
 
-// RBAC for UAMI on storage
-var tableDataContributor = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
+// RBAC for UAMI on storage (least privilege: blob + queue only — no table)
 var blobDataOwner        = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
 var queueDataContributor = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
 
-resource raTable 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storage.id, uami.id, 'table')
-  scope: storage
-  properties: { roleDefinitionId: tableDataContributor, principalId: uami.properties.principalId, principalType: 'ServicePrincipal' }
-}
 resource raBlob 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(storage.id, uami.id, 'blob')
   scope: storage
@@ -173,3 +198,4 @@ output uamiClientId string = uami.properties.clientId
 output uamiPrincipalId string = uami.properties.principalId
 output storageAccount string = storage.name
 output wipeQueueName string = wipeQueueName
+output ledgerContainerName string = ledgerContainerName

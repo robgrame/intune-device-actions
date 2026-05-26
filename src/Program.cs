@@ -1,7 +1,10 @@
+using Azure.Core;
 using Azure.Identity;
+using Azure.Storage.Blobs;
 using Azure.Storage.Queues;
 using IntuneWipeApi.Services;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -14,38 +17,70 @@ var host = new HostBuilder()
     {
         services.AddLogging();
         services.AddApplicationInsightsTelemetryWorkerService();
+        services.AddMemoryCache(o => o.SizeLimit = 100_000);
 
         var cfg = ctx.Configuration;
 
         services.AddSingleton<ClientCertValidator>();
+        services.AddSingleton<ReplayProtector>();
 
-        services.AddSingleton(_ =>
+        services.AddSingleton<TokenCredential>(_ =>
         {
+            var tenantId = cfg["Graph:TenantId"];
+            var clientId = cfg["Graph:ManagedIdentityClientId"] ?? cfg["AZURE_CLIENT_ID"];
+            var opts = new DefaultAzureCredentialOptions();
+            if (!string.IsNullOrWhiteSpace(tenantId)) opts.TenantId = tenantId;
+            if (!string.IsNullOrWhiteSpace(clientId)) opts.ManagedIdentityClientId = clientId;
+            return new DefaultAzureCredential(opts);
+        });
+
+        services.AddSingleton(sp =>
+        {
+            var cred = sp.GetRequiredService<TokenCredential>();
             var queueName = cfg["Queue:WipeQueueName"] ?? "wipe-requests";
-            var conn = cfg["AzureWebJobsStorage"];
-            QueueClient client;
+            var account = cfg["AzureWebJobsStorage__accountName"] ?? cfg["Idempotency:StorageAccount"];
             var options = new QueueClientOptions { MessageEncoding = QueueMessageEncoding.None };
-            if (!string.IsNullOrWhiteSpace(conn) && conn != "UseDevelopmentStorage=true"
-                && conn.Contains("AccountKey", StringComparison.OrdinalIgnoreCase))
+            QueueClient client;
+            if (string.IsNullOrWhiteSpace(account))
             {
-                client = new QueueClient(conn, queueName, options);
+                // Local dev fallback
+                client = new QueueClient(cfg["AzureWebJobsStorage"] ?? "UseDevelopmentStorage=true", queueName, options);
             }
             else
             {
-                var account = cfg["AzureWebJobsStorage__accountName"]
-                    ?? throw new InvalidOperationException("AzureWebJobsStorage__accountName must be set when using identity-based connection");
                 client = new QueueClient(
                     new Uri($"https://{account}.queue.core.windows.net/{queueName}"),
-                    new DefaultAzureCredential(),
-                    options);
+                    cred, options);
             }
             client.CreateIfNotExists();
             return client;
         });
 
-        services.AddSingleton(_ =>
+        services.AddSingleton(sp =>
         {
-            var cred = new DefaultAzureCredential();
+            var cred = sp.GetRequiredService<TokenCredential>();
+            var account = cfg["Idempotency:StorageAccount"] ?? cfg["AzureWebJobsStorage__accountName"];
+            var container = cfg["Idempotency:BlobContainer"] ?? "wipe-ledger";
+            BlobContainerClient client;
+            if (string.IsNullOrWhiteSpace(account))
+            {
+                client = new BlobContainerClient(cfg["AzureWebJobsStorage"] ?? "UseDevelopmentStorage=true", container);
+            }
+            else
+            {
+                client = new BlobContainerClient(
+                    new Uri($"https://{account}.blob.core.windows.net/{container}"),
+                    cred);
+            }
+            client.CreateIfNotExists();
+            return client;
+        });
+
+        services.AddSingleton<IdempotencyService>();
+
+        services.AddSingleton(sp =>
+        {
+            var cred = sp.GetRequiredService<TokenCredential>();
             return new GraphServiceClient(cred, new[] { "https://graph.microsoft.com/.default" });
         });
         services.AddSingleton<GraphWipeService>();

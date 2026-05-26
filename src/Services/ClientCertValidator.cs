@@ -9,6 +9,8 @@ public sealed class ClientCertValidator
 {
     private const string ClientAuthEku = "1.3.6.1.5.5.7.3.2";
 
+    public enum DeviceIdBinding { Disabled, SubjectCN, SanDns, SanUri }
+
     private readonly HashSet<string> _trustedCaThumbprints;
     private readonly HashSet<string> _allowedLeafThumbprints;
     private readonly List<X509Certificate2> _customTrustStore;
@@ -17,6 +19,8 @@ public sealed class ClientCertValidator
     private readonly X509RevocationFlag _revocationFlag;
     private readonly bool _requireClientAuthEku;
     private readonly bool _required;
+    private readonly bool _trustForwardedHeader;
+    private readonly DeviceIdBinding _deviceBinding;
     private readonly ILogger<ClientCertValidator> _log;
 
     public ClientCertValidator(IConfiguration cfg, ILogger<ClientCertValidator> log)
@@ -59,6 +63,10 @@ public sealed class ClientCertValidator
 
         _requireClientAuthEku = !bool.TryParse(cfg["ClientCert:RequireClientAuthEku"], out var eku) || eku;
         _required = !bool.TryParse(cfg["ClientCert:RequireClientCert"], out var r) || r;
+        _trustForwardedHeader = bool.TryParse(cfg["ClientCert:TrustForwardedHeader"], out var th) && th;
+        _deviceBinding = Enum.TryParse<DeviceIdBinding>(cfg["ClientCert:DeviceIdBindingClaim"], true, out var db)
+            ? db
+            : DeviceIdBinding.SubjectCN;
     }
 
     /// <summary>
@@ -74,7 +82,8 @@ public sealed class ClientCertValidator
 
         X509Certificate2? cert = ctx.Connection.ClientCertificate;
 
-        if (cert is null && ctx.Request.Headers.TryGetValue("X-ARR-ClientCert", out var header))
+        if (cert is null && _trustForwardedHeader
+            && ctx.Request.Headers.TryGetValue("X-ARR-ClientCert", out var header))
         {
             try
             {
@@ -152,6 +161,50 @@ public sealed class ClientCertValidator
                 if (oid.Value == ClientAuthEku) return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Extracts the device identifier the certificate is bound to, according to the configured binding claim.
+    /// Returns null when binding is Disabled or the claim is not present.
+    /// </summary>
+    public string? GetBoundDeviceId(X509Certificate2 cert)
+    {
+        switch (_deviceBinding)
+        {
+            case DeviceIdBinding.Disabled:
+                return null;
+
+            case DeviceIdBinding.SubjectCN:
+                // GetNameInfo(SimpleName, false) returns the leaf CN of the Subject.
+                var cn = cert.GetNameInfo(X509NameType.SimpleName, false);
+                return string.IsNullOrWhiteSpace(cn) ? null : ExtractGuid(cn);
+
+            case DeviceIdBinding.SanDns:
+                return FirstSanValue(cert, X509NameType.DnsName);
+
+            case DeviceIdBinding.SanUri:
+                return FirstSanValue(cert, X509NameType.UrlName);
+
+            default:
+                return null;
+        }
+    }
+
+    public bool BindingEnabled => _deviceBinding != DeviceIdBinding.Disabled;
+
+    private static string? FirstSanValue(X509Certificate2 cert, X509NameType nameType)
+    {
+        var v = cert.GetNameInfo(nameType, false);
+        return string.IsNullOrWhiteSpace(v) ? null : ExtractGuid(v);
+    }
+
+    private static string? ExtractGuid(string raw)
+    {
+        // Accept the raw value if it's already a GUID, otherwise try to extract one.
+        if (Guid.TryParse(raw.Trim(), out var g)) return g.ToString();
+        var m = System.Text.RegularExpressions.Regex.Match(raw,
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+        return m.Success ? m.Value : null;
     }
 
     private static IEnumerable<string> ParseCsv(string? value)

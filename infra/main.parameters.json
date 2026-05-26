@@ -10,6 +10,8 @@
     "revocationMode":              { "value": "Online" },
     "revocationFlag":              { "value": "ExcludeRoot" },
     "requireClientAuthEku":        { "value": true },
+    "deviceIdBindingClaim":        { "value": "SubjectCN" },
+    "maxTimestampSkewSeconds":     { "value": 300 },
     "allowedGroupId":              { "value": "REPLACE_WITH_ENTRA_GROUP_OBJECT_ID" },
     "keepEnrollmentData":          { "value": false },
     "keepUserData":                { "value": false }

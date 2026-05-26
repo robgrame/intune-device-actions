@@ -17,6 +17,10 @@
     Function key for the Azure Function (header x-functions-key).
 .PARAMETER Silent
     Skip the UI (use only for unattended testing).
+.NOTES
+    The client sends two anti-replay headers required by the API:
+      X-Request-Timestamp : current UTC time in ISO-8601 (server tolerates ±5 min by default)
+      X-Request-Nonce     : a fresh GUID per request
 .EXAMPLE
     .\Invoke-DeviceWipe.ps1 -ApiUrl https://func.example.net/api/wipe `
         -CertificateSubjectLike '*Intune MDM Device CA*' -FunctionKey '...'
@@ -61,18 +65,24 @@ function Get-IntuneDeviceId {
 
 function Get-ClientCertificate {
     param([string]$Thumb, [string]$SubjectLike)
+    # Prefer LocalMachine\My (Intune SCEP/PKCS device certs typically land there in machine context).
     foreach ($s in @('Cert:\LocalMachine\My','Cert:\CurrentUser\My')) {
-        $certs = Get-ChildItem $s -ErrorAction SilentlyContinue
+        $certs = Get-ChildItem $s -ErrorAction SilentlyContinue |
+                 Where-Object { $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date) -and $_.NotBefore -le (Get-Date) }
+        # Keep only certs that have Client Authentication EKU (1.3.6.1.5.5.7.3.2)
+        $certs = $certs | Where-Object {
+            $ekus = $_.EnhancedKeyUsageList
+            (-not $ekus) -or ($ekus | Where-Object { $_.ObjectId -eq '1.3.6.1.5.5.7.3.2' })
+        }
         if ($Thumb) {
             $c = $certs | Where-Object Thumbprint -eq $Thumb.ToUpper() | Select-Object -First 1
         } elseif ($SubjectLike) {
-            $c = $certs | Where-Object {
-                $_.Subject -like $SubjectLike -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date)
-            } | Sort-Object NotAfter -Descending | Select-Object -First 1
+            $c = $certs | Where-Object { $_.Subject -like $SubjectLike -or $_.Issuer -like $SubjectLike } |
+                 Sort-Object NotAfter -Descending | Select-Object -First 1
         }
         if ($c) { return $c }
     }
-    throw "Client certificate not found"
+    throw "Client certificate not found (with Client Authentication EKU and private key)"
 }
 
 function Show-WipeConfirmation {
@@ -217,7 +227,12 @@ $body = @{
     intuneDeviceId = $intuneId
 } | ConvertTo-Json -Compress
 
-$headers = @{ 'x-functions-key' = $FunctionKey; 'Content-Type' = 'application/json' }
+$headers = @{
+    'x-functions-key'     = $FunctionKey
+    'Content-Type'        = 'application/json'
+    'X-Request-Timestamp' = (Get-Date).ToUniversalTime().ToString('o')
+    'X-Request-Nonce'     = [Guid]::NewGuid().ToString()
+}
 
 try {
     $resp = Invoke-RestMethod -Method Post -Uri $ApiUrl -Body $body `
