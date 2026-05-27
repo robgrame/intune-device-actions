@@ -28,6 +28,13 @@ var host = new HostBuilder()
             options.SamplingRatio = 1.0f;
             options.EnableTraceBasedLogsSampler = false;
         });
+        // NOTE: services.ConfigureFunctionsApplicationInsights() — the Functions
+        // worker-AI bridge — was tested here and triggered a host startup crash
+        // (worker SIGABRT on .NET 10 + WorkerService 3.1.1 + isolated). Removed
+        // for stability. Worker-emitted TrackEvent calls still flow to App
+        // Insights via TelemetryClient; operation_Id propagation may be best-
+        // effort instead of guaranteed. Revisit if/when the bridge package
+        // supports this combination.
         services.AddMemoryCache(o => o.SizeLimit = 100_000);
 
         var cfg = ctx.Configuration;

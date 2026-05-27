@@ -48,7 +48,7 @@ public sealed class WipeRequestFunction
             {
                 [AuditEvents.Prop.ExpectedRole] = AppRoleGuard.Web,
                 [AuditEvents.Prop.ActualRole]   = AppRoleGuard.CurrentRole ?? "",
-            });
+            }, LogLevel.Warning);
             return new ObjectResult(new { status = "gone", message = "endpoint not available on this host" })
                 { StatusCode = (int)HttpStatusCode.Gone };
         }
@@ -66,7 +66,7 @@ public sealed class WipeRequestFunction
             {
                 [AuditEvents.Prop.CorrelationId] = correlationId,
                 [AuditEvents.Prop.Reason]        = replayReason ?? "",
-            });
+            }, LogLevel.Warning);
             return new ObjectResult(new { status = "denied", message = replayReason, correlationId })
                 { StatusCode = (int)HttpStatusCode.BadRequest };
         }
@@ -80,7 +80,7 @@ public sealed class WipeRequestFunction
                 [AuditEvents.Prop.CorrelationId]  = correlationId,
                 [AuditEvents.Prop.Reason]         = reason ?? "",
                 [AuditEvents.Prop.CertThumbprint] = cert?.Thumbprint ?? "",
-            });
+            }, LogLevel.Warning);
             return new ObjectResult(new { status = "denied", message = $"client cert: {reason}", correlationId })
                 { StatusCode = (int)HttpStatusCode.Unauthorized };
         }
@@ -94,7 +94,11 @@ public sealed class WipeRequestFunction
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "Invalid JSON");
+            _audit.TrackEvent(AuditEvents.DeniedPayloadInvalid, ex, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId] = correlationId,
+                [AuditEvents.Prop.Reason]        = "invalid-json",
+            }, LogLevel.Warning);
             return new BadRequestObjectResult(new { status = "error", message = "invalid JSON", correlationId });
         }
 
@@ -103,6 +107,11 @@ public sealed class WipeRequestFunction
             || string.IsNullOrWhiteSpace(body.IntuneDeviceId)
             || string.IsNullOrWhiteSpace(body.DeviceName))
         {
+            _audit.TrackEvent(AuditEvents.DeniedPayloadInvalid, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId] = correlationId,
+                [AuditEvents.Prop.Reason]        = "missing-required-fields",
+            }, LogLevel.Warning);
             return new BadRequestObjectResult(new
             {
                 status = "error",
@@ -113,6 +122,11 @@ public sealed class WipeRequestFunction
 
         if (!Guid.TryParse(body.EntraDeviceId, out _) || !Guid.TryParse(body.IntuneDeviceId, out _))
         {
+            _audit.TrackEvent(AuditEvents.DeniedPayloadInvalid, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId] = correlationId,
+                [AuditEvents.Prop.Reason]        = "invalid-guid",
+            }, LogLevel.Warning);
             return new BadRequestObjectResult(new
             {
                 status = "error",
@@ -131,7 +145,7 @@ public sealed class WipeRequestFunction
                 {
                     [AuditEvents.Prop.CorrelationId]  = correlationId,
                     [AuditEvents.Prop.CertThumbprint] = cert!.Thumbprint ?? "",
-                });
+                }, LogLevel.Warning);
                 return new ObjectResult(new { status = "denied",
                     message = "client certificate is missing the configured device-id binding claim",
                     correlationId })
@@ -146,7 +160,7 @@ public sealed class WipeRequestFunction
                     [AuditEvents.Prop.BoundDeviceId]  = boundDeviceId,
                     [AuditEvents.Prop.EntraDeviceId]  = body.EntraDeviceId!,
                     [AuditEvents.Prop.CertThumbprint] = cert!.Thumbprint ?? "",
-                });
+                }, LogLevel.Warning);
                 return new ObjectResult(new { status = "denied",
                     message = "client certificate is not bound to the requested device",
                     correlationId })

@@ -46,7 +46,7 @@ public sealed class WipeProcessorFunction
             {
                 [AuditEvents.Prop.ExpectedRole] = AppRoleGuard.Proc,
                 [AuditEvents.Prop.ActualRole]   = AppRoleGuard.CurrentRole ?? "",
-            });
+            }, LogLevel.Error);
             throw new InvalidOperationException(
                 $"App role mismatch: this Function App is not the wipe processor (App__Role='{AppRoleGuard.CurrentRole}')");
         }
@@ -93,7 +93,7 @@ public sealed class WipeProcessorFunction
                 [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
                 [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
                 [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
-            });
+            }, LogLevel.Warning);
             return;
         }
 
@@ -125,7 +125,7 @@ public sealed class WipeProcessorFunction
                 [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
                 [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
                 [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
-            });
+            }, LogLevel.Warning);
             return;
         }
 
@@ -160,7 +160,7 @@ public sealed class WipeProcessorFunction
                 [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
                 [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
                 [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
-            });
+            }, LogLevel.Warning);
             return;
         }
 
@@ -185,7 +185,7 @@ public sealed class WipeProcessorFunction
                 [AuditEvents.Prop.OriginalCorrelationId] = entry.CorrelationId,
                 [AuditEvents.Prop.DeviceName]            = msg.DeviceName,
                 [AuditEvents.Prop.IntuneDeviceId]        = msg.IntuneDeviceId,
-            });
+            }, LogLevel.Warning);
             // Another worker reserved it; skip to avoid double-wipe.
             return;
         }
@@ -224,7 +224,7 @@ public sealed class WipeProcessorFunction
                 [AuditEvents.Prop.DeviceName]      = msg.DeviceName,
                 [AuditEvents.Prop.IntuneDeviceId]  = msg.IntuneDeviceId,
                 [AuditEvents.Prop.ManagedDeviceId] = managedId,
-            });
+            }, LogLevel.Warning);
             // Throw → queue retries (visibility timeout). After 5 attempts → poison queue.
             throw;
         }
