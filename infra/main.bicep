@@ -60,11 +60,17 @@ var stProcRaw = toLower('${namePrefix}stp${suffix}')
 var stProcName = length(stProcRaw) > 24 ? substring(stProcRaw, 0, 24) : stProcRaw
 var webName    = toLower('${namePrefix}-web-${suffix}')
 var procName   = toLower('${namePrefix}-proc-${suffix}')
-var planName   = toLower('${namePrefix}-plan-${suffix}')
 var aiName     = toLower('${namePrefix}-ai-${suffix}')
 var lawName    = toLower('${namePrefix}-law-${suffix}')
 var uamiName    = toLower('${namePrefix}-uami-${suffix}')      // worker identity (Graph-consented)
 var uamiWebName = toLower('${namePrefix}-uami-web-${suffix}')   // public web identity (NO Graph)
+// Separate App Service Plans for host-level isolation between the Internet-
+// facing app and the Graph-privileged worker. Linux EP1 (cheaper than Windows,
+// native host for dotnet-isolated). Each plan = different underlying VMs, so
+// a hypothetical sandbox/host escape on the public surface cannot read the
+// worker process' environment (which holds the Graph-consented UAMI token).
+var planWebName  = toLower('${namePrefix}-plan-web-${suffix}')
+var planProcName = toLower('${namePrefix}-plan-proc-${suffix}')
 
 resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: lawName
@@ -147,12 +153,27 @@ resource uamiWeb 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' =
   location: location
 }
 
-resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
-  name: planName
+resource planWeb 'Microsoft.Web/serverfarms@2023-12-01' = {
+  name: planWebName
   location: location
   sku: { name: 'EP1', tier: 'ElasticPremium' }
   kind: 'elastic'
-  properties: { maximumElasticWorkerCount: 5 }
+  // reserved: true marks the plan as Linux. Required for linuxFxVersion on sites.
+  properties: {
+    reserved: true
+    maximumElasticWorkerCount: 5
+  }
+}
+
+resource planProc 'Microsoft.Web/serverfarms@2023-12-01' = {
+  name: planProcName
+  location: location
+  sku: { name: 'EP1', tier: 'ElasticPremium' }
+  kind: 'elastic'
+  properties: {
+    reserved: true
+    maximumElasticWorkerCount: 5
+  }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -162,13 +183,13 @@ resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
 resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
   name: webName
   location: location
-  kind: 'functionapp'
+  kind: 'functionapp,linux'
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: { '${uamiWeb.id}': {} }
   }
   properties: {
-    serverFarmId: plan.id
+    serverFarmId: planWeb.id
     httpsOnly: true
     clientCertEnabled: true
     clientCertMode: 'Required'
@@ -176,8 +197,7 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
     siteConfig: {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
-      netFrameworkVersion: 'v10.0'
-      use32BitWorkerProcess: false
+      linuxFxVersion: 'DOTNET-ISOLATED|10.0'
       scmIpSecurityRestrictionsUseMain: true
       appSettings: [
         { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
@@ -222,21 +242,20 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
 resource funcProc 'Microsoft.Web/sites@2023-12-01' = {
   name: procName
   location: location
-  kind: 'functionapp'
+  kind: 'functionapp,linux'
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: { '${uami.id}': {} }
   }
   properties: {
-    serverFarmId: plan.id
+    serverFarmId: planProc.id
     httpsOnly: true
     clientCertEnabled: false
     keyVaultReferenceIdentity: uami.id
     siteConfig: {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
-      netFrameworkVersion: 'v10.0'
-      use32BitWorkerProcess: false
+      linuxFxVersion: 'DOTNET-ISOLATED|10.0'
       scmIpSecurityRestrictionsUseMain: true
       appSettings: [
         { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }

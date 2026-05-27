@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "2357589139677452887"
+      "templateHash": "11347654384235645859"
     }
   },
   "parameters": {
@@ -145,11 +145,12 @@
     "stProcName": "[if(greater(length(variables('stProcRaw')), 24), substring(variables('stProcRaw'), 0, 24), variables('stProcRaw'))]",
     "webName": "[toLower(format('{0}-web-{1}', parameters('namePrefix'), variables('suffix')))]",
     "procName": "[toLower(format('{0}-proc-{1}', parameters('namePrefix'), variables('suffix')))]",
-    "planName": "[toLower(format('{0}-plan-{1}', parameters('namePrefix'), variables('suffix')))]",
     "aiName": "[toLower(format('{0}-ai-{1}', parameters('namePrefix'), variables('suffix')))]",
     "lawName": "[toLower(format('{0}-law-{1}', parameters('namePrefix'), variables('suffix')))]",
     "uamiName": "[toLower(format('{0}-uami-{1}', parameters('namePrefix'), variables('suffix')))]",
     "uamiWebName": "[toLower(format('{0}-uami-web-{1}', parameters('namePrefix'), variables('suffix')))]",
+    "planWebName": "[toLower(format('{0}-plan-web-{1}', parameters('namePrefix'), variables('suffix')))]",
+    "planProcName": "[toLower(format('{0}-plan-proc-{1}', parameters('namePrefix'), variables('suffix')))]",
     "blobDataOwner": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]",
     "queueDataContributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')]",
     "queueDataMessageSender": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'c6a89b2d-59bc-44d0-9896-0f6e12d7b80a')]"
@@ -265,7 +266,7 @@
     {
       "type": "Microsoft.Web/serverfarms",
       "apiVersion": "2023-12-01",
-      "name": "[variables('planName')]",
+      "name": "[variables('planWebName')]",
       "location": "[parameters('location')]",
       "sku": {
         "name": "EP1",
@@ -273,6 +274,22 @@
       },
       "kind": "elastic",
       "properties": {
+        "reserved": true,
+        "maximumElasticWorkerCount": 5
+      }
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2023-12-01",
+      "name": "[variables('planProcName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "EP1",
+        "tier": "ElasticPremium"
+      },
+      "kind": "elastic",
+      "properties": {
+        "reserved": true,
         "maximumElasticWorkerCount": 5
       }
     },
@@ -281,7 +298,7 @@
       "apiVersion": "2023-12-01",
       "name": "[variables('webName')]",
       "location": "[parameters('location')]",
-      "kind": "functionapp",
+      "kind": "functionapp,linux",
       "identity": {
         "type": "UserAssigned",
         "userAssignedIdentities": {
@@ -289,7 +306,7 @@
         }
       },
       "properties": {
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('planWebName'))]",
         "httpsOnly": true,
         "clientCertEnabled": true,
         "clientCertMode": "Required",
@@ -297,8 +314,7 @@
         "siteConfig": {
           "minTlsVersion": "1.2",
           "ftpsState": "Disabled",
-          "netFrameworkVersion": "v10.0",
-          "use32BitWorkerProcess": false,
+          "linuxFxVersion": "DOTNET-ISOLATED|10.0",
           "scmIpSecurityRestrictionsUseMain": true,
           "appSettings": [
             {
@@ -398,7 +414,7 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Insights/components', variables('aiName'))]",
-        "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+        "[resourceId('Microsoft.Web/serverfarms', variables('planWebName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts', variables('stWebName'))]",
         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName'))]"
@@ -409,7 +425,7 @@
       "apiVersion": "2023-12-01",
       "name": "[variables('procName')]",
       "location": "[parameters('location')]",
-      "kind": "functionapp",
+      "kind": "functionapp,linux",
       "identity": {
         "type": "UserAssigned",
         "userAssignedIdentities": {
@@ -417,15 +433,14 @@
         }
       },
       "properties": {
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('planProcName'))]",
         "httpsOnly": true,
         "clientCertEnabled": false,
         "keyVaultReferenceIdentity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName'))]",
         "siteConfig": {
           "minTlsVersion": "1.2",
           "ftpsState": "Disabled",
-          "netFrameworkVersion": "v10.0",
-          "use32BitWorkerProcess": false,
+          "linuxFxVersion": "DOTNET-ISOLATED|10.0",
           "scmIpSecurityRestrictionsUseMain": true,
           "appSettings": [
             {
@@ -509,7 +524,7 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Insights/components', variables('aiName'))]",
-        "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+        "[resourceId('Microsoft.Web/serverfarms', variables('planProcName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]",
         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName'))]"
       ]

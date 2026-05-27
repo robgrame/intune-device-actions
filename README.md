@@ -48,8 +48,9 @@ e chiama Microsoft Graph.
 ### Isolamento delle due Function App
 
 L'API HTTP pubblica e il worker che chiama Microsoft Graph girano in **due
-Function App distinte** (`*-web-*` e `*-proc-*`) sullo stesso piano EP1 ma
-con identità, permessi, **storage account separati** e configurazione separata.
+Function App distinte** (`*-web-*` e `*-proc-*`) su **due App Service Plan
+Linux EP1 separati** (`*-plan-web-*` e `*-plan-proc-*`), con identità,
+permessi, **storage account separati** e configurazione separata.
 Stesso pacchetto deployato su entrambe: i due setting
 `AzureWebJobs.WipeProcessor.Disabled=1` (web) e
 `AzureWebJobs.WipeRequest.Disabled=1` (worker), più il guard in-code
@@ -63,6 +64,9 @@ su quale app. Risultato:
   non può sovrascrivere il pacchetto deployato del worker.
 - Il worker ha `Storage Blob Data Owner` + `Storage Queue Data Contributor`
   solo sul proprio storage account.
+- I due plan separati significano **VM host distinti**: un eventuale escape
+  di sandbox / vulnerabilità host-level sulla superficie pubblica non vede
+  il processo del worker né il suo token UAMI cached in memoria.
 - Anche se la superficie pubblica venisse compromessa, l'attaccante non può
   pilotare Graph, manomettere il ledger, né iniettare codice nel worker.
 
