@@ -20,14 +20,16 @@ public sealed class WipeRequestFunction
     private readonly ClientCertValidator _cert;
     private readonly ReplayProtector _replay;
     private readonly QueueClient _queue;
+    private readonly AuditService _audit;
     private readonly ILogger<WipeRequestFunction> _log;
 
     public WipeRequestFunction(ClientCertValidator cert, ReplayProtector replay,
-        QueueClient queue, ILogger<WipeRequestFunction> log)
+        QueueClient queue, AuditService audit, ILogger<WipeRequestFunction> log)
     {
         _cert = cert;
         _replay = replay;
         _queue = queue;
+        _audit = audit;
         _log = log;
     }
 
@@ -42,8 +44,11 @@ public sealed class WipeRequestFunction
         //    app's HTTP surface inert even if reached.
         if (!AppRoleGuard.IsAllowed(AppRoleGuard.Web))
         {
-            _log.LogWarning("AUDIT denied reason=app-role-mismatch expected={Expected} actual={Actual}",
-                AppRoleGuard.Web, AppRoleGuard.CurrentRole);
+            _audit.TrackEvent(AuditEvents.DeniedAppRoleMismatch, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.ExpectedRole] = AppRoleGuard.Web,
+                [AuditEvents.Prop.ActualRole]   = AppRoleGuard.CurrentRole ?? "",
+            });
             return new ObjectResult(new { status = "gone", message = "endpoint not available on this host" })
                 { StatusCode = (int)HttpStatusCode.Gone };
         }
@@ -57,7 +62,11 @@ public sealed class WipeRequestFunction
         var (replayOk, replayReason) = _replay.Validate(ts, nonce);
         if (!replayOk)
         {
-            _log.LogWarning("AUDIT denied reason=replay-check {Reason} corr={Corr}", replayReason, correlationId);
+            _audit.TrackEvent(AuditEvents.DeniedReplay, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId] = correlationId,
+                [AuditEvents.Prop.Reason]        = replayReason ?? "",
+            });
             return new ObjectResult(new { status = "denied", message = replayReason, correlationId })
                 { StatusCode = (int)HttpStatusCode.BadRequest };
         }
@@ -66,7 +75,12 @@ public sealed class WipeRequestFunction
         var (ok, cert, reason) = _cert.Validate(req.HttpContext);
         if (!ok)
         {
-            _log.LogWarning("AUDIT denied reason=cert-validation {Reason} corr={Corr}", reason, correlationId);
+            _audit.TrackEvent(AuditEvents.DeniedCertValidation, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]  = correlationId,
+                [AuditEvents.Prop.Reason]         = reason ?? "",
+                [AuditEvents.Prop.CertThumbprint] = cert?.Thumbprint ?? "",
+            });
             return new ObjectResult(new { status = "denied", message = $"client cert: {reason}", correlationId })
                 { StatusCode = (int)HttpStatusCode.Unauthorized };
         }
@@ -113,8 +127,11 @@ public sealed class WipeRequestFunction
             var boundDeviceId = _cert.GetBoundDeviceId(cert!);
             if (string.IsNullOrEmpty(boundDeviceId))
             {
-                _log.LogWarning("AUDIT denied reason=binding-claim-missing thumb={Thumb} corr={Corr}",
-                    cert!.Thumbprint, correlationId);
+                _audit.TrackEvent(AuditEvents.DeniedCertBindingMissing, new Dictionary<string, string>
+                {
+                    [AuditEvents.Prop.CorrelationId]  = correlationId,
+                    [AuditEvents.Prop.CertThumbprint] = cert!.Thumbprint ?? "",
+                });
                 return new ObjectResult(new { status = "denied",
                     message = "client certificate is missing the configured device-id binding claim",
                     correlationId })
@@ -123,9 +140,13 @@ public sealed class WipeRequestFunction
 
             if (!string.Equals(boundDeviceId, body.EntraDeviceId, StringComparison.OrdinalIgnoreCase))
             {
-                _log.LogWarning(
-                    "AUDIT denied reason=cert-device-mismatch certBound={Bound} reqEntra={Req} thumb={Thumb} corr={Corr}",
-                    boundDeviceId, body.EntraDeviceId, cert!.Thumbprint, correlationId);
+                _audit.TrackEvent(AuditEvents.DeniedCertDeviceMismatch, new Dictionary<string, string>
+                {
+                    [AuditEvents.Prop.CorrelationId]  = correlationId,
+                    [AuditEvents.Prop.BoundDeviceId]  = boundDeviceId,
+                    [AuditEvents.Prop.EntraDeviceId]  = body.EntraDeviceId!,
+                    [AuditEvents.Prop.CertThumbprint] = cert!.Thumbprint ?? "",
+                });
                 return new ObjectResult(new { status = "denied",
                     message = "client certificate is not bound to the requested device",
                     correlationId })
@@ -147,9 +168,14 @@ public sealed class WipeRequestFunction
         var payload = JsonSerializer.Serialize(msg);
         await _queue.SendMessageAsync(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payload)), ct);
 
-        _log.LogInformation(
-            "AUDIT wipe-request enqueued device={DeviceName} entra={EntraId} intune={IntuneId} cert={Thumb} corr={Corr}",
-            msg.DeviceName, msg.EntraDeviceId, msg.IntuneDeviceId, msg.ClientCertThumbprint, correlationId);
+        _audit.TrackEvent(AuditEvents.RequestAccepted, new Dictionary<string, string>
+        {
+            [AuditEvents.Prop.CorrelationId]  = correlationId,
+            [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
+            [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
+            [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+            [AuditEvents.Prop.CertThumbprint] = msg.ClientCertThumbprint ?? "",
+        });
 
         return new AcceptedResult(string.Empty, new
         {

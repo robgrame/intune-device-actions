@@ -296,20 +296,47 @@ Inoltre la richiesta **deve** presentare un certificato client valido in TLS han
 
 ## Osservabilità & audit
 
-Application Insights raccoglie ogni richiesta con `correlationId`. Esempi KQL:
+Ogni operazione security-critical emette un **customEvent strutturato** in
+Application Insights (tabella `customEvents`, sampling **disabilitato** sul
+worker telemetry pipeline → `SamplingRatio = 1.0`, e `excludedTypes`
+include `Event;Exception` in `host.json`). I traces classici (`ILogger`)
+restano disponibili come mirror per i flussi locali.
+
+Convenzione nomi: `wipe.<area>.<esito>` (vedi `src/Services/AuditEvents.cs`).
+Ogni evento porta `correlationId`, `deviceName`, `entraDeviceId`,
+`intuneDeviceId` e — quando applicabile — `certThumbprint`, `reason`,
+`managedDeviceId`, `expectedRole`/`actualRole`.
+
+Esempi KQL:
 
 ```kql
-// Tutti i wipe richiesti nelle ultime 24h
-traces
+// Tutti gli eventi di audit nelle ultime 24h
+customEvents
 | where timestamp > ago(24h)
-| where message startswith "AUDIT"
-| project timestamp, message, customDimensions
+| where name startswith "wipe."
+| project timestamp, name, correlationId = tostring(customDimensions.correlationId),
+          device = tostring(customDimensions.deviceName),
+          intune = tostring(customDimensions.intuneDeviceId),
+          reason = tostring(customDimensions.reason)
+| order by timestamp desc
 
-// Wipe negati per device fuori dal gruppo
-traces
-| where message contains "device-not-in-allowed-group"
-| project timestamp, message
+// Wipe negati per device fuori dal gruppo allow-list
+customEvents
+| where name == "wipe.denied.not-in-allowed-group"
+| project timestamp, customDimensions
+
+// Trail completo di un wipe (request → graph)
+customEvents
+| where tostring(customDimensions.correlationId) == "<corr-id>"
+| order by timestamp asc
+| project timestamp, name, customDimensions
 ```
+
+> Eventi tipici: `wipe.request.accepted`, `wipe.denied.cert-validation`,
+> `wipe.denied.cert-device-mismatch`, `wipe.denied.not-in-allowed-group`,
+> `wipe.denied.ownership-mismatch`, `wipe.already-issued`,
+> `wipe.graph.issued`, `wipe.graph.failed-permanent`,
+> `wipe.graph.transient-error`. Lista completa in `Services/AuditEvents.cs`.
 
 ## Struttura del repository
 

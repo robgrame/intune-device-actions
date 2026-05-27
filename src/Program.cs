@@ -16,11 +16,23 @@ var host = new HostBuilder()
     .ConfigureServices((ctx, services) =>
     {
         services.AddLogging();
-        services.AddApplicationInsightsTelemetryWorkerService();
+        // Worker telemetry pipeline. Adaptive sampling is DISABLED so that
+        // security/audit customEvents emitted via AuditService are NEVER dropped.
+        // host.json additionally excludes Event/Exception from the host's own
+        // sampling (which applies to Functions runtime telemetry).
+        services.AddApplicationInsightsTelemetryWorkerService(options =>
+        {
+            // App Insights SDK v3 uses fixed-rate sampling (not adaptive).
+            // 1.0 = sample 100% (no sampling). Audit customEvents emitted via
+            // AuditService must NEVER be dropped on a security-critical pipeline.
+            options.SamplingRatio = 1.0f;
+            options.EnableTraceBasedLogsSampler = false;
+        });
         services.AddMemoryCache(o => o.SizeLimit = 100_000);
 
         var cfg = ctx.Configuration;
 
+        services.AddSingleton<AuditService>();
         services.AddSingleton<ClientCertValidator>();
         services.AddSingleton<ReplayProtector>();
 

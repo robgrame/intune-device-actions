@@ -19,12 +19,15 @@ public sealed class WipeProcessorFunction
 {
     private readonly GraphWipeService _graph;
     private readonly IdempotencyService _ledger;
+    private readonly AuditService _audit;
     private readonly ILogger<WipeProcessorFunction> _log;
 
-    public WipeProcessorFunction(GraphWipeService graph, IdempotencyService ledger, ILogger<WipeProcessorFunction> log)
+    public WipeProcessorFunction(GraphWipeService graph, IdempotencyService ledger,
+        AuditService audit, ILogger<WipeProcessorFunction> log)
     {
         _graph = graph;
         _ledger = ledger;
+        _audit = audit;
         _log = log;
     }
 
@@ -39,8 +42,11 @@ public sealed class WipeProcessorFunction
         //    moves to the poison queue and stops bouncing.
         if (!AppRoleGuard.IsAllowed(AppRoleGuard.Proc))
         {
-            _log.LogError("AUDIT denied reason=app-role-mismatch expected={Expected} actual={Actual}",
-                AppRoleGuard.Proc, AppRoleGuard.CurrentRole);
+            _audit.TrackEvent(AuditEvents.DeniedAppRoleMismatch, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.ExpectedRole] = AppRoleGuard.Proc,
+                [AuditEvents.Prop.ActualRole]   = AppRoleGuard.CurrentRole ?? "",
+            });
             throw new InvalidOperationException(
                 $"App role mismatch: this Function App is not the wipe processor (App__Role='{AppRoleGuard.CurrentRole}')");
         }
@@ -71,13 +77,23 @@ public sealed class WipeProcessorFunction
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "AUDIT denied reason=device-resolve-failed-permanent corr={Corr}", msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.DeniedDeviceResolveFailed, ex, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+                [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
+                [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
+            });
             return;
         }
 
         if (deviceObjId is null)
         {
-            _log.LogWarning("AUDIT denied reason=device-not-found-in-entra corr={Corr}", msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.DeniedDeviceNotInEntra, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
+                [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
+                [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+            });
             return;
         }
 
@@ -94,14 +110,22 @@ public sealed class WipeProcessorFunction
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "AUDIT denied reason=group-check-failed-permanent corr={Corr}", msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.DeniedGroupCheckFailed, ex, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+            });
             return;
         }
 
         if (!inGroup)
         {
-            _log.LogWarning("AUDIT denied reason=device-not-in-allowed-group device={Device} corr={Corr}",
-                msg.DeviceName, msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.DeniedNotInAllowedGroup, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+                [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
+            });
             return;
         }
 
@@ -118,14 +142,25 @@ public sealed class WipeProcessorFunction
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "AUDIT denied reason=managed-device-resolve-failed-permanent corr={Corr}", msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.DeniedManagedDeviceResolveFailed, ex, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+                [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+                [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
+                [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
+            });
             return;
         }
 
         if (managedId is null)
         {
-            _log.LogWarning("AUDIT denied reason=ownership-mismatch device={Device} corr={Corr}",
-                msg.DeviceName, msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.DeniedOwnershipMismatch, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
+                [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+                [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
+            });
             return;
         }
 
@@ -133,16 +168,24 @@ public sealed class WipeProcessorFunction
         var (state, entry) = await _ledger.ReserveAsync(msg.IntuneDeviceId, msg.CorrelationId, ct);
         if (state == IdempotencyService.State.Issued)
         {
-            _log.LogInformation(
-                "AUDIT wipe-already-issued device={Device} intune={Intune} originalCorr={Orig} corr={Corr}",
-                msg.DeviceName, msg.IntuneDeviceId, entry.CorrelationId, msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.WipeAlreadyIssued, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]         = msg.CorrelationId,
+                [AuditEvents.Prop.OriginalCorrelationId] = entry.CorrelationId,
+                [AuditEvents.Prop.DeviceName]            = msg.DeviceName,
+                [AuditEvents.Prop.IntuneDeviceId]        = msg.IntuneDeviceId,
+            });
             return;
         }
         if (state == IdempotencyService.State.Reserved && entry.CorrelationId != msg.CorrelationId)
         {
-            _log.LogWarning(
-                "AUDIT wipe-in-progress-elsewhere device={Device} intune={Intune} originalCorr={Orig} corr={Corr}",
-                msg.DeviceName, msg.IntuneDeviceId, entry.CorrelationId, msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.WipeInProgressElsewhere, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]         = msg.CorrelationId,
+                [AuditEvents.Prop.OriginalCorrelationId] = entry.CorrelationId,
+                [AuditEvents.Prop.DeviceName]            = msg.DeviceName,
+                [AuditEvents.Prop.IntuneDeviceId]        = msg.IntuneDeviceId,
+            });
             // Another worker reserved it; skip to avoid double-wipe.
             return;
         }
@@ -152,23 +195,36 @@ public sealed class WipeProcessorFunction
         {
             await _graph.WipeAsync(managedId, ct);
             await _ledger.MarkIssuedAsync(msg.IntuneDeviceId, msg.CorrelationId, ct);
-            _log.LogInformation(
-                "AUDIT wipe-issued device={Device} entra={Entra} intune={Intune} managed={Managed} corr={Corr}",
-                msg.DeviceName, msg.EntraDeviceId, msg.IntuneDeviceId, managedId, msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.WipeIssued, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]    = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]       = msg.DeviceName,
+                [AuditEvents.Prop.EntraDeviceId]    = msg.EntraDeviceId,
+                [AuditEvents.Prop.IntuneDeviceId]   = msg.IntuneDeviceId,
+                [AuditEvents.Prop.ManagedDeviceId]  = managedId,
+            });
         }
         catch (Exception ex) when (GraphWipeService.Classify(ex) == GraphWipeService.GraphErrorKind.Permanent)
         {
             await _ledger.MarkFailedAsync(msg.IntuneDeviceId, msg.CorrelationId, ex.Message, ct);
-            _log.LogError(ex,
-                "AUDIT wipe-failed-permanent device={Device} intune={Intune} corr={Corr}",
-                msg.DeviceName, msg.IntuneDeviceId, msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.WipeFailedPermanent, ex, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]   = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]      = msg.DeviceName,
+                [AuditEvents.Prop.IntuneDeviceId]  = msg.IntuneDeviceId,
+                [AuditEvents.Prop.ManagedDeviceId] = managedId,
+            });
             // Do not throw — no retry on permanent errors.
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex,
-                "AUDIT wipe-transient-error device={Device} intune={Intune} corr={Corr} — will retry",
-                msg.DeviceName, msg.IntuneDeviceId, msg.CorrelationId);
+            _audit.TrackEvent(AuditEvents.WipeTransientError, ex, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]   = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]      = msg.DeviceName,
+                [AuditEvents.Prop.IntuneDeviceId]  = msg.IntuneDeviceId,
+                [AuditEvents.Prop.ManagedDeviceId] = managedId,
+            });
             // Throw → queue retries (visibility timeout). After 5 attempts → poison queue.
             throw;
         }
