@@ -32,7 +32,8 @@ $ProgressPreference    = 'SilentlyContinue'
 $InstallDir   = Join-Path $env:ProgramFiles 'IntuneWipeClient'
 $LogDir       = Join-Path $env:ProgramData  'IntuneWipeClient\Logs'
 $ConfigPath   = Join-Path $InstallDir       'config.json'
-$RegPath      = 'HKLM:\SOFTWARE\Contoso\IntuneWipeClient'
+$RegPath      = 'HKLM:\SOFTWARE\MSLABS\IntuneWipeClient'
+$RegSubKey    = 'SOFTWARE\MSLABS\IntuneWipeClient'  # used via Registry64 view to bypass WOW6432Node redirection
 $ProductCode  = '{2C0D7E3A-7A19-4B0B-8F7E-9E0F2A4D1B22}'  # stable GUID for detection
 $Version      = (Get-Content (Join-Path $PSScriptRoot 'version.txt') -ErrorAction SilentlyContinue) -as [string]
 if (-not $Version) { $Version = '1.0.0' }
@@ -121,13 +122,22 @@ try {
         Write-Host "  Created shortcut: $lnkPath"
     }
 
-    # --- Detection registry key --------------------------------------------
-    New-Item -Path $RegPath -Force | Out-Null
-    New-ItemProperty -Path $RegPath -Name 'Version'      -Value $Version     -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $RegPath -Name 'ProductCode'  -Value $ProductCode -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $RegPath -Name 'InstallDir'   -Value $InstallDir  -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $RegPath -Name 'InstalledOn'  -Value ((Get-Date).ToString('s')) -PropertyType String -Force | Out-Null
-    Write-Host "  Registry: $RegPath  (Version=$Version)"
+    # --- Detection registry key (write to 64-bit hive explicitly) ----------
+    # Intune Management Extension launches Win32 install scripts under
+    # 32-bit PowerShell, which redirects HKLM\SOFTWARE writes into
+    # HKLM\SOFTWARE\WOW6432Node. Detection often runs in 64-bit context and
+    # would miss the redirected key. Use Registry64 view to always write to
+    # the native 64-bit hive so both views can find it.
+    $base64 = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::LocalMachine,
+        [Microsoft.Win32.RegistryView]::Registry64)
+    $key64 = $base64.CreateSubKey($RegSubKey, $true)
+    $key64.SetValue('Version',     $Version,     [Microsoft.Win32.RegistryValueKind]::String)
+    $key64.SetValue('ProductCode', $ProductCode, [Microsoft.Win32.RegistryValueKind]::String)
+    $key64.SetValue('InstallDir',  $InstallDir,  [Microsoft.Win32.RegistryValueKind]::String)
+    $key64.SetValue('InstalledOn', (Get-Date).ToString('s'), [Microsoft.Win32.RegistryValueKind]::String)
+    $key64.Close(); $base64.Close()
+    Write-Host "  Registry (64-bit hive): $RegPath  (Version=$Version)"
 
     # --- Scheduled task (SYSTEM, on-demand, executable by Users) ------------
     # The end-user launcher (Launch-Wipe.ps1) runs in user context and
@@ -143,7 +153,7 @@ try {
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>Self-service Intune device wipe (runs as SYSTEM, triggered on-demand by Launch-Wipe.ps1).</Description>
-    <Author>Contoso IT</Author>
+    <Author>MSLABS IT</Author>
     <URI>$TaskFull</URI>
   </RegistrationInfo>
   <Triggers />

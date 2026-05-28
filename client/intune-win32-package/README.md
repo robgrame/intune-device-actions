@@ -12,7 +12,7 @@ for distribution via Microsoft Intune as a Win32 LOB application.
 | `%ProgramFiles%\IntuneWipeClient\Launch-Wipe.ps1` | Shortcut launcher: reads config + invokes the wipe script. |
 | `%ProgramFiles%\IntuneWipeClient\config.json` | API URL + function key (ACL = SYSTEM + Administrators only). |
 | `%ProgramData%\Microsoft\Windows\Start Menu\Programs\Reset aziendale del dispositivo.lnk` | All-users Start Menu shortcut. |
-| `HKLM:\SOFTWARE\Contoso\IntuneWipeClient` | Detection registry key (`Version`, `ProductCode`, `InstallDir`). |
+| `HKLM:\SOFTWARE\MSLABS\IntuneWipeClient` | Detection registry key (`Version`, `ProductCode`, `InstallDir`). |
 
 ## Build
 
@@ -50,7 +50,7 @@ re-published.
   `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".\Uninstall.ps1"`
 - **Install behaviour**: System
 - **Detection**: registry value
-  `HKLM\SOFTWARE\Contoso\IntuneWipeClient\Version` equals the current version.
+  `HKLM\SOFTWARE\MSLABS\IntuneWipeClient\Version` equals the current version.
 - **Requirements**: Windows 10 1809+, all architectures.
 - **Restart behaviour**: suppress.
 

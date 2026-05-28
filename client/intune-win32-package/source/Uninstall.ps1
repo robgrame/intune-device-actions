@@ -11,7 +11,8 @@ param(
 $ErrorActionPreference = 'Continue'
 
 $InstallDir = Join-Path $env:ProgramFiles 'IntuneWipeClient'
-$RegPath    = 'HKLM:\SOFTWARE\Contoso\IntuneWipeClient'
+$RegPath    = 'HKLM:\SOFTWARE\MSLABS\IntuneWipeClient'
+$RegSubKey  = 'SOFTWARE\MSLABS\IntuneWipeClient'
 $LogDir     = Join-Path $env:ProgramData  'IntuneWipeClient\Logs'
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
@@ -43,9 +44,24 @@ try {
         Write-Host "Removed: $InstallDir"
     }
 
-    if (Test-Path $RegPath) {
-        Remove-Item $RegPath -Recurse -Force
-        Write-Host "Removed registry: $RegPath"
+    # Delete the detection key from the 64-bit hive (where Install.ps1 wrote it).
+    try {
+        $base64 = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Registry64)
+        $base64.DeleteSubKeyTree($RegSubKey, $false)
+        $base64.Close()
+        Write-Host "Removed registry (64-bit): $RegPath"
+    } catch { }
+    # Best-effort cleanup of any stale WOW6432Node copy from older installs.
+    if (Test-Path 'HKLM:\SOFTWARE\WOW6432Node\MSLABS\IntuneWipeClient') {
+        Remove-Item 'HKLM:\SOFTWARE\WOW6432Node\MSLABS\IntuneWipeClient' -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path 'HKLM:\SOFTWARE\WOW6432Node\Contoso\IntuneWipeClient') {
+        Remove-Item 'HKLM:\SOFTWARE\WOW6432Node\Contoso\IntuneWipeClient' -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path 'HKLM:\SOFTWARE\Contoso\IntuneWipeClient') {
+        Remove-Item 'HKLM:\SOFTWARE\Contoso\IntuneWipeClient' -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host "Uninstall completed."

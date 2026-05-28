@@ -30,7 +30,7 @@ param(
     [Parameter(Mandatory = $true)]  [string] $FunctionKey,
     [Parameter(Mandatory = $false)] [string] $TenantId,
     [Parameter(Mandatory = $false)] [string] $AssignToGroupId,
-    [Parameter(Mandatory = $false)] [string] $Publisher = 'Contoso IT',
+    [Parameter(Mandatory = $false)] [string] $Publisher = 'MSLABS IT',
     [Parameter(Mandatory = $false)] [string] $DisplayName = 'Intune Wipe Self-Service Client',
     [Parameter(Mandatory = $false)] [string] $CertificateIssuerLike = '*MSLABS-SUBCA01*',
     [Parameter(Mandatory = $false)] [string] $CertificateSubjectLike,
@@ -160,7 +160,7 @@ $uninstallCmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle 
 
 $detection = New-IntuneWin32AppDetectionRuleRegistry `
     -StringComparison `
-    -KeyPath 'HKEY_LOCAL_MACHINE\SOFTWARE\Contoso\IntuneWipeClient' `
+    -KeyPath 'HKEY_LOCAL_MACHINE\SOFTWARE\MSLABS\IntuneWipeClient' `
     -ValueName 'Version' `
     -StringComparisonOperator 'equal' `
     -StringComparisonValue $version
