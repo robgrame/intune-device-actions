@@ -138,7 +138,7 @@ public sealed class WipeRequestFunction
         // 4) Certificate <-> device binding (defends against IDOR)
         if (_cert.BindingEnabled)
         {
-            var boundDeviceId = _cert.GetBoundDeviceId(cert!);
+            var boundDeviceId = await _cert.GetBoundDeviceId(cert!, ct);
             if (string.IsNullOrEmpty(boundDeviceId))
             {
                 _audit.TrackEvent(AuditEvents.DeniedCertBindingMissing, new Dictionary<string, string>

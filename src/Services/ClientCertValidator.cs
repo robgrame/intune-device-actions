@@ -9,7 +9,7 @@ public sealed class ClientCertValidator
 {
     private const string ClientAuthEku = "1.3.6.1.5.5.7.3.2";
 
-    public enum DeviceIdBinding { Disabled, SubjectCN, SanDns, SanUri, Thumbprint, Auto }
+    public enum DeviceIdBinding { Disabled, SubjectCN, SanDns, SanUri, Thumbprint, SanDnsLookup, Auto }
 
     private readonly HashSet<string> _trustedCaThumbprints;
     private readonly HashSet<string> _allowedLeafThumbprints;
@@ -23,11 +23,14 @@ public sealed class ClientCertValidator
     private readonly bool _required;
     private readonly bool _trustForwardedHeader;
     private readonly DeviceIdBinding _deviceBinding;
+    private readonly DeviceDirectoryResolver? _directoryResolver;
     private readonly ILogger<ClientCertValidator> _log;
 
-    public ClientCertValidator(IConfiguration cfg, ILogger<ClientCertValidator> log)
+    public ClientCertValidator(IConfiguration cfg, ILogger<ClientCertValidator> log,
+        DeviceDirectoryResolver? directoryResolver = null)
     {
         _log = log;
+        _directoryResolver = directoryResolver;
 
         _trustedCaThumbprints = ParseCsv(cfg["ClientCert:TrustedCaThumbprints"])
             .Select(NormalizeThumbprint)
@@ -270,7 +273,7 @@ public sealed class ClientCertValidator
     /// Extracts the device identifier the certificate is bound to, according to the configured binding claim.
     /// Returns null when binding is Disabled or the claim is not present.
     /// </summary>
-    public string? GetBoundDeviceId(X509Certificate2 cert)
+    public async Task<string?> GetBoundDeviceId(X509Certificate2 cert, CancellationToken ct = default)
     {
         switch (_deviceBinding)
         {
@@ -289,14 +292,19 @@ public sealed class ClientCertValidator
             case DeviceIdBinding.Thumbprint:
                 return LookupByThumbprint(cert);
 
+            case DeviceIdBinding.SanDnsLookup:
+                return await ResolveDnsViaDirectoryAsync(cert, ct);
+
             case DeviceIdBinding.Auto:
                 // Operator-maintained mapping wins when populated for this cert (explicit intent),
-                // otherwise try every PKI convention in order. PKI-agnostic: customers don't have
-                // to change their cert templates, and the operator can override on a per-cert basis.
+                // then GUID-bearing claims in priority order (SAN URI, SAN DNS, CN), finally the
+                // directory lookup which handles legacy AD CS / on-prem PKI certs whose claims are
+                // AD identities (DN / FQDN) rather than Entra Device Ids.
                 return LookupByThumbprint(cert)
                     ?? FirstSanValue(cert, X509NameType.UrlName)
                     ?? FirstSanValue(cert, X509NameType.DnsName)
-                    ?? ExtractFromSubject(cert);
+                    ?? ExtractFromSubject(cert)
+                    ?? await ResolveDnsViaDirectoryAsync(cert, ct);
 
             default:
                 return null;
@@ -304,6 +312,20 @@ public sealed class ClientCertValidator
     }
 
     public bool BindingEnabled => _deviceBinding != DeviceIdBinding.Disabled;
+
+    private async Task<string?> ResolveDnsViaDirectoryAsync(X509Certificate2 cert, CancellationToken ct)
+    {
+        if (_directoryResolver is null)
+        {
+            _log.LogWarning("SanDnsLookup binding requires DeviceDirectoryResolver but it is not registered; fail-closed.");
+            return null;
+        }
+        // Pass the RAW SAN DNS value (typically the FQDN). The resolver handles FQDN/short-name
+        // fallback and fail-closed on ambiguity. We deliberately do NOT apply the strict GUID
+        // filter here — the whole point of this mode is that the SAN is a DNS name, not a GUID.
+        var rawDns = cert.GetNameInfo(X509NameType.DnsName, false);
+        return await _directoryResolver.ResolveByDnsNameAsync(rawDns, ct);
+    }
 
     private string? LookupByThumbprint(X509Certificate2 cert)
     {

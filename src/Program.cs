@@ -40,6 +40,7 @@ var host = new HostBuilder()
         var cfg = ctx.Configuration;
 
         services.AddSingleton<AuditService>();
+        services.AddSingleton<DeviceDirectoryResolver>();
         services.AddSingleton<ClientCertValidator>();
         services.AddSingleton<ReplayProtector>();
 

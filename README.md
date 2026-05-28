@@ -133,22 +133,27 @@ az deployment group create `
 
 Output utili: `webAppName`, `webAppHostname`, `procAppName`, `procAppHostname`, `uamiWorkerPrincipalId`, `uamiWebPrincipalId`, `storageWebAccount`, `storageProcAccount`, `wipeQueueName`, `ledgerContainerName`.
 
-### 3. Concedi i permessi Graph alla Managed Identity (solo worker)
+### 3. Concedi i permessi Graph alle Managed Identity
 
-Solo l'UAMI del worker (`uamiWorkerPrincipalId` dall'output) riceve i consent
-Graph. La UAMI web (`uamiWebPrincipalId`) **non** deve essere consentita.
+L'UAMI del worker (`uamiWorkerPrincipalId`) riceve **tutti** i consent Graph
+(necessari per la chiamata di wipe). L'UAMI web (`uamiWebPrincipalId`) riceve
+**solo** `Device.Read.All` — strettamente richiesto dalla modalità di binding
+`SanDnsLookup` (risoluzione directory per certificati AD CS che portano
+identità AD invece di EntraDeviceId). `Device.Read.All` è read-only e non
+concede capacità distruttive: il privilege boundary del wipe (che richiede
+`DeviceManagementManagedDevices.PrivilegedOperations.All`) resta sul worker.
+
+Se non userai mai `SanDnsLookup` (cert SCEP/PKCS Intune nativi con
+`{{AAD_Device_ID}}`), puoi omettere il consent su `uamiWebPrincipalId` — il
+modulo va in fail-closed loggando un warning.
 
 ```pwsh
-$principalId = '<uamiWorkerPrincipalId dall''output>'
-$graphSpId   = az ad sp list --filter "appId eq '00000003-0000-0000-c000-000000000000'" --query "[0].id" -o tsv
+$workerPrincipalId = '<uamiWorkerPrincipalId dall''output>'
+$webPrincipalId    = '<uamiWebPrincipalId    dall''output>'
+$graphSpId         = az ad sp list --filter "appId eq '00000003-0000-0000-c000-000000000000'" --query "[0].id" -o tsv
 
-foreach ($r in @(
-  'DeviceManagementManagedDevices.PrivilegedOperations.All',
-  'DeviceManagementManagedDevices.Read.All',
-  'Device.Read.All',
-  'GroupMember.Read.All'
-)) {
-  $rid = az ad sp show --id $graphSpId --query "appRoles[?value=='$r'].id | [0]" -o tsv
+function Grant-GraphAppRole($principalId, $roleValue) {
+  $rid = az ad sp show --id $graphSpId --query "appRoles[?value=='$roleValue'].id | [0]" -o tsv
   $body = "{`"principalId`":`"$principalId`",`"resourceId`":`"$graphSpId`",`"appRoleId`":`"$rid`"}"
   $tmp = New-TemporaryFile; $body | Set-Content -Encoding ascii $tmp
   az rest --method POST `
@@ -156,6 +161,17 @@ foreach ($r in @(
     --headers "Content-Type=application/json" --body "@$($tmp.FullName)"
   Remove-Item $tmp
 }
+
+# Worker: full Graph scope for wipe
+foreach ($r in @(
+  'DeviceManagementManagedDevices.PrivilegedOperations.All',
+  'DeviceManagementManagedDevices.Read.All',
+  'Device.Read.All',
+  'GroupMember.Read.All'
+)) { Grant-GraphAppRole $workerPrincipalId $r }
+
+# Web: ONLY Device.Read.All (read-only directory enumeration for SanDnsLookup)
+Grant-GraphAppRole $webPrincipalId 'Device.Read.All'
 ```
 
 ### 4. Pubblica il codice su entrambe le Function App
@@ -275,8 +291,10 @@ Tutte le impostazioni sono app settings della Function App:
 | `ClientCert__RequireClientAuthEku` | `true` | Richiede EKU Client Authentication (1.3.6.1.5.5.7.3.2) |
 | `ClientCert__RequireClientCert` | `true` | Impone cert client (fail-closed se mancante) |
 | `ClientCert__TrustForwardedHeader` | `true` | **DEVE essere `true` su App Service**: anche con `clientCertMode=Required` il cert viene consegnato all'app via header `X-ARR-ClientCert`, non via `HttpContext.Connection.ClientCertificate`. |
-| `ClientCert__DeviceIdBindingClaim` | `Auto` | `Auto`\|`SubjectCN`\|`SanDns`\|`SanUri`\|`Thumbprint`\|`Disabled` — strategia per legare il certificato all'`entraDeviceId`. **`Auto`** (raccomandato multi-PKI) prova in ordine: `ThumbprintToDeviceMap` (intent operatore vince) → `SanUri` → `SanDns` → `SubjectCN`. **Tutte le strategie sono strict**: il valore della SAN o del CN deve **essere uguale** a un GUID — niente estrazione substring, niente scan dell'intero DN (anti-IDOR). **`Thumbprint`** usa solo la mappa operatore. **`Disabled`** disattiva il binding (sconsigliato). |
+| `ClientCert__DeviceIdBindingClaim` | `Auto` | `Auto`\|`SubjectCN`\|`SanDns`\|`SanUri`\|`Thumbprint`\|`SanDnsLookup`\|`Disabled` — strategia per legare il certificato all'`entraDeviceId`. **`Auto`** (raccomandato multi-PKI) prova in ordine: `ThumbprintToDeviceMap` (intent operatore vince) → `SanUri` → `SanDns` → `SubjectCN` → `SanDnsLookup`. Le strategie claim-based sono **strict**: il valore della SAN o del CN deve **essere uguale** a un GUID — niente estrazione substring, niente scan dell'intero DN (anti-IDOR). **`SanDnsLookup`** risolve il SAN DNS (FQDN/short) via MS Graph `displayName eq` per i cert AD CS che non portano l'EntraDeviceId; richiede `Device.Read.All` sulla UAMI web; fail-closed su 0 match, >1 match, Graph error. **`Thumbprint`** usa solo la mappa operatore. **`Disabled`** disattiva il binding (sconsigliato). |
 | `ClientCert__ThumbprintToDeviceMap` | _(vuoto)_ | Mappa operatore `thumbprint=EntraDeviceId` per le modalità `Auto`/`Thumbprint`. Formato: `THUMB1=guid1\|THUMB2=guid2`. Duplicati di stesso thumbprint mappato a GUID diversi sono **rifiutati fail-closed** all'avvio (ERROR loggato). Escape-hatch quando il Subject del cert non contiene il device id. |
+| `ClientCert__DirectoryLookupPositiveTtlMinutes` | `15` | TTL della cache per i risultati positivi della `SanDnsLookup` (riduce throttling Graph). |
+| `ClientCert__DirectoryLookupNegativeTtlMinutes` | `1` | TTL della cache per i risultati negativi (corto per non bloccare onboarding nuovi device). |
 | `Replay__MaxTimestampSkewSeconds` | `300` | Skew massimo (s) per `X-Request-Timestamp` |
 | `Idempotency__StorageAccount` | _(da bicep)_ | Storage account del ledger blob |
 | `Idempotency__BlobContainer` | `wipe-ledger` | Container blob del ledger idempotency |
