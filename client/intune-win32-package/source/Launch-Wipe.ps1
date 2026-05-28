@@ -34,37 +34,10 @@ New-Item -ItemType Directory -Force -Path $UserLogDir | Out-Null
 $LogFile = Join-Path $UserLogDir ("Launch_{0:yyyyMMdd_HHmmss}.log" -f (Get-Date))
 Start-Transcript -Path $LogFile -Force | Out-Null
 
-function Get-EntraDeviceIdSafe {
-    try {
-        $out = & dsregcmd /status 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $out) { return 'n/a' }
-        $line = $out | Where-Object { $_ -match '^\s*DeviceId\s*:\s*([0-9a-fA-F-]{36})' } | Select-Object -First 1
-        if ($line -match '([0-9a-fA-F-]{36})') { return $Matches[1] }
-        return 'n/a'
-    } catch { return 'n/a' }
-}
-
-function Get-IntuneManagedDeviceIdSafe {
-    # Returns the real Intune managedDevice.id (Graph resource id) when derivable locally; 'n/a' otherwise.
-    try {
-        $imeKey = 'HKLM:\SOFTWARE\Microsoft\IntuneManagementExtension'
-        if (Test-Path $imeKey) {
-            $p = Get-ItemProperty $imeKey -ErrorAction SilentlyContinue
-            foreach ($n in 'IntuneDeviceId','ManagedDeviceId','DeviceId') {
-                if ($p -and $p.PSObject.Properties.Name -contains $n -and $p.$n -match '^[0-9a-fA-F-]{36}$') {
-                    return $p.$n
-                }
-            }
-        }
-        $logPath = Join-Path $env:ProgramData 'Microsoft\IntuneManagementExtension\Logs\IntuneManagementExtension.log'
-        if (Test-Path $logPath) {
-            $hits = Select-String -Path $logPath -Pattern 'Intune\s*Device\s*Id\D+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})' -ErrorAction SilentlyContinue
-            $last = $hits | Select-Object -Last 1
-            if ($last) { return $last.Matches[0].Groups[1].Value }
-        }
-    } catch { }
-    return 'n/a'
-}
+# Device identity helpers live in the canonical module so they can be
+# unit-tested in isolation (see client\tests\DeviceIdentity.Tests.ps1).
+# The module is deployed alongside this script by the Win32 installer.
+Import-Module (Join-Path $InstallDir 'DeviceIdentity.psm1') -Force -DisableNameChecking
 
 function Show-Message {
     param([string]$Text, [string]$Title, [System.Windows.Forms.MessageBoxIcon]$Icon = 'Information')

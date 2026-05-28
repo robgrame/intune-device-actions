@@ -68,6 +68,7 @@ try {
         'WipeConfirmationDialog.ps1',
         'WipeResultDialogs.ps1',
         'Launch-Wipe.ps1',
+        'DeviceIdentity.psm1',
         'version.txt'
     )
     foreach ($f in $payload) {

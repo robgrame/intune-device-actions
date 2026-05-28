@@ -50,96 +50,10 @@ if (-not $DryRun) {
 
 #region helpers
 
-function Get-EntraDeviceId {
-    $out = & dsregcmd /status 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $out) { throw "dsregcmd failed" }
-    $line = $out | Where-Object { $_ -match '^\s*DeviceId\s*:\s*([0-9a-fA-F-]{36})' } | Select-Object -First 1
-    if ($line -match '([0-9a-fA-F-]{36})') { return $Matches[1] }
-    throw "EntraDeviceId not found (device not Entra joined/registered?)"
-}
-
-function Get-MdmEnrollmentId {
-    # Returns the MDM EnrollmentId / DeviceClientId from registry (NOT the Intune managedDevice.id).
-    # Kept for diagnostic display and audit trail; backend resolves the real managedDevice.id from EntraDeviceId.
-    $root = 'HKLM:\SOFTWARE\Microsoft\Enrollments'
-    if (-not (Test-Path $root)) { throw "Enrollments key not found" }
-    foreach ($e in (Get-ChildItem $root -ErrorAction SilentlyContinue |
-                    Where-Object { $_.PSChildName -match '^[0-9A-Fa-f-]{36}$' })) {
-        $p = Get-ItemProperty $e.PSPath -ErrorAction SilentlyContinue
-        if ($p.ProviderID -eq 'MS DM Server' -and $p.UPN) {
-            if ($p.PSObject.Properties.Name -contains 'DeviceClientId' -and $p.DeviceClientId) {
-                return $p.DeviceClientId
-            }
-            return $e.PSChildName
-        }
-    }
-    throw "Intune enrollment not found (device not enrolled in Intune?)"
-}
-
-function Get-IntuneManagedDeviceId {
-    # Returns the actual Intune managedDevice.id (Graph resource id), e.g. a8fa102a-1e88-4e71-8df0-37a09d570a72.
-    # This is NOT the same GUID as DeviceClientId/EnrollmentId. Best-effort: tries IME registry and log.
-    # Returns $null if not derivable locally (the server resolves it from EntraDeviceId regardless).
-
-    # 1) IntuneManagementExtension registry (may expose DeviceId/IntuneDeviceId on newer IME builds)
-    $imeKey = 'HKLM:\SOFTWARE\Microsoft\IntuneManagementExtension'
-    if (Test-Path $imeKey) {
-        $p = Get-ItemProperty $imeKey -ErrorAction SilentlyContinue
-        foreach ($n in 'IntuneDeviceId','ManagedDeviceId','DeviceId') {
-            if ($p -and $p.PSObject.Properties.Name -contains $n -and $p.$n -match '^[0-9a-fA-F-]{36}$') {
-                return $p.$n
-            }
-        }
-    }
-
-    # 2) IntuneManagementExtension.log — typical line: "Get Intune Device Id : a8fa102a-..."
-    $logPath = Join-Path $env:ProgramData 'Microsoft\IntuneManagementExtension\Logs\IntuneManagementExtension.log'
-    if (Test-Path $logPath) {
-        try {
-            $hits = Select-String -Path $logPath -Pattern 'Intune\s*Device\s*Id\D+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})' -ErrorAction SilentlyContinue
-            $last = $hits | Select-Object -Last 1
-            if ($last) { return $last.Matches[0].Groups[1].Value }
-        } catch { }
-    }
-
-    return $null
-}
-
-function Get-ClientCertificate {
-    param([string]$Thumb, [string]$SubjectLike, [string]$IssuerLike)
-    # Prefer LocalMachine\My (Intune SCEP/PKCS device certs typically land there in machine context).
-    foreach ($s in @('Cert:\LocalMachine\My','Cert:\CurrentUser\My')) {
-        $certs = Get-ChildItem $s -ErrorAction SilentlyContinue |
-                 Where-Object { $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date) -and $_.NotBefore -le (Get-Date) }
-        # Keep only certs that have Client Authentication EKU (1.3.6.1.5.5.7.3.2)
-        $certs = $certs | Where-Object {
-            $ekus = $_.EnhancedKeyUsageList
-            (-not $ekus) -or ($ekus | Where-Object { $_.ObjectId -eq '1.3.6.1.5.5.7.3.2' })
-        }
-        # Issuer filter (AND semantics: if specified, must match). Supports semicolon-
-        # separated list of wildcards — useful when the device may carry certs from
-        # multiple CAs (e.g. an Intune SCEP SubCA AND an on-prem AD CS sub-CA).
-        if ($IssuerLike) {
-            $patterns = $IssuerLike -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-            $certs = $certs | Where-Object {
-                $c = $_
-                ($patterns | Where-Object { $c.Issuer -like $_ } | Select-Object -First 1) -ne $null
-            }
-        }
-        if ($Thumb) {
-            $c = $certs | Where-Object Thumbprint -eq $Thumb.ToUpper() | Select-Object -First 1
-        } elseif ($SubjectLike) {
-            $c = $certs | Where-Object { $_.Subject -like $SubjectLike } |
-                 Sort-Object NotAfter -Descending | Select-Object -First 1
-        } else {
-            # No subject/thumb filter: take the longest-living matching cert
-            # (already filtered by EKU + optional Issuer).
-            $c = $certs | Sort-Object NotAfter -Descending | Select-Object -First 1
-        }
-        if ($c) { return $c }
-    }
-    throw "Client certificate not found (with Client Authentication EKU and private key)"
-}
+# Device identity + certificate helpers live in the canonical module so they
+# can be unit-tested in isolation (see client\tests\DeviceIdentity.Tests.ps1).
+# The module is copied next to this script by Build-IntuneWinPackage.ps1.
+Import-Module (Join-Path $PSScriptRoot 'DeviceIdentity.psm1') -Force -DisableNameChecking
 
 function Show-WipeConfirmation {
     param([string]$DeviceName, [string]$EntraDeviceId, [string]$IntuneDeviceId)
