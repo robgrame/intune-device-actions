@@ -41,3 +41,20 @@ Soluzione end-to-end per consentire ad un client (PS 5.1) di richiedere un wipe 
 - `client/Invoke-DeviceWipe.ps1`
 - `azure.yaml` per `azd up`
 - `README.md` con istruzioni di deploy e configurazione Graph permissions
+
+## Stato corrente (2026-05-28)
+
+**Backend**: deployed su `intwipe-web-qupxwx6egkr3e` + `intwipe-proc-qupxwx6egkr3e` (RG `rg-intwipe-dev`).
+- Wipe pipeline: HTTP (mTLS) → queue → worker → Graph wipe.
+- **Post-wipe fallback** (best-effort): syncDevice (+60s) → rebootNow (+60s); opt-out via `Wipe:SyncFallbackDelaySeconds=0` / `Wipe:RebootFallbackDelaySeconds=0`.
+- **Audit persistence**: dual-write App Insights `customEvents` + Azure Table `auditevents` su `storageProc` (PartitionKey=correlationId, RowKey=ticks_guid). Retention illimitata, query in Storage Explorer.
+
+**Client v1.0.11** (intunewin rebuilt, da ri-pubblicare su Intune):
+- Modulo `DeviceIdentity.psm1` condiviso (test-coverage Pester 26/26).
+- Fix strict-mode su `Get-ClientCertificate` (single-pattern `-split` → array).
+- Sync+reboot fallback lato server (nessun cambio client necessario per beneficiarne).
+
+**TODO operativo**:
+- Republish `IntuneWipeClient.intunewin` v1.0.11 su Intune (Publish-ToIntune.ps1).
+- (Opzionale) Aggiungere lifecycle policy alla `auditevents` table se serve cap di retention.
+- (Roadmap) Event Grid custom topic per fanout notifiche/SIEM, e system topic su Key Vault quando ci sposteremo trusted CA lì.
