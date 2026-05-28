@@ -9,12 +9,13 @@ public sealed class ClientCertValidator
 {
     private const string ClientAuthEku = "1.3.6.1.5.5.7.3.2";
 
-    public enum DeviceIdBinding { Disabled, SubjectCN, SanDns, SanUri }
+    public enum DeviceIdBinding { Disabled, SubjectCN, SanDns, SanUri, Thumbprint, Auto }
 
     private readonly HashSet<string> _trustedCaThumbprints;
     private readonly HashSet<string> _allowedLeafThumbprints;
     private readonly List<X509Certificate2> _rootStore;          // anchors: CustomTrustStore
     private readonly List<X509Certificate2> _intermediateStore;  // path hints: ExtraStore only
+    private readonly Dictionary<string, string> _thumbprintToDeviceMap;
     private readonly bool _checkRevocation;
     private readonly X509RevocationMode _revocationMode;
     private readonly X509RevocationFlag _revocationFlag;
@@ -88,7 +89,28 @@ public sealed class ClientCertValidator
         _trustForwardedHeader = bool.TryParse(cfg["ClientCert:TrustForwardedHeader"], out var th) && th;
         _deviceBinding = Enum.TryParse<DeviceIdBinding>(cfg["ClientCert:DeviceIdBindingClaim"], true, out var db)
             ? db
-            : DeviceIdBinding.SubjectCN;
+            : DeviceIdBinding.Auto;
+
+        // Operator-maintained mapping: cert thumbprint -> EntraDeviceId.
+        // Format: "THUMB1=guid1|THUMB2=guid2" (separators , ; | accepted). Whitespace ignored.
+        // Used by Thumbprint binding mode and as final fallback for Auto mode. This is the
+        // PKI-neutral escape hatch when the certificate Subject does not embed the device id.
+        _thumbprintToDeviceMap = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in ParseCsv(cfg["ClientCert:ThumbprintToDeviceMap"]))
+        {
+            var eq = pair.IndexOf('=');
+            if (eq <= 0 || eq == pair.Length - 1) continue;
+            var thumb = NormalizeThumbprint(pair[..eq]);
+            var devId = pair[(eq + 1)..].Trim();
+            if (thumb.Length == 0 || devId.Length == 0) continue;
+            if (!Guid.TryParse(devId, out var g))
+            {
+                _log.LogWarning("ThumbprintToDeviceMap entry skipped: '{DeviceId}' is not a GUID (thumb={Thumb}).", devId, thumb);
+                continue;
+            }
+            _thumbprintToDeviceMap[thumb] = g.ToString();
+            _log.LogInformation("Loaded thumbprint->device mapping: {Thumb} -> {DeviceId}", thumb, g);
+        }
     }
 
     private void LoadCerts(string? csv, List<X509Certificate2> target, string label)
@@ -241,9 +263,7 @@ public sealed class ClientCertValidator
                 return null;
 
             case DeviceIdBinding.SubjectCN:
-                // GetNameInfo(SimpleName, false) returns the leaf CN of the Subject.
-                var cn = cert.GetNameInfo(X509NameType.SimpleName, false);
-                return string.IsNullOrWhiteSpace(cn) ? null : ExtractGuid(cn);
+                return ExtractFromSubject(cert);
 
             case DeviceIdBinding.SanDns:
                 return FirstSanValue(cert, X509NameType.DnsName);
@@ -251,12 +271,39 @@ public sealed class ClientCertValidator
             case DeviceIdBinding.SanUri:
                 return FirstSanValue(cert, X509NameType.UrlName);
 
+            case DeviceIdBinding.Thumbprint:
+                return LookupByThumbprint(cert);
+
+            case DeviceIdBinding.Auto:
+                // Try every PKI convention in order, falling back to the operator-maintained map.
+                // This is PKI-agnostic: customers don't have to change their cert templates.
+                return FirstSanValue(cert, X509NameType.UrlName)
+                    ?? FirstSanValue(cert, X509NameType.DnsName)
+                    ?? ExtractFromSubject(cert)
+                    ?? LookupByThumbprint(cert);
+
             default:
                 return null;
         }
     }
 
     public bool BindingEnabled => _deviceBinding != DeviceIdBinding.Disabled;
+
+    private string? LookupByThumbprint(X509Certificate2 cert)
+    {
+        var thumb = NormalizeThumbprint(cert.Thumbprint ?? string.Empty);
+        return thumb.Length > 0 && _thumbprintToDeviceMap.TryGetValue(thumb, out var devId) ? devId : null;
+    }
+
+    private static string? ExtractFromSubject(X509Certificate2 cert)
+    {
+        // Prefer the leaf CN, but fall back to scanning the full DN for any GUID-shaped value
+        // (covers customer PKIs that put the device id in OU=, DC=, serialNumber=, etc.).
+        var cn = cert.GetNameInfo(X509NameType.SimpleName, false);
+        var fromCn = string.IsNullOrWhiteSpace(cn) ? null : ExtractGuid(cn);
+        if (fromCn is not null) return fromCn;
+        return string.IsNullOrWhiteSpace(cert.Subject) ? null : ExtractGuid(cert.Subject);
+    }
 
     private static string? FirstSanValue(X509Certificate2 cert, X509NameType nameType)
     {

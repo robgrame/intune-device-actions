@@ -275,7 +275,8 @@ Tutte le impostazioni sono app settings della Function App:
 | `ClientCert__RequireClientAuthEku` | `true` | Richiede EKU Client Authentication (1.3.6.1.5.5.7.3.2) |
 | `ClientCert__RequireClientCert` | `true` | Impone cert client (fail-closed se mancante) |
 | `ClientCert__TrustForwardedHeader` | `true` | **DEVE essere `true` su App Service**: anche con `clientCertMode=Required` il cert viene consegnato all'app via header `X-ARR-ClientCert`, non via `HttpContext.Connection.ClientCertificate`. |
-| `ClientCert__DeviceIdBindingClaim` | `SubjectCN` | `SubjectCN`\|`SanDns`\|`SanUri`\|`Disabled` — claim del cert che identifica l'`entraDeviceId` |
+| `ClientCert__DeviceIdBindingClaim` | `Auto` | `Auto`\|`SubjectCN`\|`SanDns`\|`SanUri`\|`Thumbprint`\|`Disabled` — strategia per legare il certificato all'`entraDeviceId`. **`Auto`** (raccomandato per ambienti multi-PKI) prova in cascata `SanUri → SanDns → SubjectCN (GUID-shaped) → ThumbprintToDeviceMap`, così non è necessario imporre un template di certificato al cliente. **`Thumbprint`** usa solo la mappa operatore. **`SubjectCN`** ora scansiona l'intero DN (non solo il CN) per un GUID. **`Disabled`** disattiva il binding (sconsigliato, anti-IDOR esposto). |
+| `ClientCert__ThumbprintToDeviceMap` | _(vuoto)_ | Mappa operatore `thumbprint=EntraDeviceId` per le modalità `Auto`/`Thumbprint`. Formato: `THUMB1=guid1\|THUMB2=guid2` (accetta anche `,` e `;`). Escape-hatch quando il Subject del cert non contiene il device id (es. template PKI di terze parti non modificabili dal cliente). |
 | `Replay__MaxTimestampSkewSeconds` | `300` | Skew massimo (s) per `X-Request-Timestamp` |
 | `Idempotency__StorageAccount` | _(da bicep)_ | Storage account del ledger blob |
 | `Idempotency__BlobContainer` | `wipe-ledger` | Container blob del ledger idempotency |

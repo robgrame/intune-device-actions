@@ -41,9 +41,13 @@ param revocationFlag string = 'ExcludeRoot'
 @description('Require Client Authentication EKU (1.3.6.1.5.5.7.3.2) on the client certificate.')
 param requireClientAuthEku bool = true
 
-@description('Which claim from the client certificate identifies the device. SubjectCN expects CN=<entraDeviceId GUID>. Disabled turns off cert<->device binding (NOT recommended).')
-@allowed([ 'SubjectCN', 'SanDns', 'SanUri', 'Disabled' ])
-param deviceIdBindingClaim string = 'SubjectCN'
+@description('Which claim from the client certificate identifies the device. Auto tries SanUri -> SanDns -> SubjectCN (GUID-shaped) -> ThumbprintToDeviceMap, which is PKI-agnostic and recommended for multi-tenant scenarios. Thumbprint uses ONLY the operator-maintained map (clientCertThumbprintToDeviceMap). SubjectCN/SanDns/SanUri assume the cert embeds the device GUID. Disabled turns off cert<->device binding (NOT recommended).')
+@allowed([ 'Auto', 'SubjectCN', 'SanDns', 'SanUri', 'Thumbprint', 'Disabled' ])
+param deviceIdBindingClaim string = 'Auto'
+
+@description('Operator-maintained mapping cert-thumbprint -> EntraDeviceId for the Thumbprint and Auto binding modes. Format: "THUMB1=guid1|THUMB2=guid2". Use this when the client certificate Subject does not embed the device id (e.g., third-party PKI templates the customer cannot change).')
+@secure()
+param clientCertThumbprintToDeviceMap string = ''
 
 @description('Maximum acceptable clock skew (seconds) between client X-Request-Timestamp and server time.')
 param maxTimestampSkewSeconds int = 300
@@ -245,6 +249,7 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
         // "client certificate missing" even when the client presented one.
         { name: 'ClientCert__TrustForwardedHeader',    value: 'true' }
         { name: 'ClientCert__DeviceIdBindingClaim',    value: deviceIdBindingClaim }
+        { name: 'ClientCert__ThumbprintToDeviceMap',   value: clientCertThumbprintToDeviceMap }
         { name: 'Replay__MaxTimestampSkewSeconds',     value: string(maxTimestampSkewSeconds) }
       ]
     }
