@@ -129,11 +129,11 @@ public sealed class WipeProcessorFunction
             return;
         }
 
-        // 3) Ownership: managedDevice.azureADDeviceId must match
+        // 3) Ownership: resolve managedDevice via Graph filter by azureADDeviceId (server-authoritative)
         string? managedId;
         try
         {
-            managedId = await _graph.ResolveAndValidateAsync(msg.IntuneDeviceId, msg.EntraDeviceId, ct);
+            managedId = await _graph.ResolveAndValidateAsync(msg.EntraDeviceId, ct);
         }
         catch (Exception ex) when (GraphWipeService.Classify(ex) == GraphWipeService.GraphErrorKind.Transient)
         {
@@ -142,13 +142,22 @@ public sealed class WipeProcessorFunction
         }
         catch (Exception ex)
         {
-            _audit.TrackEvent(AuditEvents.DeniedManagedDeviceResolveFailed, ex, new Dictionary<string, string>
+            var props = new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
                 [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
                 [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
                 [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
-            });
+                ["exceptionType"]                 = ex.GetType().FullName ?? "(unknown)",
+                ["exceptionMessage"]              = ex.Message ?? string.Empty,
+            };
+            if (ex is Microsoft.Graph.Models.ODataErrors.ODataError oe)
+            {
+                props["graphStatusCode"] = oe.ResponseStatusCode.ToString();
+                props["graphErrorCode"]  = oe.Error?.Code ?? string.Empty;
+                props["graphErrorMsg"]   = oe.Error?.Message ?? string.Empty;
+            }
+            _audit.TrackEvent(AuditEvents.DeniedManagedDeviceResolveFailed, ex, props);
             return;
         }
 

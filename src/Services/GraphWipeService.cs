@@ -56,22 +56,40 @@ public sealed class GraphWipeService
     }
 
     /// <summary>
-    /// Verifies that intuneDeviceId belongs to entraDeviceId (azureADDeviceId match) and returns the managed device id.
+    /// Resolves the Intune managedDevice.id by querying managedDevices filtered by azureADDeviceId.
+    /// The cert-bound entraDeviceId is the authoritative server-side input (the client-supplied
+    /// IntuneDeviceId from registry — DeviceClientId/EnrollmentId — is NOT the same as managedDevice.id
+    /// and must NOT be trusted for resolution).
+    ///
+    /// Returns the managedDevice.id on success, null when:
+    ///   - no managedDevice exists for that azureADDeviceId (device not enrolled in Intune or sync gap)
+    ///   - more than one matches (ambiguity, fail-closed)
     /// </summary>
-    public async Task<string?> ResolveAndValidateAsync(string intuneDeviceId, string entraDeviceId, CancellationToken ct)
+    public async Task<string?> ResolveAndValidateAsync(string entraDeviceId, CancellationToken ct)
     {
-        var md = await _graph.DeviceManagement.ManagedDevices[intuneDeviceId]
-            .GetAsync(rc => rc.QueryParameters.Select = new[] { "id", "deviceName", "azureADDeviceId" }, ct);
+        if (!Guid.TryParse(entraDeviceId, out _))
+            throw new ArgumentException("entraDeviceId must be a GUID", nameof(entraDeviceId));
 
-        if (md is null) return null;
-
-        if (!string.Equals(md.AzureADDeviceId, entraDeviceId, StringComparison.OrdinalIgnoreCase))
+        var page = await _graph.DeviceManagement.ManagedDevices.GetAsync(rc =>
         {
-            _log.LogWarning("Ownership mismatch: managedDevice {Id} azureADDeviceId={Aad}, request={Req}",
-                intuneDeviceId, md.AzureADDeviceId, entraDeviceId);
+            rc.QueryParameters.Filter = $"azureADDeviceId eq '{entraDeviceId}'";
+            rc.QueryParameters.Select = new[] { "id", "deviceName", "azureADDeviceId", "managementState" };
+            rc.QueryParameters.Top    = 2;
+        }, ct);
+
+        var matches = page?.Value ?? new List<Microsoft.Graph.Models.ManagedDevice>();
+
+        if (matches.Count == 0)
+        {
+            _log.LogWarning("No managedDevice found for azureADDeviceId={Aad} (device not Intune-enrolled or replication lag)", entraDeviceId);
             return null;
         }
-        return md.Id;
+        if (matches.Count > 1)
+        {
+            _log.LogWarning("Ambiguous managedDevice resolution for azureADDeviceId={Aad}: {Count} matches — fail-closed", entraDeviceId, matches.Count);
+            return null;
+        }
+        return matches[0].Id;
     }
 
     public async Task WipeAsync(string managedDeviceId, CancellationToken ct)
