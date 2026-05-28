@@ -44,19 +44,23 @@ function Get-EntraDeviceIdSafe {
     } catch { return 'n/a' }
 }
 
-function Get-IntuneDeviceIdSafe {
+function Get-IntuneManagedDeviceIdSafe {
+    # Returns the real Intune managedDevice.id (Graph resource id) when derivable locally; 'n/a' otherwise.
     try {
-        $root = 'HKLM:\SOFTWARE\Microsoft\Enrollments'
-        if (-not (Test-Path $root)) { return 'n/a' }
-        foreach ($e in (Get-ChildItem $root -ErrorAction SilentlyContinue |
-                        Where-Object { $_.PSChildName -match '^[0-9A-Fa-f-]{36}$' })) {
-            $p = Get-ItemProperty $e.PSPath -ErrorAction SilentlyContinue
-            if ($p.ProviderID -eq 'MS DM Server' -and $p.UPN) {
-                if ($p.PSObject.Properties.Name -contains 'DeviceClientId' -and $p.DeviceClientId) {
-                    return $p.DeviceClientId
+        $imeKey = 'HKLM:\SOFTWARE\Microsoft\IntuneManagementExtension'
+        if (Test-Path $imeKey) {
+            $p = Get-ItemProperty $imeKey -ErrorAction SilentlyContinue
+            foreach ($n in 'IntuneDeviceId','ManagedDeviceId','DeviceId') {
+                if ($p -and $p.PSObject.Properties.Name -contains $n -and $p.$n -match '^[0-9a-fA-F-]{36}$') {
+                    return $p.$n
                 }
-                return $e.PSChildName
             }
+        }
+        $logPath = Join-Path $env:ProgramData 'Microsoft\IntuneManagementExtension\Logs\IntuneManagementExtension.log'
+        if (Test-Path $logPath) {
+            $hits = Select-String -Path $logPath -Pattern 'Intune\s*Device\s*Id\D+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})' -ErrorAction SilentlyContinue
+            $last = $hits | Select-Object -Last 1
+            if ($last) { return $last.Matches[0].Groups[1].Value }
         }
     } catch { }
     return 'n/a'
@@ -85,7 +89,7 @@ try {
 
     $deviceName = $env:COMPUTERNAME
     $entraId    = Get-EntraDeviceIdSafe
-    $intuneId   = Get-IntuneDeviceIdSafe
+    $intuneId   = Get-IntuneManagedDeviceIdSafe
 
     $confirmed = Show-WipeConfirmation -DeviceName $deviceName -EntraDeviceId $entraId -IntuneDeviceId $intuneId
     if (-not $confirmed) {

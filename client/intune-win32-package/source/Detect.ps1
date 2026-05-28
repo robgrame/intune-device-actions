@@ -12,7 +12,7 @@
 #>
 
 $ErrorActionPreference = 'SilentlyContinue'
-$ExpectedVersion = '1.0.9'  # __VERSION_PLACEHOLDER__  (rewritten by Build-IntuneWinPackage.ps1)
+$ExpectedVersion = '1.0.10'  # __VERSION_PLACEHOLDER__  (rewritten by Build-IntuneWinPackage.ps1)
 $RegPath         = 'HKLM:\SOFTWARE\MSLABS\IntuneWipeClient'
 $RegSubKey       = 'SOFTWARE\MSLABS\IntuneWipeClient'
 $ProgramFiles64  = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }

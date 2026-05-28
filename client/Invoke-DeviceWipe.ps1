@@ -58,7 +58,9 @@ function Get-EntraDeviceId {
     throw "EntraDeviceId not found (device not Entra joined/registered?)"
 }
 
-function Get-IntuneDeviceId {
+function Get-MdmEnrollmentId {
+    # Returns the MDM EnrollmentId / DeviceClientId from registry (NOT the Intune managedDevice.id).
+    # Kept for diagnostic display and audit trail; backend resolves the real managedDevice.id from EntraDeviceId.
     $root = 'HKLM:\SOFTWARE\Microsoft\Enrollments'
     if (-not (Test-Path $root)) { throw "Enrollments key not found" }
     foreach ($e in (Get-ChildItem $root -ErrorAction SilentlyContinue |
@@ -74,6 +76,35 @@ function Get-IntuneDeviceId {
     throw "Intune enrollment not found (device not enrolled in Intune?)"
 }
 
+function Get-IntuneManagedDeviceId {
+    # Returns the actual Intune managedDevice.id (Graph resource id), e.g. a8fa102a-1e88-4e71-8df0-37a09d570a72.
+    # This is NOT the same GUID as DeviceClientId/EnrollmentId. Best-effort: tries IME registry and log.
+    # Returns $null if not derivable locally (the server resolves it from EntraDeviceId regardless).
+
+    # 1) IntuneManagementExtension registry (may expose DeviceId/IntuneDeviceId on newer IME builds)
+    $imeKey = 'HKLM:\SOFTWARE\Microsoft\IntuneManagementExtension'
+    if (Test-Path $imeKey) {
+        $p = Get-ItemProperty $imeKey -ErrorAction SilentlyContinue
+        foreach ($n in 'IntuneDeviceId','ManagedDeviceId','DeviceId') {
+            if ($p -and $p.PSObject.Properties.Name -contains $n -and $p.$n -match '^[0-9a-fA-F-]{36}$') {
+                return $p.$n
+            }
+        }
+    }
+
+    # 2) IntuneManagementExtension.log — typical line: "Get Intune Device Id : a8fa102a-..."
+    $logPath = Join-Path $env:ProgramData 'Microsoft\IntuneManagementExtension\Logs\IntuneManagementExtension.log'
+    if (Test-Path $logPath) {
+        try {
+            $hits = Select-String -Path $logPath -Pattern 'Intune\s*Device\s*Id\D+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})' -ErrorAction SilentlyContinue
+            $last = $hits | Select-Object -Last 1
+            if ($last) { return $last.Matches[0].Groups[1].Value }
+        } catch { }
+    }
+
+    return $null
+}
+
 function Get-ClientCertificate {
     param([string]$Thumb, [string]$SubjectLike, [string]$IssuerLike)
     # Prefer LocalMachine\My (Intune SCEP/PKCS device certs typically land there in machine context).
@@ -85,9 +116,15 @@ function Get-ClientCertificate {
             $ekus = $_.EnhancedKeyUsageList
             (-not $ekus) -or ($ekus | Where-Object { $_.ObjectId -eq '1.3.6.1.5.5.7.3.2' })
         }
-        # Issuer filter (AND semantics: if specified, must match).
+        # Issuer filter (AND semantics: if specified, must match). Supports semicolon-
+        # separated list of wildcards — useful when the device may carry certs from
+        # multiple CAs (e.g. an Intune SCEP SubCA AND an on-prem AD CS sub-CA).
         if ($IssuerLike) {
-            $certs = $certs | Where-Object { $_.Issuer -like $IssuerLike }
+            $patterns = $IssuerLike -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+            $certs = $certs | Where-Object {
+                $c = $_
+                ($patterns | Where-Object { $c.Issuer -like $_ } | Select-Object -First 1) -ne $null
+            }
         }
         if ($Thumb) {
             $c = $certs | Where-Object Thumbprint -eq $Thumb.ToUpper() | Select-Object -First 1
@@ -118,20 +155,24 @@ function Show-WipeConfirmation {
 
 Write-Host 'Collecting device identity...' -ForegroundColor Cyan
 if ($DryRun) {
-    $deviceName = 'LAPTOP-DEMO-01'
-    $entraId    = '8f3b6c2e-7a91-4d2f-9b1e-5c0a4d6e8f12'
-    $intuneId   = '1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d'
+    $deviceName  = 'LAPTOP-DEMO-01'
+    $entraId     = '8f3b6c2e-7a91-4d2f-9b1e-5c0a4d6e8f12'
+    $enrollmentId = '1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d'
+    $intuneId    = 'a8fa102a-1e88-4e71-8df0-37a09d570a72'
 } else {
-    $deviceName = $env:COMPUTERNAME
-    $entraId    = Get-EntraDeviceId
-    $intuneId   = Get-IntuneDeviceId
+    $deviceName   = $env:COMPUTERNAME
+    $entraId      = Get-EntraDeviceId
+    $enrollmentId = Get-MdmEnrollmentId
+    $intuneId     = Get-IntuneManagedDeviceId   # may be $null on devices without IME
 }
-Write-Host ("  Device      : {0}" -f $deviceName)
-Write-Host ("  EntraDevId  : {0}" -f $entraId)
-Write-Host ("  IntuneDevId : {0}" -f $intuneId)
+$intuneDisplay = if ($intuneId) { $intuneId } else { '(non disponibile localmente — risolto dal server)' }
+Write-Host ("  Device       : {0}" -f $deviceName)
+Write-Host ("  EntraDevId   : {0}" -f $entraId)
+Write-Host ("  IntuneDevId  : {0}" -f $intuneDisplay)
+Write-Host ("  EnrollmentId : {0}" -f $enrollmentId) -ForegroundColor DarkGray
 
 if (-not $Silent) {
-    $confirmed = Show-WipeConfirmation -DeviceName $deviceName -EntraDeviceId $entraId -IntuneDeviceId $intuneId
+    $confirmed = Show-WipeConfirmation -DeviceName $deviceName -EntraDeviceId $entraId -IntuneDeviceId $intuneDisplay
     if (-not $confirmed) {
         Write-Host 'Operazione annullata dall''utente.' -ForegroundColor Yellow
         return
@@ -149,7 +190,7 @@ Write-Host ("Using cert: {0} (thumb {1})" -f $cert.Subject, $cert.Thumbprint) -F
 $body = @{
     deviceName     = $deviceName
     entraDeviceId  = $entraId
-    intuneDeviceId = $intuneId
+    intuneDeviceId = $enrollmentId   # legacy field name; backend uses it only for audit, resolves real id via EntraDeviceId
 } | ConvertTo-Json -Compress
 
 $headers = @{
@@ -185,7 +226,8 @@ catch {
         apiUrl             = $ApiUrl
         deviceName         = $deviceName
         entraDeviceId      = $entraId
-        intuneDeviceId     = $intuneId
+        intuneDeviceId     = $enrollmentId
+        intuneManagedId    = $intuneId
         certSubject        = $cert.Subject
         certThumbprint     = $cert.Thumbprint
         clientMessage      = $_.Exception.Message
