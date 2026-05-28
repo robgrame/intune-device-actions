@@ -50,6 +50,15 @@ public static class AuditEvents
     public const string RebootFallbackIssued = "wipe.graph.reboot-fallback.issued";
     public const string RebootFallbackFailed = "wipe.graph.reboot-fallback.failed";
 
+    // Post-issue wipe action tracking (polled by WipeStatusPollerFunction every
+    // few minutes against Graph's managedDevices/{id}.deviceActionResults).
+    public const string ActionStateObserved   = "wipe.action.state-observed";   // every poll, even if unchanged (low-noise via LogLevel.Debug)
+    public const string ActionStateChanged    = "wipe.action.state-changed";    // emitted on transition
+    public const string ActionCompleted       = "wipe.action.completed";        // terminal: done | removedFromIntune
+    public const string ActionFailed          = "wipe.action.failed";           // terminal: failed | canceled | notSupported
+    public const string ActionPollTimeout     = "wipe.action.poll-timeout";     // gave up polling after PollMaxAgeHours
+    public const string ActionPollError       = "wipe.action.poll-error";       // Graph call failed (transient)
+
     // Shared property keys (use these consistently so KQL is uniform)
     public static class Prop
     {
@@ -66,5 +75,11 @@ public static class AuditEvents
         public const string OriginalCorrelationId = "originalCorrelationId";
         public const string ExceptionType    = "exceptionType";
         public const string ExceptionMessage = "exceptionMessage";
+        // Wipe action status tracking
+        public const string PreviousState    = "previousState";
+        public const string CurrentState     = "currentState";
+        public const string PollAttempts     = "pollAttempts";
+        public const string IssuedAt         = "issuedAt";
+        public const string LastChangedAt    = "lastChangedAt";
     }
 }

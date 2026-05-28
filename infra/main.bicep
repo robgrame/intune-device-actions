@@ -67,6 +67,10 @@ param ledgerContainerName string = 'wipe-ledger'
 
 @description('Table name used for long-term audit event persistence (dual-write alongside App Insights)')
 param auditTableName string = 'auditevents'
+@description('Name of the Azure Table holding per-correlationId wipe action status. Polled by WipeStatusPollerFunction.')
+param wipeStatusTableName string = 'wipestatus'
+@description('NCRONTAB expression for the wipe-action status poller. Default: every 5 minutes.')
+param wipeStatusPollerCron string = '0 */5 * * * *'
 
 var suffix = uniqueString(resourceGroup().id)
 var stWebRaw = toLower('${namePrefix}stw${suffix}')
@@ -166,6 +170,10 @@ resource auditTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023
   parent: tableSvcProc
   name: auditTableName
 }
+resource wipeStatusTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' = {
+  parent: tableSvcProc
+  name: wipeStatusTableName
+}
 
 resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: uamiName
@@ -239,6 +247,7 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'App__Role', value: 'web' }
         // Selector: keep only the HTTP trigger on this app.
         { name: 'AzureWebJobs.WipeProcessor.Disabled', value: 'true' }
+        { name: 'AzureWebJobs.WipeStatusPoller.Disabled', value: 'true' }
         // Queue write (enqueue only — identity has Sender role on the queue
         // resource of the *worker's* storage account, not on this app's runtime
         // storage).
@@ -310,6 +319,8 @@ resource funcProc 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'App__Role', value: 'proc' }
         // Selector: keep only the queue trigger on this app.
         { name: 'AzureWebJobs.WipeRequest.Disabled', value: 'true' }
+        { name: 'WipeStatus__TableName', value: wipeStatusTableName }
+        { name: 'WipeStatusPoller__CronExpression', value: wipeStatusPollerCron }
         // Queue + ledger live in this app's own storage account.
         { name: 'Queue__StorageAccount', value: storageProc.name }
         { name: 'Queue__WipeQueueName', value: wipeQueueName }

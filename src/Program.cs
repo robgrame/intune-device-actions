@@ -150,6 +150,48 @@ var host = new HostBuilder()
             return new GraphServiceClient(cred, new[] { "https://graph.microsoft.com/.default" });
         });
         services.AddSingleton<GraphWipeService>();
+
+        // Wipe action status tracker (separate table from auditevents because
+        // it's upsert-per-correlationId, not append-only). Pollato dal
+        // WipeStatusPollerFunction (timer trigger ogni 5 min).
+        services.AddSingleton(sp =>
+        {
+            var cred = sp.GetRequiredService<TokenCredential>();
+            var account = cfg["Audit:StorageAccount"]
+                ?? cfg["Idempotency:StorageAccount"]
+                ?? cfg["AzureWebJobsStorage__accountName"];
+            var tableName = cfg["WipeStatus:TableName"] ?? "wipestatus";
+            try
+            {
+                TableClient client;
+                if (string.IsNullOrWhiteSpace(account))
+                {
+                    var conn = cfg["AzureWebJobsStorage"] ?? "UseDevelopmentStorage=true";
+                    client = new TableClient(conn, tableName);
+                }
+                else
+                {
+                    client = new TableClient(
+                        new Uri($"https://{account}.table.core.windows.net"),
+                        tableName,
+                        cred);
+                }
+                client.CreateIfNotExists();
+                return new WipeStatusTracker(client,
+                    sp.GetRequiredService<GraphWipeService>(),
+                    sp.GetRequiredService<AuditService>(),
+                    cfg,
+                    sp.GetRequiredService<ILogger<WipeStatusTracker>>());
+            }
+            catch
+            {
+                return new WipeStatusTracker(null,
+                    sp.GetRequiredService<GraphWipeService>(),
+                    sp.GetRequiredService<AuditService>(),
+                    cfg,
+                    sp.GetRequiredService<ILogger<WipeStatusTracker>>());
+            }
+        });
     })
     .Build();
 

@@ -136,6 +136,58 @@ public sealed class GraphWipeService
     }
 
     /// <summary>
+    /// Queries the current state of the wipe device action on a managed device.
+    /// Returns:
+    ///   - the (actionState, lastUpdatedDateTime) of the first <c>actionName == "wipe"</c>
+    ///     entry in <c>deviceActionResults</c>;
+    ///   - <c>("removedFromIntune", now)</c> if Graph returns 404 — strong signal that
+    ///     the wipe completed and the device de-enrolled or was removed;
+    ///   - <c>("notReported", null)</c> if the device exists but has no wipe action
+    ///     recorded yet (race condition between issue and first IME check-in).
+    /// Other Graph errors are thrown and should be retried by the caller.
+    /// </summary>
+    public async Task<(string State, DateTimeOffset? LastUpdated)> GetWipeActionStatusAsync(
+        string managedDeviceId, CancellationToken ct)
+    {
+        try
+        {
+            var dev = await _graph.DeviceManagement.ManagedDevices[managedDeviceId].GetAsync(rc =>
+            {
+                // Select only what we need to keep the response small. Note: Graph
+                // requires 'id' to be in $select for the entity to deserialize.
+                rc.QueryParameters.Select = new[] { "id", "deviceName", "deviceActionResults" };
+            }, cancellationToken: ct);
+
+            if (dev?.DeviceActionResults is null || dev.DeviceActionResults.Count == 0)
+            {
+                return ("notReported", null);
+            }
+
+            // Take the most-recently-updated wipe action. There may be multiple
+            // entries across the device's history (e.g. wipe → autopilot reset →
+            // wipe) so always prefer the freshest one.
+            var wipe = dev.DeviceActionResults
+                .Where(r => string.Equals(r.ActionName, "wipe", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(r => r.LastUpdatedDateTime ?? r.StartDateTime ?? DateTimeOffset.MinValue)
+                .FirstOrDefault();
+
+            if (wipe is null)
+            {
+                return ("notReported", null);
+            }
+
+            return (wipe.ActionState?.ToString().ToLowerInvariant() ?? "unknown", wipe.LastUpdatedDateTime ?? wipe.StartDateTime);
+        }
+        catch (ODataError oe) when (oe.ResponseStatusCode == 404)
+        {
+            // Device gone from Intune — best inferable signal that the wipe ran
+            // to completion (it factory-reset and either re-enrolled with a new
+            // managed-device id or stayed out of MDM).
+            return ("removedFromIntune", DateTimeOffset.UtcNow);
+        }
+    }
+
+    /// <summary>
     /// Classifies a Microsoft Graph exception as Transient (retry) or Permanent (do not retry).
     /// </summary>
     public static GraphErrorKind Classify(Exception ex)

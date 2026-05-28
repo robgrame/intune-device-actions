@@ -20,14 +20,16 @@ public sealed class WipeProcessorFunction
     private readonly GraphWipeService _graph;
     private readonly IdempotencyService _ledger;
     private readonly AuditService _audit;
+    private readonly WipeStatusTracker _statusTracker;
     private readonly ILogger<WipeProcessorFunction> _log;
 
     public WipeProcessorFunction(GraphWipeService graph, IdempotencyService ledger,
-        AuditService audit, ILogger<WipeProcessorFunction> log)
+        AuditService audit, WipeStatusTracker statusTracker, ILogger<WipeProcessorFunction> log)
     {
         _graph = graph;
         _ledger = ledger;
         _audit = audit;
+        _statusTracker = statusTracker;
         _log = log;
     }
 
@@ -214,6 +216,11 @@ public sealed class WipeProcessorFunction
                 [AuditEvents.Prop.ManagedDeviceId]  = managedId,
             });
             wipeSucceeded = true;
+
+            // Open the status tracking row so the poller can follow the
+            // device-side execution of the wipe action (best-effort).
+            try { await _statusTracker.InitializeAsync(msg, managedId, ct); }
+            catch (Exception ex) { _log.LogWarning(ex, "Status tracker initialization failed for {Corr}", msg.CorrelationId); }
         }
         catch (Exception ex) when (GraphWipeService.Classify(ex) == GraphWipeService.GraphErrorKind.Permanent)
         {
