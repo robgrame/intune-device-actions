@@ -118,7 +118,18 @@ try {
     $resp = Invoke-RestMethod -Method Post -Uri $ApiUrl -Body $body `
         -Headers $headers -Certificate $cert -TimeoutSec 60
     Write-Host 'Richiesta accettata:' -ForegroundColor Green
-    $resp | Format-List
+    # NOTE: NON usare `$resp | Format-List` qui — i directive di formattazione
+    # (FormatStartData/GroupStartData/...) finiscono nello stream success e
+    # durante `Start-Transcript` vengono serializzati come nomi di tipo,
+    # mascherando i valori. Inoltre Invoke-WipeFromTask.ps1 fa regex match su
+    # "correlationId : <guid>" nello stdout: Format-List dentro trascrizione
+    # non produce quella riga in modo affidabile. Stampo esplicitamente.
+    $corrOut   = if ($resp.PSObject.Properties.Name -contains 'correlationId') { [string]$resp.correlationId } else { '' }
+    $statusOut = if ($resp.PSObject.Properties.Name -contains 'status')        { [string]$resp.status }        else { '' }
+    $msgOut    = if ($resp.PSObject.Properties.Name -contains 'message')       { [string]$resp.message }       else { '' }
+    Write-Host ("  status         : {0}" -f $statusOut)
+    Write-Host ("  correlationId  : {0}" -f $corrOut)
+    if ($msgOut) { Write-Host ("  message        : {0}" -f $msgOut) }
     if (-not $Silent) {
         Add-Type -AssemblyName System.Windows.Forms | Out-Null
         [System.Windows.Forms.MessageBox]::Show(
