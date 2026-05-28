@@ -39,7 +39,7 @@
       "value": 300
     },
     "allowedGroupId": {
-      "value": "REPLACE_WITH_ENTRA_GROUP_OBJECT_ID"
+      "value": "5ac79766-3c7b-4d26-9e4e-932516f601ca"
     },
     "keepEnrollmentData": {
       "value": false
