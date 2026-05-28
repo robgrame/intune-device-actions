@@ -14,13 +14,13 @@
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
           -ApiUrl "https://func.example.net/api/wipe" `
           -FunctionKey "abcd...==" `
-          -CertificateSubjectLike "*Intune MDM Device CA*"
+          -CertificateSubjectLike "*MSLABS-SUBCA01*"
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)] [string] $ApiUrl,
     [Parameter(Mandatory = $true)] [string] $FunctionKey,
-    [Parameter(Mandatory = $false)] [string] $CertificateSubjectLike = '*Microsoft Intune MDM Device CA*',
+    [Parameter(Mandatory = $false)] [string] $CertificateSubjectLike = '*MSLABS-SUBCA01*',
     [Parameter(Mandatory = $false)] [string] $CertificateThumbprint,
     [Parameter(Mandatory = $false)] [string] $ShortcutName = 'Reset aziendale del dispositivo'
 )

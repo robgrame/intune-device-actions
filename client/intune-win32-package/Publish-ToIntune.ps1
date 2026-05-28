@@ -32,7 +32,7 @@ param(
     [Parameter(Mandatory = $false)] [string] $AssignToGroupId,
     [Parameter(Mandatory = $false)] [string] $Publisher = 'Contoso IT',
     [Parameter(Mandatory = $false)] [string] $DisplayName = 'Intune Wipe Self-Service Client',
-    [Parameter(Mandatory = $false)] [string] $CertificateSubjectLike = '*Microsoft Intune MDM Device CA*',
+    [Parameter(Mandatory = $false)] [string] $CertificateSubjectLike = '*MSLABS-SUBCA01*',
     # Well-known Microsoft Intune PowerShell first-party app (has Intune scopes
     # pre-consented in most tenants). Override with your own app reg if you have
     # one bound to DeviceManagementApps.ReadWrite.All.
