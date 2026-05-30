@@ -14,6 +14,10 @@ namespace IntuneWipeApi.Services;
 /// </summary>
 public static class AuditEvents
 {
+    // Inbound request audit (emitted BEFORE validation so denied attempts are
+    // also visible — gives full coverage of every wipe attempt that reached us)
+    public const string RequestReceived = "wipe.request.received";
+
     // Acceptance
     public const string RequestAccepted = "wipe.request.accepted";
 
@@ -75,11 +79,27 @@ public static class AuditEvents
         public const string OriginalCorrelationId = "originalCorrelationId";
         public const string ExceptionType    = "exceptionType";
         public const string ExceptionMessage = "exceptionMessage";
+        // Inbound request envelope
+        public const string CallerIp          = "callerIp";
+        public const string UserAgent         = "userAgent";
+        public const string RequestSize       = "requestSize";
+        public const string ContentType       = "contentType";
+        // Wipe execution context
+        public const string KeepEnrollmentData = "keepEnrollmentData";
+        public const string KeepUserData       = "keepUserData";
         // Wipe action status tracking
         public const string PreviousState    = "previousState";
         public const string CurrentState     = "currentState";
         public const string PollAttempts     = "pollAttempts";
         public const string IssuedAt         = "issuedAt";
         public const string LastChangedAt    = "lastChangedAt";
+        // Enriched device snapshot from Graph (during polling)
+        public const string GraphActionStartedAt    = "graphActionStartedAt";
+        public const string GraphActionLastUpdated  = "graphActionLastUpdated";
+        public const string DeviceLastSync          = "deviceLastSyncDateTime";
+        public const string DeviceComplianceState   = "deviceComplianceState";
+        public const string DeviceOsVersion         = "deviceOsVersion";
+        public const string DeviceOperatingSystem   = "deviceOperatingSystem";
+        public const string MinutesSinceLastSync    = "minutesSinceLastSync";
     }
 }

@@ -79,6 +79,38 @@ public sealed class WipeStatusTracker
     public int PollMaxAgeHours => _pollMaxAgeHours;
 
     /// <summary>
+    /// Read the current status row for a correlationId. Returns null if no
+    /// tracking row exists (either the wipe was never issued, the row was
+    /// purged, or the storage backend is disabled).
+    /// </summary>
+    public async Task<WipeStatusSnapshot?> GetStatusAsync(string correlationId, CancellationToken ct)
+    {
+        if (_table is null || string.IsNullOrWhiteSpace(correlationId)) return null;
+        try
+        {
+            var resp = await _table.GetEntityAsync<TableEntity>(SanitizeKey(correlationId), RowKeyStatus, cancellationToken: ct).ConfigureAwait(false);
+            var row = resp.Value;
+            return new WipeStatusSnapshot(
+                CorrelationId:    correlationId,
+                DeviceName:       row.GetString("DeviceName") ?? string.Empty,
+                EntraDeviceId:    row.GetString("EntraDeviceId") ?? string.Empty,
+                IntuneDeviceId:   row.GetString("IntuneDeviceId") ?? string.Empty,
+                ManagedDeviceId:  row.GetString("ManagedDeviceId") ?? string.Empty,
+                LastState:        row.GetString("LastState") ?? "unknown",
+                PreviousState:    row.GetString("PreviousState") ?? string.Empty,
+                Terminal:         row.GetBoolean("Terminal") ?? false,
+                IssuedAt:         row.GetDateTimeOffset("IssuedAt") ?? DateTimeOffset.MinValue,
+                LastPolledAt:     row.GetDateTimeOffset("LastPolledAt") ?? DateTimeOffset.MinValue,
+                LastChangedAt:    row.GetDateTimeOffset("LastChangedAt") ?? DateTimeOffset.MinValue,
+                PollAttempts:     row.GetInt32("PollAttempts") ?? 0);
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Creates the initial status row right after a wipe was successfully issued.
     /// Idempotent (uses upsert) — re-issuing for the same correlationId resets
     /// the tracking row without throwing.
@@ -164,11 +196,13 @@ public sealed class WipeStatusTracker
             return;
         }
 
-        string currentState;
-        DateTimeOffset? graphLastUpdated;
+        WipeStatusTracker.WipeActionSnapshotShim snap;
         try
         {
-            (currentState, graphLastUpdated) = await _graph.GetWipeActionStatusAsync(managedDeviceId, ct).ConfigureAwait(false);
+            var s = await _graph.GetWipeActionStatusAsync(managedDeviceId, ct).ConfigureAwait(false);
+            snap = new WipeStatusTracker.WipeActionSnapshotShim(
+                s.State, s.ActionStartedAt, s.ActionLastUpdated,
+                s.DeviceLastSync, s.ComplianceState, s.OsVersion, s.OperatingSystem);
         }
         catch (Exception ex)
         {
@@ -188,6 +222,8 @@ public sealed class WipeStatusTracker
             return;
         }
 
+        var currentState     = snap.State;
+        var graphLastUpdated = snap.ActionLastUpdated;
         var now = DateTimeOffset.UtcNow;
         var stateChanged = !string.Equals(previousState, currentState, StringComparison.OrdinalIgnoreCase);
         var isTerminal   = TerminalStates.Contains(currentState);
@@ -204,6 +240,11 @@ public sealed class WipeStatusTracker
         {
             row["GraphLastUpdated"] = graphLastUpdated.Value;
         }
+        if (snap.ActionStartedAt.HasValue)   row["GraphActionStartedAt"] = snap.ActionStartedAt.Value;
+        if (snap.DeviceLastSync.HasValue)    row["DeviceLastSync"]       = snap.DeviceLastSync.Value;
+        if (!string.IsNullOrEmpty(snap.ComplianceState)) row["ComplianceState"] = snap.ComplianceState;
+        if (!string.IsNullOrEmpty(snap.OsVersion))       row["OsVersion"]       = snap.OsVersion;
+        if (!string.IsNullOrEmpty(snap.OperatingSystem)) row["OperatingSystem"] = snap.OperatingSystem;
         row["Terminal"] = isTerminal;
 
         try
@@ -216,19 +257,42 @@ public sealed class WipeStatusTracker
             return;
         }
 
+        // Build the rich context that every action-tracking event will carry.
+        // Computed once, used by the heartbeat + transition + terminal events.
+        var ctxBase = new Dictionary<string, string>
+        {
+            [AuditEvents.Prop.CorrelationId]    = correlationId,
+            [AuditEvents.Prop.DeviceName]       = deviceName,
+            [AuditEvents.Prop.ManagedDeviceId]  = managedDeviceId,
+            [AuditEvents.Prop.PreviousState]    = previousState,
+            [AuditEvents.Prop.CurrentState]     = currentState,
+            [AuditEvents.Prop.PollAttempts]     = (attempts + 1).ToString(),
+            [AuditEvents.Prop.IssuedAt]         = issuedAt.ToString("o"),
+        };
+        if (graphLastUpdated.HasValue)
+            ctxBase[AuditEvents.Prop.GraphActionLastUpdated] = graphLastUpdated.Value.ToString("o");
+        if (snap.ActionStartedAt.HasValue)
+            ctxBase[AuditEvents.Prop.GraphActionStartedAt]   = snap.ActionStartedAt.Value.ToString("o");
+        if (snap.DeviceLastSync.HasValue)
+        {
+            ctxBase[AuditEvents.Prop.DeviceLastSync]      = snap.DeviceLastSync.Value.ToString("o");
+            ctxBase[AuditEvents.Prop.MinutesSinceLastSync] = ((int)(now - snap.DeviceLastSync.Value).TotalMinutes).ToString();
+        }
+        if (!string.IsNullOrEmpty(snap.ComplianceState)) ctxBase[AuditEvents.Prop.DeviceComplianceState] = snap.ComplianceState;
+        if (!string.IsNullOrEmpty(snap.OsVersion))       ctxBase[AuditEvents.Prop.DeviceOsVersion]       = snap.OsVersion;
+        if (!string.IsNullOrEmpty(snap.OperatingSystem)) ctxBase[AuditEvents.Prop.DeviceOperatingSystem] = snap.OperatingSystem;
+
+        // Heartbeat: emit on every poll so operators can confirm the poller
+        // actually ran for this correlationId, even when state is unchanged.
+        // Information level — sampling may drop in high-volume tenants but the
+        // table row in wipestatus always has the authoritative LastPolledAt.
+        _audit.TrackEvent(AuditEvents.ActionStateObserved, new Dictionary<string, string>(ctxBase),
+            Microsoft.Extensions.Logging.LogLevel.Information);
+
         // Audit transitions; on terminal also emit completed/failed.
         if (stateChanged)
         {
-            _audit.TrackEvent(AuditEvents.ActionStateChanged, new Dictionary<string, string>
-            {
-                [AuditEvents.Prop.CorrelationId]   = correlationId,
-                [AuditEvents.Prop.DeviceName]      = deviceName,
-                [AuditEvents.Prop.ManagedDeviceId] = managedDeviceId,
-                [AuditEvents.Prop.PreviousState]   = previousState,
-                [AuditEvents.Prop.CurrentState]    = currentState,
-                [AuditEvents.Prop.PollAttempts]    = (attempts + 1).ToString(),
-                [AuditEvents.Prop.IssuedAt]        = issuedAt.ToString("o"),
-            });
+            _audit.TrackEvent(AuditEvents.ActionStateChanged, new Dictionary<string, string>(ctxBase));
         }
 
         if (isTerminal)
@@ -237,18 +301,27 @@ public sealed class WipeStatusTracker
             var level = SuccessStates.Contains(currentState)
                 ? Microsoft.Extensions.Logging.LogLevel.Information
                 : Microsoft.Extensions.Logging.LogLevel.Warning;
-            _audit.TrackEvent(name, new Dictionary<string, string>
+            var ctxTerminal = new Dictionary<string, string>(ctxBase)
             {
-                [AuditEvents.Prop.CorrelationId]   = correlationId,
-                [AuditEvents.Prop.DeviceName]      = deviceName,
-                [AuditEvents.Prop.ManagedDeviceId] = managedDeviceId,
-                [AuditEvents.Prop.CurrentState]    = currentState,
-                [AuditEvents.Prop.IssuedAt]        = issuedAt.ToString("o"),
-                [AuditEvents.Prop.LastChangedAt]   = now.ToString("o"),
-                [AuditEvents.Prop.PollAttempts]    = (attempts + 1).ToString(),
-            }, level);
+                [AuditEvents.Prop.LastChangedAt] = now.ToString("o"),
+            };
+            _audit.TrackEvent(name, ctxTerminal, level);
         }
     }
+
+    /// <summary>
+    /// Internal shim so PollOneAsync can pass the Graph snapshot around without
+    /// taking a hard dependency on the GraphWipeService nested type at every
+    /// call site (also makes future test mocks easier).
+    /// </summary>
+    internal sealed record WipeActionSnapshotShim(
+        string State,
+        DateTimeOffset? ActionStartedAt,
+        DateTimeOffset? ActionLastUpdated,
+        DateTimeOffset? DeviceLastSync,
+        string? ComplianceState,
+        string? OsVersion,
+        string? OperatingSystem);
 
     private async Task MarkTerminalAsync(TableEntity row, string state, string previousState, CancellationToken ct)
     {

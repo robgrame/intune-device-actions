@@ -69,8 +69,8 @@ param ledgerContainerName string = 'wipe-ledger'
 param auditTableName string = 'auditevents'
 @description('Name of the Azure Table holding per-correlationId wipe action status. Polled by WipeStatusPollerFunction.')
 param wipeStatusTableName string = 'wipestatus'
-@description('NCRONTAB expression for the wipe-action status poller. Default: every 5 minutes.')
-param wipeStatusPollerCron string = '0 */5 * * * *'
+@description('NCRONTAB expression for the wipe-action status poller. Default: every 2 minutes (tight polling for prompt operator visibility on stuck wipes).')
+param wipeStatusPollerCron string = '0 */2 * * * *'
 
 var suffix = uniqueString(resourceGroup().id)
 var stWebRaw = toLower('${namePrefix}stw${suffix}')

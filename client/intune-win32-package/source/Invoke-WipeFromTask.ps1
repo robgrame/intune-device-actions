@@ -72,18 +72,38 @@ function Write-WipeEventLog {
 }
 
 function Send-UserNotification {
+    <#
+        Stub kept for source compatibility. We deliberately do NOT use
+        msg.exe (Terminal-Services WTSSendMessage): it is disabled on
+        Server SKUs, can pop opaque dialogs over full-screen apps, and
+        is unwanted by the operator. End-user feedback now comes from
+        the live progress dialog (Show-WipeProgressDialog) plus the
+        Application Event Log entries already written by callers.
+    #>
     param([string]$Title, [string]$Body)
-    # msg.exe sends a Terminal Services message to all interactive sessions.
-    # Works out-of-the-box from SYSTEM context on Windows 10/11 and shows a
-    # native popup even when Launch-Wipe.ps1 isn't running. Best-effort: we
-    # never want this to break the task itself.
-    # NOTE: msg.exe truncates messages > ~255 chars, so we keep it short.
+    Write-Host ("[notify-suppressed] {0}: {1}" -f $Title, $Body)
+}
+
+function Start-StatusPoller {
+    <#
+        Trigger the SYSTEM-context StatusPoller scheduled task with the
+        live correlationId so it can begin polling GET /wipe/status/{id}
+        for the operator-facing live progress UI. Best-effort: a failure
+        here must not bubble up — the wipe itself was already accepted.
+    #>
+    param([string]$CorrelationId)
+    if (-not $CorrelationId) { return }
     try {
-        $text = "{0}`r`n`r`n{1}" -f $Title, $Body
-        if ($text.Length -gt 250) { $text = $text.Substring(0, 247) + '...' }
-        & "$env:WINDIR\System32\msg.exe" '*' '/TIME:60' $text 2>$null | Out-Null
+        $taskFull = '\IntuneWipeClient\StatusPoller'
+        & schtasks.exe /End /TN $taskFull 2>$null | Out-Null
+        & schtasks.exe /Run /TN $taskFull 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Triggered StatusPoller scheduled task."
+            return
+        }
+        Write-Host ("WARN: schtasks /Run StatusPoller failed with exit {0}" -f $LASTEXITCODE)
     } catch {
-        Write-Host ("WARN: msg.exe notification failed: {0}" -f $_.Exception.Message)
+        Write-Host ("WARN: Start-StatusPoller failed: {0}" -f $_.Exception.Message)
     }
 }
 
@@ -173,8 +193,7 @@ try {
 
     Write-Result -Status 'ok' -Message 'Wipe request accepted by the API.' -CorrelationId $corr
     Write-WipeEventLog -EntryType Information -EventId 1001 -Message ("Wipe request accepted by the API. CorrelationId={0}, Device={1}" -f $corr, $env:COMPUTERNAME)
-    Send-UserNotification -Title 'Reset aziendale: richiesta inviata' `
-        -Body ("La richiesta e' stata accettata. Il dispositivo verra' resettato a breve. CorrelationId: {0}" -f $corr)
+    Start-StatusPoller -CorrelationId $corr
     exit 0
 }
 catch {

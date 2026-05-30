@@ -65,8 +65,10 @@ try {
     $payload = @(
         'Invoke-DeviceWipe.ps1',
         'Invoke-WipeFromTask.ps1',
+        'Watch-WipeStatus.ps1',
         'WipeConfirmationDialog.ps1',
         'WipeResultDialogs.ps1',
+        'Show-WipeProgressDialog.ps1',
         'Launch-Wipe.ps1',
         'DeviceIdentity.psm1',
         'version.txt'
@@ -213,9 +215,74 @@ try {
     $task.SetSecurityDescriptor($sddl, 0)
     Write-Host "  Registered scheduled task: $TaskFull (SYSTEM, on-demand, executable by Users)"
 
-    # --- Data dir for last-result.json + per-user logs --------------------
+    # --- Scheduled task: StatusPoller (SYSTEM, on-demand, executable by Users) ---
+    # Runs Watch-WipeStatus.ps1, which polls GET /api/wipe/status/{corrId}
+    # using the device cert (mTLS) every 60s for up to 30 min and writes
+    # %ProgramData%\IntuneWipeClient\status\<corrId>.json. The user-side
+    # Launch-Wipe.ps1 launches Show-WipeProgressDialog which tails that
+    # file — no msg.exe / Terminal-Services popups involved.
+    #
+    # /Run does not pass arguments, so Watch-WipeStatus.ps1 falls back to
+    # reading the correlationId from %ProgramData%\IntuneWipeClient\last-result.json
+    # (freshly written by Invoke-WipeFromTask.ps1 right before triggering us).
+    $PollerName = 'StatusPoller'
+    $PollerFull = ($TaskFolder.TrimEnd('\')) + '\' + $PollerName
+    $pollerXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Polls the wipe status endpoint for an in-flight self-service wipe. Triggered on-demand by Invoke-WipeFromTask.ps1 right after the API accepts the request.</Description>
+    <Author>MSLABS IT</Author>
+    <URI>$PollerFull</URI>
+  </RegistrationInfo>
+  <Triggers />
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT35M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$InstallDir\Watch-WipeStatus.ps1"</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
+    $tmpPollerXml = Join-Path $env:TEMP ("IntuneWipePoller_{0}.xml" -f ([guid]::NewGuid()))
+    [IO.File]::WriteAllText($tmpPollerXml, $pollerXml, [Text.UnicodeEncoding]::new($false,$true))
+    & schtasks.exe /Create /TN $PollerFull /XML $tmpPollerXml /F | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "schtasks /Create (StatusPoller) failed (exit $LASTEXITCODE)" }
+    Remove-Item -LiteralPath $tmpPollerXml -Force -ErrorAction SilentlyContinue
+
+    $svc2  = New-Object -ComObject 'Schedule.Service'
+    $svc2.Connect()
+    $folder2 = $svc2.GetFolder($TaskFolder.TrimEnd('\'))
+    $task2   = $folder2.GetTask($PollerName)
+    $task2.SetSecurityDescriptor($sddl, 0)
+    Write-Host "  Registered scheduled task: $PollerFull (SYSTEM, on-demand, executable by Users)"
+
+    # --- Data dir for last-result.json + per-user logs + status snapshots ---
     $DataDir = Join-Path $env:ProgramData 'IntuneWipeClient'
     New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $DataDir 'status') | Out-Null
 
     # --- Event Log source (pre-create so we don't pay first-write latency) ---
     try {

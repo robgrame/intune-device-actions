@@ -56,6 +56,22 @@ public sealed class WipeRequestFunction
         var correlationId = Guid.NewGuid().ToString("N");
         using var scope = _log.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId });
 
+        // 0.1) Inbound audit — emitted BEFORE any validation so even rejected/
+        // malformed attempts leave a forensic trace. Captures the request
+        // envelope (caller IP, UA, content type, size) without touching the body.
+        var callerIp = req.HttpContext.Connection.RemoteIpAddress?.ToString()
+            ?? req.Headers["X-Forwarded-For"].ToString();
+        var userAgent = req.Headers.UserAgent.ToString();
+        _audit.TrackEvent(AuditEvents.RequestReceived, new Dictionary<string, string>
+        {
+            [AuditEvents.Prop.CorrelationId] = correlationId,
+            [AuditEvents.Prop.CallerIp]      = callerIp ?? "",
+            [AuditEvents.Prop.UserAgent]     = userAgent ?? "",
+            [AuditEvents.Prop.ContentType]   = req.ContentType ?? "",
+            [AuditEvents.Prop.RequestSize]   = (req.ContentLength ?? -1).ToString(),
+            [AuditEvents.Prop.CertThumbprint] = req.HttpContext.Connection.ClientCertificate?.Thumbprint ?? "",
+        });
+
         // 1) Replay protection (timestamp + nonce)
         var ts = req.Headers["X-Request-Timestamp"].ToString();
         var nonce = req.Headers["X-Request-Nonce"].ToString();

@@ -34,6 +34,8 @@ public sealed class GraphWipeService
 
     public int SyncFallbackDelaySeconds   => _syncFallbackDelaySeconds;
     public int RebootFallbackDelaySeconds => _rebootFallbackDelaySeconds;
+    public bool KeepEnrollmentData         => _keepEnrollment;
+    public bool KeepUserData               => _keepUserData;
 
     /// <summary>
     /// Resolves the directory object id of an Entra device by its deviceId (azureADDeviceId).
@@ -136,54 +138,78 @@ public sealed class GraphWipeService
     }
 
     /// <summary>
-    /// Queries the current state of the wipe device action on a managed device.
-    /// Returns:
-    ///   - the (actionState, lastUpdatedDateTime) of the first <c>actionName == "wipe"</c>
-    ///     entry in <c>deviceActionResults</c>;
-    ///   - <c>("removedFromIntune", now)</c> if Graph returns 404 — strong signal that
-    ///     the wipe completed and the device de-enrolled or was removed;
-    ///   - <c>("notReported", null)</c> if the device exists but has no wipe action
-    ///     recorded yet (race condition between issue and first IME check-in).
-    /// Other Graph errors are thrown and should be retried by the caller.
+    /// Rich snapshot of the wipe action state plus device-health context. Helps
+    /// answer "why didn't the wipe execute?" — common causes are device offline
+    /// (high MinutesSinceLastSync), out-of-compliance, or removed from Intune.
     /// </summary>
-    public async Task<(string State, DateTimeOffset? LastUpdated)> GetWipeActionStatusAsync(
-        string managedDeviceId, CancellationToken ct)
+    public sealed record WipeActionSnapshot(
+        string State,
+        DateTimeOffset? ActionStartedAt,
+        DateTimeOffset? ActionLastUpdated,
+        DateTimeOffset? DeviceLastSync,
+        string? ComplianceState,
+        string? OsVersion,
+        string? OperatingSystem,
+        string? DeviceName);
+
+    /// <summary>
+    /// Queries the current state of the wipe device action plus surrounding
+    /// device telemetry (last sync, compliance, OS) so operators can diagnose
+    /// why a wipe is stuck.
+    /// </summary>
+    public async Task<WipeActionSnapshot> GetWipeActionStatusAsync(string managedDeviceId, CancellationToken ct)
     {
         try
         {
             var dev = await _graph.DeviceManagement.ManagedDevices[managedDeviceId].GetAsync(rc =>
             {
-                // Select only what we need to keep the response small. Note: Graph
-                // requires 'id' to be in $select for the entity to deserialize.
-                rc.QueryParameters.Select = new[] { "id", "deviceName", "deviceActionResults" };
+                rc.QueryParameters.Select = new[]
+                {
+                    "id", "deviceName", "operatingSystem", "osVersion",
+                    "complianceState", "lastSyncDateTime", "deviceActionResults"
+                };
             }, cancellationToken: ct);
 
-            if (dev?.DeviceActionResults is null || dev.DeviceActionResults.Count == 0)
+            DateTimeOffset? actionStart   = null;
+            DateTimeOffset? actionUpdated = null;
+            var state = "notReported";
+
+            if (dev?.DeviceActionResults is { Count: > 0 } results)
             {
-                return ("notReported", null);
+                var wipe = results
+                    .Where(r => string.Equals(r.ActionName, "wipe", StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(r => r.LastUpdatedDateTime ?? r.StartDateTime ?? DateTimeOffset.MinValue)
+                    .FirstOrDefault();
+
+                if (wipe is not null)
+                {
+                    state         = wipe.ActionState?.ToString().ToLowerInvariant() ?? "unknown";
+                    actionStart   = wipe.StartDateTime;
+                    actionUpdated = wipe.LastUpdatedDateTime ?? wipe.StartDateTime;
+                }
             }
 
-            // Take the most-recently-updated wipe action. There may be multiple
-            // entries across the device's history (e.g. wipe → autopilot reset →
-            // wipe) so always prefer the freshest one.
-            var wipe = dev.DeviceActionResults
-                .Where(r => string.Equals(r.ActionName, "wipe", StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(r => r.LastUpdatedDateTime ?? r.StartDateTime ?? DateTimeOffset.MinValue)
-                .FirstOrDefault();
-
-            if (wipe is null)
-            {
-                return ("notReported", null);
-            }
-
-            return (wipe.ActionState?.ToString().ToLowerInvariant() ?? "unknown", wipe.LastUpdatedDateTime ?? wipe.StartDateTime);
+            return new WipeActionSnapshot(
+                State:             state,
+                ActionStartedAt:   actionStart,
+                ActionLastUpdated: actionUpdated,
+                DeviceLastSync:    dev?.LastSyncDateTime,
+                ComplianceState:   dev?.ComplianceState?.ToString(),
+                OsVersion:         dev?.OsVersion,
+                OperatingSystem:   dev?.OperatingSystem,
+                DeviceName:        dev?.DeviceName);
         }
         catch (ODataError oe) when (oe.ResponseStatusCode == 404)
         {
-            // Device gone from Intune — best inferable signal that the wipe ran
-            // to completion (it factory-reset and either re-enrolled with a new
-            // managed-device id or stayed out of MDM).
-            return ("removedFromIntune", DateTimeOffset.UtcNow);
+            return new WipeActionSnapshot(
+                State: "removedFromIntune",
+                ActionStartedAt: null,
+                ActionLastUpdated: DateTimeOffset.UtcNow,
+                DeviceLastSync: null,
+                ComplianceState: null,
+                OsVersion: null,
+                OperatingSystem: null,
+                DeviceName: null);
         }
     }
 

@@ -25,6 +25,7 @@ $ProgramFiles64 = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:Progr
 $InstallDir = Join-Path $ProgramFiles64 'IntuneWipeClient'
 $DialogPath = Join-Path $InstallDir       'WipeConfirmationDialog.ps1'
 $ResultUiPath = Join-Path $InstallDir     'WipeResultDialogs.ps1'
+$ProgressUiPath = Join-Path $InstallDir   'Show-WipeProgressDialog.ps1'
 $DataDir    = Join-Path $env:ProgramData  'IntuneWipeClient'
 $ResultPath = Join-Path $DataDir          'last-result.json'
 $TaskFull   = '\IntuneWipeClient\InvokeWipe'
@@ -54,11 +55,14 @@ try {
         throw "Result dialog script not found at '$ResultUiPath'. Reinstall the client."
     }
 
-    # Load confirmation dialog builder (defines Show-WipeConfirmation) and
+    # Load confirmation dialog builder (defines Show-WipeConfirmation),
     # the rich result dialogs (Show-WipeSuccessDialog, Show-WipeErrorDialog,
-    # Show-WipeUnknownDialog).
+    # Show-WipeUnknownDialog) and the live status progress dialog
+    # (Show-WipeProgressDialog) used on the success path to tail the
+    # SYSTEM-context StatusPoller's status file.
     . $DialogPath
     . $ResultUiPath
+    if (Test-Path $ProgressUiPath) { . $ProgressUiPath }
 
     $deviceName = $env:COMPUTERNAME
     $entraId    = Get-EntraDeviceIdSafe
@@ -99,7 +103,18 @@ try {
 
     if ($result -and $result.status -eq 'ok') {
         $corr = if ($result.correlationId) { $result.correlationId } else { '' }
-        Show-WipeSuccessDialog -CorrelationId $corr -DeviceName $deviceName
+        # New UX (replaces the static success popup): live progress dialog
+        # that tails %ProgramData%\IntuneWipeClient\status\<corr>.json
+        # populated by the SYSTEM-context StatusPoller scheduled task. The
+        # user gets the CorrelationId AND continuous feedback on the wipe
+        # action state observed by Intune. We fall back to the static
+        # success dialog if the progress UI script is missing (older
+        # install).
+        if (Get-Command Show-WipeProgressDialog -ErrorAction SilentlyContinue) {
+            Show-WipeProgressDialog -CorrelationId $corr -DeviceName $deviceName
+        } else {
+            Show-WipeSuccessDialog -CorrelationId $corr -DeviceName $deviceName
+        }
         exit 0
     }
     elseif ($result -and $result.status -eq 'error') {

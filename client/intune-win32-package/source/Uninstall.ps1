@@ -22,7 +22,8 @@ Start-Transcript -Path $LogFile -Force | Out-Null
 
 try {
     # --- Scheduled task -----------------------------------------------------
-    & schtasks.exe /Delete /TN '\IntuneWipeClient\InvokeWipe' /F 2>$null | Out-Null
+    & schtasks.exe /Delete /TN '\IntuneWipeClient\InvokeWipe'   /F 2>$null | Out-Null
+    & schtasks.exe /Delete /TN '\IntuneWipeClient\StatusPoller' /F 2>$null | Out-Null
     # Also remove the (now-empty) folder.
     try {
         $svc = New-Object -ComObject 'Schedule.Service'; $svc.Connect()

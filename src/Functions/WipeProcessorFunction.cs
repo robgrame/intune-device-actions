@@ -209,11 +209,13 @@ public sealed class WipeProcessorFunction
             await _ledger.MarkIssuedAsync(msg.IntuneDeviceId, msg.CorrelationId, ct);
             _audit.TrackEvent(AuditEvents.WipeIssued, new Dictionary<string, string>
             {
-                [AuditEvents.Prop.CorrelationId]    = msg.CorrelationId,
-                [AuditEvents.Prop.DeviceName]       = msg.DeviceName,
-                [AuditEvents.Prop.EntraDeviceId]    = msg.EntraDeviceId,
-                [AuditEvents.Prop.IntuneDeviceId]   = msg.IntuneDeviceId,
-                [AuditEvents.Prop.ManagedDeviceId]  = managedId,
+                [AuditEvents.Prop.CorrelationId]       = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]          = msg.DeviceName,
+                [AuditEvents.Prop.EntraDeviceId]       = msg.EntraDeviceId,
+                [AuditEvents.Prop.IntuneDeviceId]      = msg.IntuneDeviceId,
+                [AuditEvents.Prop.ManagedDeviceId]     = managedId,
+                [AuditEvents.Prop.KeepEnrollmentData]  = _graph.KeepEnrollmentData.ToString(),
+                [AuditEvents.Prop.KeepUserData]        = _graph.KeepUserData.ToString(),
             });
             wipeSucceeded = true;
 
