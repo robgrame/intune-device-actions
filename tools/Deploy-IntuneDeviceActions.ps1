@@ -45,6 +45,11 @@
 .PARAMETER SkipDeploy
     Skip the function-zip deploy step.
 
+.PARAMETER SkipGraphConsent
+    Skip the automatic Microsoft Graph app-role assignment step.
+    Requires the caller to be Global Admin / Privileged Role Admin /
+    Cloud Application Admin in the tenant.
+
 .PARAMETER NoSmokeTest
     Skip the final HTTP smoke test.
 
@@ -69,6 +74,7 @@ param(
     [switch]$SkipPublish,
     [switch]$SkipInfra,
     [switch]$SkipDeploy,
+    [switch]$SkipGraphConsent,
     [switch]$NoSmokeTest
 )
 
@@ -345,6 +351,20 @@ function Invoke-SmokeTest {
     }
 }
 
+# -- Graph admin consent ---------------------------------------------------
+function Invoke-GraphConsent {
+    Write-Step "Granting Microsoft Graph app roles to UAMIs"
+    $script = Join-Path $PSScriptRoot 'Grant-GraphPermissions.ps1'
+    if (-not (Test-Path $script)) {
+        Write-Warn2 "Grant-GraphPermissions.ps1 not found; skipping."
+        return
+    }
+    & $script -ResourceGroup $ResourceGroup -NamePrefix $NamePrefix
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn2 "Graph consent step reported failures (exit $LASTEXITCODE). Review output above."
+    }
+}
+
 # -- Post-deploy reminders -------------------------------------------------
 function Show-PostDeployNotes {
     $appcfg = & az appconfig list -g $ResourceGroup `
@@ -353,15 +373,9 @@ function Show-PostDeployNotes {
     Write-Host ''
     Write-Host '============ Manual post-deploy actions ============' -ForegroundColor Magenta
     Write-Host ''
-    Write-Host '1) Grant Microsoft Graph admin consent to the User-Assigned MIs:' -ForegroundColor White
-    Write-Host '     - uamiWipe (privileged):' -ForegroundColor Gray
-    Write-Host '         DeviceManagementManagedDevices.PrivilegedOperations.All'
-    Write-Host '         DeviceManagementManagedDevices.Read.All'
-    Write-Host '         Device.Read.All'
-    Write-Host '         GroupMember.Read.All'
-    Write-Host '     - uami (status poller):' -ForegroundColor Gray
-    Write-Host '         DeviceManagementManagedDevices.Read.All'
-    Write-Host '   Use Entra portal -> Enterprise Applications -> search MI name -> Permissions -> Grant admin consent.'
+    Write-Host '1) Microsoft Graph app roles for the UAMIs:' -ForegroundColor White
+    Write-Host '     Handled automatically by Grant-GraphPermissions.ps1 unless -SkipGraphConsent was used.' -ForegroundColor Gray
+    Write-Host '     If skipped, run:  .\tools\Grant-GraphPermissions.ps1 -ResourceGroup ' $ResourceGroup -ForegroundColor Gray
     Write-Host ''
     if ($appcfg) {
         Write-Host "2) (optional) Seed App Configuration ($appcfg) overrides:" -ForegroundColor White
@@ -401,6 +415,11 @@ try {
     Invoke-Publish
     Invoke-InfraDeploy
     Invoke-ZipDeploy
+    if ($SkipGraphConsent) {
+        Write-Warn2 'Skipping Graph consent (-SkipGraphConsent).'
+    } else {
+        Invoke-GraphConsent
+    }
     Invoke-SmokeTest
     Show-PostDeployNotes
 
