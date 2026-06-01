@@ -89,6 +89,9 @@ param idempotencyAllowForceRearm bool = true
 @description('If true, the /api/admin/wipe-ledger/* endpoints are reachable (function key still required). Default false in prod.')
 param idempotencyAdminApiEnabled bool = true
 
+@description('If true, provisions an Azure Automation Account + PowerShell 7.2 runbook (Invoke-DeviceWipe) as an alternative wipe executor. Demo of the plug-in model: same input envelope, different runtime.')
+param enableRunbookVariant bool = true
+
 var suffix = uniqueString(resourceGroup().id)
 var stWebRaw = toLower('${namePrefix}stw${suffix}')
 var stWebName = length(stWebRaw) > 24 ? substring(stWebRaw, 0, 24) : stWebRaw
@@ -660,6 +663,85 @@ resource raWipeTableOnProc 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   properties: { roleDefinitionId: tableDataContributor, principalId: uamiWipe.properties.principalId, principalType: 'ServicePrincipal' }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Optional: Azure Automation Account + PowerShell 7.2 runbook variant.
+// Demonstrates the plug-in model: the same "wipe" capability can be executed
+// by a PowerShell runtime alongside the dotnet-isolated WipeActionConsumerFunction.
+// The runbook content itself is uploaded post-deploy via:
+//   az automation runbook replace-content … --content @runbooks/Invoke-DeviceWipe.runbook.ps1
+//   az automation runbook publish …
+// ───────────────────────────────────────────────────────────────────────────
+var automationAccountName = toLower('${namePrefix}-aa-${suffix}')
+var runbookName           = 'Invoke-DeviceWipe'
+
+resource automationAccount 'Microsoft.Automation/automationAccounts@2023-11-01' = if (enableRunbookVariant) {
+  name: automationAccountName
+  location: location
+  identity: { type: 'SystemAssigned' }
+  properties: {
+    sku: { name: 'Basic' }
+    publicNetworkAccess: true
+    disableLocalAuth: false
+  }
+}
+
+resource aaVarLedgerStorage 'Microsoft.Automation/automationAccounts/variables@2023-11-01' = if (enableRunbookVariant) {
+  parent: automationAccount
+  name: 'LedgerStorageAccount'
+  properties: { isEncrypted: false, value: '"${storageProc.name}"' }
+}
+resource aaVarLedgerContainer 'Microsoft.Automation/automationAccounts/variables@2023-11-01' = if (enableRunbookVariant) {
+  parent: automationAccount
+  name: 'LedgerContainer'
+  properties: { isEncrypted: false, value: '"${ledgerContainerName}"' }
+}
+resource aaVarAuditStorage 'Microsoft.Automation/automationAccounts/variables@2023-11-01' = if (enableRunbookVariant) {
+  parent: automationAccount
+  name: 'AuditStorageAccount'
+  properties: { isEncrypted: false, value: '"${storageProc.name}"' }
+}
+resource aaVarAuditTable 'Microsoft.Automation/automationAccounts/variables@2023-11-01' = if (enableRunbookVariant) {
+  parent: automationAccount
+  name: 'AuditTableName'
+  properties: { isEncrypted: false, value: '"${auditTableName}"' }
+}
+resource aaVarKeepEnrollment 'Microsoft.Automation/automationAccounts/variables@2023-11-01' = if (enableRunbookVariant) {
+  parent: automationAccount
+  name: 'KeepEnrollmentData'
+  properties: { isEncrypted: false, value: keepEnrollmentData ? 'true' : 'false' }
+}
+resource aaVarKeepUser 'Microsoft.Automation/automationAccounts/variables@2023-11-01' = if (enableRunbookVariant) {
+  parent: automationAccount
+  name: 'KeepUserData'
+  properties: { isEncrypted: false, value: keepUserData ? 'true' : 'false' }
+}
+
+resource runbook 'Microsoft.Automation/automationAccounts/runbooks@2023-11-01' = if (enableRunbookVariant) {
+  parent: automationAccount
+  name: runbookName
+  location: location
+  properties: {
+    runbookType: 'PowerShell72'
+    logVerbose: true
+    logProgress: true
+    description: 'Alternative wipe executor (demo plug-in variant). Same envelope as WipeActionConsumerFunction.'
+  }
+}
+
+// Automation MI → Blob Data Contributor on the ledger container (idempotency).
+resource raAaLedger 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableRunbookVariant) {
+  name: guid(ledgerContainer.id, automationAccount.id, 'aa-blob-ledger')
+  scope: ledgerContainer
+  properties: { roleDefinitionId: blobDataContributor, principalId: automationAccount.identity.principalId, principalType: 'ServicePrincipal' }
+}
+
+// Automation MI → Table Data Contributor on storageProc (audit + wipestatus).
+resource raAaTable 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableRunbookVariant) {
+  name: guid(storageProc.id, automationAccount.id, 'aa-table')
+  scope: storageProc
+  properties: { roleDefinitionId: tableDataContributor, principalId: automationAccount.identity.principalId, principalType: 'ServicePrincipal' }
+}
+
 output webAppName string = funcWeb.name
 output webAppHostname string = funcWeb.properties.defaultHostName
 output procAppName string = funcProc.name
@@ -678,3 +760,6 @@ output storageWipeAccount string = storageWipe.name
 output wipeQueueName string = wipeQueueName
 output wipeActionQueueName string = wipeActionQueueName
 output ledgerContainerName string = ledgerContainerName
+output automationAccountName string = enableRunbookVariant ? automationAccount.name : ''
+output runbookName string = enableRunbookVariant ? runbookName : ''
+output automationPrincipalId string = enableRunbookVariant ? automationAccount.identity.principalId : ''

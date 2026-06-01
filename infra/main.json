@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "6948563429663767536"
+      "templateHash": "2734298523582377101"
     }
   },
   "parameters": {
@@ -222,6 +222,13 @@
       "metadata": {
         "description": "If true, the /api/admin/wipe-ledger/* endpoints are reachable (function key still required). Default false in prod."
       }
+    },
+    "enableRunbookVariant": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "If true, provisions an Azure Automation Account + PowerShell 7.2 runbook (Invoke-DeviceWipe) as an alternative wipe executor. Demo of the plug-in model: same input envelope, different runtime."
+      }
     }
   },
   "variables": {
@@ -247,7 +254,9 @@
     "queueDataContributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')]",
     "tableDataContributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')]",
     "queueDataMessageSender": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'c6a89b2d-59bc-44d0-9896-0f6e12d7b80a')]",
-    "blobDataContributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
+    "blobDataContributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
+    "automationAccountName": "[toLower(format('{0}-aa-{1}', parameters('namePrefix'), variables('suffix')))]",
+    "runbookName": "Invoke-DeviceWipe"
   },
   "resources": [
     {
@@ -1219,6 +1228,151 @@
         "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]",
         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName'))]"
       ]
+    },
+    {
+      "condition": "[parameters('enableRunbookVariant')]",
+      "type": "Microsoft.Automation/automationAccounts",
+      "apiVersion": "2023-11-01",
+      "name": "[variables('automationAccountName')]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "sku": {
+          "name": "Basic"
+        },
+        "publicNetworkAccess": true,
+        "disableLocalAuth": false
+      }
+    },
+    {
+      "condition": "[parameters('enableRunbookVariant')]",
+      "type": "Microsoft.Automation/automationAccounts/variables",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('automationAccountName'), 'LedgerStorageAccount')]",
+      "properties": {
+        "isEncrypted": false,
+        "value": "[format('\"{0}\"', variables('stProcName'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableRunbookVariant')]",
+      "type": "Microsoft.Automation/automationAccounts/variables",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('automationAccountName'), 'LedgerContainer')]",
+      "properties": {
+        "isEncrypted": false,
+        "value": "[format('\"{0}\"', parameters('ledgerContainerName'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableRunbookVariant')]",
+      "type": "Microsoft.Automation/automationAccounts/variables",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('automationAccountName'), 'AuditStorageAccount')]",
+      "properties": {
+        "isEncrypted": false,
+        "value": "[format('\"{0}\"', variables('stProcName'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableRunbookVariant')]",
+      "type": "Microsoft.Automation/automationAccounts/variables",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('automationAccountName'), 'AuditTableName')]",
+      "properties": {
+        "isEncrypted": false,
+        "value": "[format('\"{0}\"', parameters('auditTableName'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableRunbookVariant')]",
+      "type": "Microsoft.Automation/automationAccounts/variables",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('automationAccountName'), 'KeepEnrollmentData')]",
+      "properties": {
+        "isEncrypted": false,
+        "value": "[string(parameters('keepEnrollmentData'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableRunbookVariant')]",
+      "type": "Microsoft.Automation/automationAccounts/variables",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('automationAccountName'), 'KeepUserData')]",
+      "properties": {
+        "isEncrypted": false,
+        "value": "[string(parameters('keepUserData'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableRunbookVariant')]",
+      "type": "Microsoft.Automation/automationAccounts/runbooks",
+      "apiVersion": "2023-11-01",
+      "name": "[format('{0}/{1}', variables('automationAccountName'), variables('runbookName'))]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "runbookType": "PowerShell72",
+        "logVerbose": true,
+        "logProgress": true,
+        "description": "Alternative wipe executor (demo plug-in variant). Same envelope as WipeActionConsumerFunction."
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableRunbookVariant')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', parameters('ledgerContainerName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', parameters('ledgerContainerName')), resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName')), 'aa-blob-ledger')]",
+      "properties": {
+        "roleDefinitionId": "[variables('blobDataContributor')]",
+        "principalId": "[reference(resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName')), '2023-11-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', parameters('ledgerContainerName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableRunbookVariant')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('stProcName')), resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName')), 'aa-table')]",
+      "properties": {
+        "roleDefinitionId": "[variables('tableDataContributor')]",
+        "principalId": "[reference(resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName')), '2023-11-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]"
+      ]
     }
   ],
   "outputs": {
@@ -1293,6 +1447,18 @@
     "ledgerContainerName": {
       "type": "string",
       "value": "[parameters('ledgerContainerName')]"
+    },
+    "automationAccountName": {
+      "type": "string",
+      "value": "[if(parameters('enableRunbookVariant'), variables('automationAccountName'), '')]"
+    },
+    "runbookName": {
+      "type": "string",
+      "value": "[if(parameters('enableRunbookVariant'), variables('runbookName'), '')]"
+    },
+    "automationPrincipalId": {
+      "type": "string",
+      "value": "[if(parameters('enableRunbookVariant'), reference(resourceId('Microsoft.Automation/automationAccounts', variables('automationAccountName')), '2023-11-01', 'full').identity.principalId, '')]"
     }
   }
 }
