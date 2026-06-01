@@ -54,6 +54,10 @@ var host = new HostBuilder()
             var role = preliminary["App:Role"] ?? "web";
             var clientId = preliminary["Graph:ManagedIdentityClientId"]
                 ?? preliminary["AZURE_CLIENT_ID"];
+            // Cannot resolve an ILogger this early (host not built yet) so route
+            // troubleshooting breadcrumbs to stdout — they are captured by App
+            // Service log stream and Application Insights traces.
+            Console.WriteLine($"[startup] AppConfig source enabled: endpoint={endpoint} role={role} miClientId={(string.IsNullOrEmpty(clientId) ? "(none)" : clientId)}");
             var credOpts = new Azure.Identity.DefaultAzureCredentialOptions();
             if (!string.IsNullOrWhiteSpace(clientId)) credOpts.ManagedIdentityClientId = clientId;
             var cred = new Azure.Identity.DefaultAzureCredential(credOpts);

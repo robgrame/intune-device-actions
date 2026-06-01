@@ -41,6 +41,10 @@ public sealed class WipeForwardingRunner : IActionRunner
     public async Task RunAsync(ActionDispatchMessage envelope, CancellationToken ct)
     {
         var json = JsonSerializer.Serialize(envelope, JsonOptions);
+        _log.LogDebug("WipeForwardingRunner sending envelope: corr={Corr} bytes={Bytes} queue={Queue}",
+            envelope.CorrelationId, System.Text.Encoding.UTF8.GetByteCount(json), _queue.Client.Name);
+        if (_log.IsEnabled(LogLevel.Trace))
+            _log.LogTrace("WipeForwardingRunner payload (Trace only): {Payload}", json);
         await _queue.Client.SendMessageAsync(json, cancellationToken: ct);
 
         _audit.TrackEvent(AuditEvents.ActionForwarded, new Dictionary<string, string>

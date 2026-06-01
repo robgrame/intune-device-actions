@@ -145,6 +145,8 @@ public sealed class IdempotencyService
         string intuneDeviceId, string correlationId, bool forceRearm, CancellationToken ct)
     {
         var blob = _container.GetBlobClient(BlobName(intuneDeviceId));
+        _log.LogDebug("Idempotency ReserveAsync entry: device={Device} corr={Corr} forceRearm={Force} blob={Blob}",
+            intuneDeviceId, correlationId, forceRearm, blob.Name);
 
         // Attempt #1: optimistic create (no prior wipe for this device id).
         var fresh = new Entry
@@ -162,6 +164,7 @@ public sealed class IdempotencyService
                 new BinaryData(freshBytes),
                 new BlobUploadOptions { Conditions = new BlobRequestConditions { IfNoneMatch = ETag.All } },
                 cancellationToken: ct);
+            _log.LogDebug("Idempotency NEW reservation created device={Device} corr={Corr}", intuneDeviceId, correlationId);
             return new ReserveResult { State = State.New, Entry = fresh, MaxWipesPerDay = _maxWipesPerDay };
         }
         catch (RequestFailedException ex) when (ex.Status == 409 || ex.Status == 412)
@@ -202,6 +205,8 @@ public sealed class IdempotencyService
 
             // Existing.State == Issued or Failed. Decide if we can rearm.
             var (rearmDecision, ageHours) = await DecideRearmAsync(existing, forceRearm, ct);
+            _log.LogDebug("Idempotency rearm decision: device={Device} existingState={State} ageHours={Age} decision={Decision} forceRearm={Force}",
+                intuneDeviceId, existing.State, ageHours, rearmDecision, forceRearm);
             if (rearmDecision == RearmReason.None)
             {
                 // No rearm permitted — preserve existing state and surface to caller.
@@ -223,6 +228,8 @@ public sealed class IdempotencyService
 
             if (recent.Count >= _maxWipesPerDay && rearmDecision != RearmReason.Forced)
             {
+                _log.LogDebug("Idempotency RATE-LIMITED device={Device} recentCount={Recent} cap={Cap}",
+                    intuneDeviceId, recent.Count, _maxWipesPerDay);
                 return new ReserveResult
                 {
                     State = State.RateLimited,

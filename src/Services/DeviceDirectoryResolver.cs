@@ -64,8 +64,10 @@ public sealed class DeviceDirectoryResolver
         var cacheKey = "devdir:" + displayName;
         if (_cache.TryGetValue<string?>(cacheKey, out var cached))
         {
+            _log.LogDebug("Directory lookup cache HIT name='{Name}' resolved={Resolved}", displayName, cached ?? "(negative)");
             return cached; // may be null (cached negative)
         }
+        _log.LogDebug("Directory lookup cache MISS name='{Name}' — querying Graph", displayName);
 
         string? resolved = null;
         try
@@ -111,6 +113,9 @@ public sealed class DeviceDirectoryResolver
             AbsoluteExpirationRelativeToNow = resolved is null ? _negativeTtl : _positiveTtl,
             Size = 1
         });
+        _log.LogDebug("Directory lookup cached result name='{Name}' resolved={Resolved} ttlSeconds={Ttl}",
+            displayName, resolved ?? "(negative)",
+            (int)(resolved is null ? _negativeTtl.TotalSeconds : _positiveTtl.TotalSeconds));
         return resolved;
     }
 

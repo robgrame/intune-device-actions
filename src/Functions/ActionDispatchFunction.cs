@@ -58,8 +58,11 @@ public sealed class ActionDispatchFunction
         ActionDispatchMessage env;
         try
         {
-            env = JsonSerializer.Deserialize<ActionDispatchMessage>(messageJson, ActionDispatchEnqueuer.JsonOptions)
+            _log.LogDebug("ActionDispatch raw message received: length={Length}", messageJson?.Length ?? 0);
+            env = JsonSerializer.Deserialize<ActionDispatchMessage>(messageJson ?? "{}", ActionDispatchEnqueuer.JsonOptions)
                   ?? throw new InvalidOperationException("Empty dispatch envelope.");
+            _log.LogDebug("ActionDispatch envelope parsed: corr={Corr} actionType={ActionType} schema={Schema} device={Device}",
+                env.CorrelationId, env.ActionType, env.SchemaVersion, env.DeviceName);
         }
         catch (Exception ex)
         {
@@ -87,6 +90,8 @@ public sealed class ActionDispatchFunction
         });
 
         var runner = _registry.Resolve(env.ActionType);
+        _log.LogDebug("ActionDispatch runner resolution: type={ActionType} runner={Runner} knownTypes=[{Known}]",
+            env.ActionType, runner?.GetType().Name ?? "(none)", string.Join(",", _registry.KnownTypes));
         if (runner is null)
         {
             _audit.TrackEvent(AuditEvents.ActionDispatchNoRunner, new Dictionary<string, string>
@@ -102,8 +107,11 @@ public sealed class ActionDispatchFunction
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
+            _log.LogDebug("ActionDispatch invoking runner {Runner} for corr={Corr}", runner.GetType().Name, env.CorrelationId);
             await runner.RunAsync(env, ct);
             sw.Stop();
+            _log.LogDebug("ActionDispatch runner {Runner} completed in {Ms} ms corr={Corr}",
+                runner.GetType().Name, sw.ElapsedMilliseconds, env.CorrelationId);
             _audit.TrackEvent(AuditEvents.ActionDispatchCompleted, new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId] = env.CorrelationId,

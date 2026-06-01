@@ -59,6 +59,19 @@ public sealed class WipeRequestFunction
         var correlationId = Guid.NewGuid().ToString("N");
         using var scope = _log.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId });
 
+        _log.LogDebug("WipeRequest received: corr={Corr} method={Method} path={Path} contentLength={Len}",
+            correlationId, req.Method, req.Path.Value, req.ContentLength ?? -1);
+        if (_log.IsEnabled(LogLevel.Trace))
+        {
+            // VERBOSE: dump headers (excluding Authorization / Cookie). Only emitted
+            // when LogLevel for IntuneWipeApi.* is Trace — never enabled in prod.
+            var headerDump = string.Join(", ", req.Headers
+                .Where(h => !string.Equals(h.Key, "Authorization", StringComparison.OrdinalIgnoreCase)
+                         && !string.Equals(h.Key, "Cookie", StringComparison.OrdinalIgnoreCase))
+                .Select(h => $"{h.Key}={h.Value}"));
+            _log.LogTrace("WipeRequest headers: {Headers}", headerDump);
+        }
+
         // 0.1) Inbound audit — emitted BEFORE any validation so even rejected/
         // malformed attempts leave a forensic trace. Captures the request
         // envelope (caller IP, UA, content type, size) without touching the body.
@@ -79,6 +92,8 @@ public sealed class WipeRequestFunction
         var ts = req.Headers["X-Request-Timestamp"].ToString();
         var nonce = req.Headers["X-Request-Nonce"].ToString();
         var (replayOk, replayReason) = _replay.Validate(ts, nonce);
+        _log.LogDebug("Replay check: ok={Ok} reason={Reason} ts={Ts} nonceLen={NonceLen}",
+            replayOk, replayReason ?? "(none)", ts ?? "(empty)", nonce?.Length ?? 0);
         if (!replayOk)
         {
             _audit.TrackEvent(AuditEvents.DeniedReplay, new Dictionary<string, string>
@@ -92,6 +107,8 @@ public sealed class WipeRequestFunction
 
         // 2) Client certificate (chain validation + EKU + optional revocation)
         var (ok, cert, reason) = _cert.Validate(req.HttpContext);
+        _log.LogDebug("Cert validation: ok={Ok} thumb={Thumb} reason={Reason}",
+            ok, cert?.Thumbprint ?? "(none)", reason ?? "(none)");
         if (!ok)
         {
             _audit.TrackEvent(AuditEvents.DeniedCertValidation, new Dictionary<string, string>
@@ -208,6 +225,8 @@ public sealed class WipeRequestFunction
 
         var payload = JsonSerializer.Serialize(msg);
         await _queue.SendMessageAsync(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payload)), ct);
+        _log.LogDebug("Wipe request enqueued: corr={Corr} device={Device} entra={Entra} intune={Intune} forceRearm={Force} queue={Queue}",
+            correlationId, msg.DeviceName, msg.EntraDeviceId, msg.IntuneDeviceId, forceRearm, _queue.Name);
 
         var acceptProps = new Dictionary<string, string>
         {

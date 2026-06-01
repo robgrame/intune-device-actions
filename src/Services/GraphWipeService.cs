@@ -82,6 +82,7 @@ public sealed class GraphWipeService
         if (!Guid.TryParse(entraDeviceId, out _))
             throw new ArgumentException("entraDeviceId must be a GUID", nameof(entraDeviceId));
 
+        _log.LogDebug("Resolving managedDeviceId via Graph for entraDeviceId={Entra}", entraDeviceId);
         var page = await _graph.DeviceManagement.ManagedDevices.GetAsync(rc =>
         {
             rc.QueryParameters.Filter = $"azureADDeviceId eq '{entraDeviceId}'";
@@ -90,6 +91,7 @@ public sealed class GraphWipeService
         }, ct);
 
         var matches = page?.Value ?? new List<Microsoft.Graph.Models.ManagedDevice>();
+        _log.LogDebug("Graph managedDevices query returned {Count} match(es) for entra={Entra}", matches.Count, entraDeviceId);
 
         if (matches.Count == 0)
         {
@@ -111,6 +113,8 @@ public sealed class GraphWipeService
             KeepEnrollmentData = _keepEnrollment,
             KeepUserData = _keepUserData
         };
+        _log.LogDebug("Graph wipe request: managedDevice={Id} keepEnrollment={KE} keepUserData={KU}",
+            managedDeviceId, _keepEnrollment, _keepUserData);
         await _graph.DeviceManagement.ManagedDevices[managedDeviceId].Wipe.PostAsync(body, cancellationToken: ct);
         _log.LogInformation("Wipe issued for managedDevice {Id}", managedDeviceId);
     }

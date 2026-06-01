@@ -49,11 +49,25 @@ public sealed class WipeRunbookForwardingRunner : IActionRunner
     {
         if (string.IsNullOrWhiteSpace(_webhookUrl))
         {
+            _log.LogDebug("WipeRunbookForwardingRunner: webhook URL not configured for corr={Corr}", envelope.CorrelationId);
             // Permanent config error — surface as failure so envelope.FailOnError
             // can route to poison instead of looping.
             throw new InvalidOperationException(
                 "WipeRunbook:WebhookUrl is not configured on this app. Cannot forward to runbook.");
         }
+
+        // Redact the webhook URL — keep only host + path-head to aid troubleshooting
+        // without leaking the secret SAS token in the query string.
+        string webhookHost = "(unknown)", pathHead = "";
+        try
+        {
+            var u = new Uri(_webhookUrl);
+            webhookHost = u.Host;
+            pathHead = u.AbsolutePath.Length > 32 ? u.AbsolutePath[..32] + "…" : u.AbsolutePath;
+        }
+        catch { /* malformed URI — surface as failure below */ }
+        _log.LogDebug("WipeRunbookForwardingRunner POST: corr={Corr} host={Host} path={Path} actionType={ActionType}",
+            envelope.CorrelationId, webhookHost, pathHead, envelope.ActionType);
 
         // Automation webhooks accept ANY POST body and expose it on
         // $WebhookData.RequestBody as a JSON string. The runbook deserialises
@@ -61,6 +75,8 @@ public sealed class WipeRunbookForwardingRunner : IActionRunner
         // Function App path — no wire-format change.
         var resp = await Http.PostAsJsonAsync(_webhookUrl, envelope, ct);
         var status = (int)resp.StatusCode;
+        _log.LogDebug("WipeRunbookForwardingRunner response: corr={Corr} httpStatus={Status} reason={Reason} contentLen={Len}",
+            envelope.CorrelationId, status, resp.ReasonPhrase ?? "(none)", resp.Content.Headers.ContentLength ?? -1);
 
         if (!resp.IsSuccessStatusCode)
         {

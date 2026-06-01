@@ -61,12 +61,22 @@ public sealed class WipeProcessorFunction
         var refresher = AppConfigRefresherHolder.Instance;
         if (refresher is not null)
         {
-            try { await refresher.TryRefreshAsync(ct); }
+            try
+            {
+                var refreshed = await refresher.TryRefreshAsync(ct);
+                _log.LogDebug("AppConfig TryRefreshAsync returned {Refreshed}", refreshed);
+            }
             catch (Exception ex) { _log.LogWarning(ex, "AppConfig refresh failed; using cached value."); }
         }
-        return string.IsNullOrWhiteSpace(_cfg["Wipe:ActionType"])
+        else
+        {
+            _log.LogTrace("AppConfig refresher not captured — running with startup snapshot only.");
+        }
+        var actionType = string.IsNullOrWhiteSpace(_cfg["Wipe:ActionType"])
             ? DefaultWipeActionType
             : _cfg["Wipe:ActionType"]!.Trim();
+        _log.LogDebug("Resolved ActionType={ActionType} (raw cfg value='{Raw}')", actionType, _cfg["Wipe:ActionType"] ?? "(null)");
+        return actionType;
     }
 
     [Function("WipeProcessor")]
@@ -115,5 +125,7 @@ public sealed class WipeProcessorFunction
         };
 
         await _enqueuer.EnqueueAsync(envelope, ct);
+        _log.LogDebug("Dispatch envelope enqueued: corr={Corr} actionType={ActionType} device={Device}",
+            envelope.CorrelationId, envelope.ActionType, envelope.DeviceName);
     }
 }

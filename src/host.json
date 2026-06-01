@@ -6,6 +6,13 @@
         "isEnabled": true,
         "excludedTypes": "Request;Event;Exception"
       }
+    },
+    "logLevel": {
+      "default": "Information",
+      "Host.Aggregator": "Information",
+      "Host.Results": "Information",
+      "Function": "Information",
+      "IntuneWipeApi": "Information"
     }
   },
   "extensions": {
