@@ -1,11 +1,11 @@
 using System.Text.Json;
-using IntuneWipeApi.Actions;
-using IntuneWipeApi.Actions.Runners;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Actions;
+using IntuneDeviceActions.Actions.Runners;
+using IntuneDeviceActions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Functions;
+namespace IntuneDeviceActions.Functions;
 
 /// <summary>
 /// Dedicated per-capability consumer for the <c>wipe-action</c> Storage Queue.

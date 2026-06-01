@@ -1,8 +1,8 @@
-namespace IntuneWipeApi.Actions;
+namespace IntuneDeviceActions.Actions;
 
 /// <summary>
 /// Envelope queued on the <c>action-dispatch</c> storage queue. Decouples the
-/// producers (e.g. <c>WipeProcessorFunction</c> after validating an HTTP wipe
+/// producers (e.g. <c>RequestIntakeFunction</c> after validating an HTTP wipe
 /// request) from the concrete action implementation, which is selected at
 /// runtime by <see cref="Functions.ActionDispatchFunction"/> via
 /// <see cref="ActionRunnerRegistry"/>.
@@ -60,7 +60,7 @@ public sealed class ActionDispatchMessage
     /// <summary>
     /// Per-action-type opaque payload. Producers serialize the concrete shape;
     /// runners deserialize it via <see cref="System.Text.Json.JsonElement"/>.
-    /// For the wipe runner this is a <c>WipeQueueMessage</c>; future runners
+    /// For the wipe runner this is a <c>ActionRequestMessage</c>; future runners
     /// use whatever shape they need without polluting this envelope.
     /// </summary>
     public System.Text.Json.JsonElement Payload { get; set; }

@@ -1,4 +1,4 @@
-namespace IntuneWipeApi.Services;
+namespace IntuneDeviceActions.Services;
 
 /// <summary>
 /// Canonical event names emitted to Application Insights customEvents for the
@@ -42,7 +42,7 @@ public static class AuditEvents
 
     // Ledger lifecycle — re-arm decisions taken by IdempotencyService when a
     // previous wipe for the same device has already reached a terminal state
-    // on the Intune side (as observed by WipeStatusTracker). These are the
+    // on the Intune side (as observed by ActionStatusTracker). These are the
     // signals operators look at to validate that "test wipe ×N" or
     // "re-wipe after legitimate failure" flows behave as designed.
     public const string LedgerRearmedAfterSuccess = "wipe.ledger.rearmed.after-success";
@@ -73,7 +73,7 @@ public static class AuditEvents
     public const string RebootFallbackIssued = "wipe.graph.reboot-fallback.issued";
     public const string RebootFallbackFailed = "wipe.graph.reboot-fallback.failed";
 
-    // Post-issue wipe action tracking (polled by WipeStatusPollerFunction every
+    // Post-issue wipe action tracking (polled by ActionStatusPollerFunction every
     // few minutes against Graph's managedDevices/{id}.deviceActionResults).
     public const string ActionStateObserved   = "wipe.action.state-observed";   // every poll, even if unchanged (low-noise via LogLevel.Debug)
     public const string ActionStateChanged    = "wipe.action.state-changed";    // emitted on transition

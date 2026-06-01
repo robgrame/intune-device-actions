@@ -1,8 +1,8 @@
 using System.Text.Json;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Services;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Actions;
+namespace IntuneDeviceActions.Actions;
 
 /// <summary>
 /// Producer-side helper that enqueues an <see cref="ActionDispatchMessage"/>
@@ -14,7 +14,7 @@ namespace IntuneWipeApi.Actions;
 /// </remarks>
 public sealed class ActionDispatchEnqueuer
 {
-    private readonly ActionDispatchQueueClient _queue;
+    private readonly ActionDispatchSender _queue;
     private readonly AuditService _audit;
     private readonly ILogger<ActionDispatchEnqueuer> _log;
 
@@ -22,7 +22,7 @@ public sealed class ActionDispatchEnqueuer
     public static readonly JsonSerializerOptions JsonOptions = JsonOptionsInternal;
 
     public ActionDispatchEnqueuer(
-        ActionDispatchQueueClient queue,
+        ActionDispatchSender queue,
         AuditService audit,
         ILogger<ActionDispatchEnqueuer> log)
     {

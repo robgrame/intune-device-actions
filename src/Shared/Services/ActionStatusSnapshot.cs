@@ -1,9 +1,9 @@
-namespace IntuneWipeApi.Services;
+namespace IntuneDeviceActions.Services;
 
 /// <summary>
 /// Read-only DTO for the wipe-action status returned by the GET status endpoint.
 /// </summary>
-public sealed record WipeStatusSnapshot(
+public sealed record ActionStatusSnapshot(
     string CorrelationId,
     string DeviceName,
     string EntraDeviceId,

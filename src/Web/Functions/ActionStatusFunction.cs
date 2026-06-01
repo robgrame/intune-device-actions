@@ -1,20 +1,20 @@
 using System.Net;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Functions;
+namespace IntuneDeviceActions.Functions;
 
 /// <summary>
 /// Public HTTP endpoint that surfaces the outcome of a previously-issued wipe.
-/// Reads the row tracked by <see cref="WipeStatusTracker"/> in the
+/// Reads the row tracked by <see cref="ActionStatusTracker"/> in the
 /// <c>wipestatus</c> table and returns a small JSON projection.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Authentication mirrors <see cref="WipeRequestFunction"/>: mTLS is required
+/// Authentication mirrors <see cref="ActionRequestFunction"/>: mTLS is required
 /// and the caller's certificate-bound device id must match the EntraDeviceId
 /// of the row being read. This prevents one enrolled device from snooping the
 /// wipe outcome of another (basic IDOR defense).
@@ -30,15 +30,15 @@ namespace IntuneWipeApi.Functions;
 /// </list>
 /// </para>
 /// </remarks>
-public sealed class WipeStatusFunction
+public sealed class ActionStatusFunction
 {
     private readonly ClientCertValidator _cert;
-    private readonly WipeStatusTracker _tracker;
+    private readonly ActionStatusTracker _tracker;
     private readonly AuditService _audit;
-    private readonly ILogger<WipeStatusFunction> _log;
+    private readonly ILogger<ActionStatusFunction> _log;
 
-    public WipeStatusFunction(ClientCertValidator cert, WipeStatusTracker tracker,
-        AuditService audit, ILogger<WipeStatusFunction> log)
+    public ActionStatusFunction(ClientCertValidator cert, ActionStatusTracker tracker,
+        AuditService audit, ILogger<ActionStatusFunction> log)
     {
         _cert = cert;
         _tracker = tracker;
@@ -46,9 +46,9 @@ public sealed class WipeStatusFunction
         _log = log;
     }
 
-    [Function("WipeStatus")]
+    [Function("ActionStatus")]
     public async Task<IActionResult> Run(
-        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "wipe/status/{correlationId}")] HttpRequest req,
+        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "actions/wipe/status/{correlationId}")] HttpRequest req,
         string correlationId,
         CancellationToken ct)
     {

@@ -12,7 +12,7 @@
       "Host.Aggregator": "Information",
       "Host.Results": "Information",
       "Function": "Information",
-      "IntuneWipeApi": "Information"
+      "IntuneDeviceActions": "Information"
     }
   }
 }

@@ -1,8 +1,8 @@
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Functions;
+namespace IntuneDeviceActions.Functions;
 
 /// <summary>
 /// Timer-triggered poller that drives the wipe-action status tracking loop.
@@ -20,12 +20,12 @@ namespace IntuneWipeApi.Functions;
 /// poll passes across scaled-out workers.
 /// </para>
 /// </remarks>
-public sealed class WipeStatusPollerFunction
+public sealed class ActionStatusPollerFunction
 {
-    private readonly WipeStatusTracker _tracker;
-    private readonly ILogger<WipeStatusPollerFunction> _log;
+    private readonly ActionStatusTracker _tracker;
+    private readonly ILogger<ActionStatusPollerFunction> _log;
 
-    public WipeStatusPollerFunction(WipeStatusTracker tracker, ILogger<WipeStatusPollerFunction> log)
+    public ActionStatusPollerFunction(ActionStatusTracker tracker, ILogger<ActionStatusPollerFunction> log)
     {
         _tracker = tracker;
         _log = log;
@@ -33,9 +33,9 @@ public sealed class WipeStatusPollerFunction
 
     // NCRONTAB: every 5 minutes (sec min hour day month dayOfWeek). Override
     // with %WipeStatusPoller:CronExpression% app setting if needed.
-    [Function("WipeStatusPoller")]
+    [Function("ActionStatusPoller")]
     public async Task Run(
-        [TimerTrigger("%WipeStatusPoller:CronExpression%")] TimerInfo timer,
+        [TimerTrigger("%ActionStatusPoller:CronExpression%")] TimerInfo timer,
         CancellationToken ct)
     {
         if (!_tracker.IsEnabled)

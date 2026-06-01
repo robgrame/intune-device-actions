@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Configuration.AzureAppConfiguration;
 
-namespace IntuneWipeApi.Middleware;
+namespace IntuneDeviceActions.Middleware;
 
 /// <summary>
 /// Holds the <see cref="IConfigurationRefresher"/> captured at startup so the

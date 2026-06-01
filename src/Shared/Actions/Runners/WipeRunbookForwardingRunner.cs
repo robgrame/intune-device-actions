@@ -1,10 +1,10 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Actions.Runners;
+namespace IntuneDeviceActions.Actions.Runners;
 
 /// <summary>
 /// <see cref="IActionRunner"/> registered on the worker role for the

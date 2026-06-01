@@ -1,7 +1,7 @@
 using Microsoft.ApplicationInsights;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Services;
+namespace IntuneDeviceActions.Services;
 
 /// <summary>
 /// Emits security/audit events for the wipe pipeline as Application Insights

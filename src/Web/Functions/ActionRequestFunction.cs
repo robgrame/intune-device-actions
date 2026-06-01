@@ -1,32 +1,32 @@
 using System.Net;
 using System.Text.Json;
 using Azure.Storage.Queues;
-using IntuneWipeApi.Models;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Models;
+using IntuneDeviceActions.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Functions;
+namespace IntuneDeviceActions.Functions;
 
 /// <summary>
 /// Public HTTP endpoint: validates the client (cert + payload + replay headers + cert↔device binding)
 /// and enqueues a wipe request. All heavy lifting (group membership, Graph wipe) happens
-/// asynchronously in WipeProcessorFunction.
+/// asynchronously in RequestIntakeFunction.
 /// </summary>
-public sealed class WipeRequestFunction
+public sealed class ActionRequestFunction
 {
     private readonly ClientCertValidator _cert;
     private readonly ReplayProtector _replay;
     private readonly QueueClient _queue;
     private readonly AuditService _audit;
     private readonly IConfiguration _cfg;
-    private readonly ILogger<WipeRequestFunction> _log;
+    private readonly ILogger<ActionRequestFunction> _log;
 
-    public WipeRequestFunction(ClientCertValidator cert, ReplayProtector replay,
-        QueueClient queue, AuditService audit, IConfiguration cfg, ILogger<WipeRequestFunction> log)
+    public ActionRequestFunction(ClientCertValidator cert, ReplayProtector replay,
+        QueueClient queue, AuditService audit, IConfiguration cfg, ILogger<ActionRequestFunction> log)
     {
         _cert = cert;
         _replay = replay;
@@ -36,25 +36,25 @@ public sealed class WipeRequestFunction
         _log = log;
     }
 
-    [Function("WipeRequest")]
+    [Function("ActionRequest")]
     public async Task<IActionResult> Run(
-        [HttpTrigger(AuthorizationLevel.Function, "post", Route = "wipe")] HttpRequest req,
+        [HttpTrigger(AuthorizationLevel.Function, "post", Route = "actions/wipe")] HttpRequest req,
         CancellationToken ct)
     {
         var correlationId = Guid.NewGuid().ToString("N");
         using var scope = _log.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId });
 
-        _log.LogDebug("WipeRequest received: corr={Corr} method={Method} path={Path} contentLength={Len}",
+        _log.LogDebug("ActionRequest received: corr={Corr} method={Method} path={Path} contentLength={Len}",
             correlationId, req.Method, req.Path.Value, req.ContentLength ?? -1);
         if (_log.IsEnabled(LogLevel.Trace))
         {
             // VERBOSE: dump headers (excluding Authorization / Cookie). Only emitted
-            // when LogLevel for IntuneWipeApi.* is Trace — never enabled in prod.
+            // when LogLevel for IntuneDeviceActions.* is Trace — never enabled in prod.
             var headerDump = string.Join(", ", req.Headers
                 .Where(h => !string.Equals(h.Key, "Authorization", StringComparison.OrdinalIgnoreCase)
                          && !string.Equals(h.Key, "Cookie", StringComparison.OrdinalIgnoreCase))
                 .Select(h => $"{h.Key}={h.Value}"));
-            _log.LogTrace("WipeRequest headers: {Headers}", headerDump);
+            _log.LogTrace("ActionRequest headers: {Headers}", headerDump);
         }
 
         // 0.1) Inbound audit — emitted BEFORE any validation so even rejected/
@@ -107,10 +107,10 @@ public sealed class WipeRequestFunction
         }
 
         // 3) Payload
-        WipeRequest? body;
+        ActionRequest? body;
         try
         {
-            body = await JsonSerializer.DeserializeAsync<WipeRequest>(req.Body,
+            body = await JsonSerializer.DeserializeAsync<ActionRequest>(req.Body,
                 new JsonSerializerOptions(JsonSerializerDefaults.Web), ct);
         }
         catch (Exception ex)
@@ -197,7 +197,7 @@ public sealed class WipeRequestFunction
         var allowForceRearm = bool.TryParse(_cfg["Idempotency:AllowForceRearm"], out var afr) && afr;
         var forceRearm      = headerSaysForce && allowForceRearm;
 
-        var msg = new WipeQueueMessage
+        var msg = new ActionRequestMessage
         {
             DeviceName = body.DeviceName!,
             EntraDeviceId = body.EntraDeviceId!,

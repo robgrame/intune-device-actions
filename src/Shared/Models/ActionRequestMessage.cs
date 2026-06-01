@@ -1,8 +1,8 @@
 using System.Text.Json.Serialization;
 
-namespace IntuneWipeApi.Models;
+namespace IntuneDeviceActions.Models;
 
-public sealed class WipeQueueMessage
+public sealed class ActionRequestMessage
 {
     [JsonPropertyName("deviceName")]       public string DeviceName { get; set; } = string.Empty;
     [JsonPropertyName("entraDeviceId")]    public string EntraDeviceId { get; set; } = string.Empty;

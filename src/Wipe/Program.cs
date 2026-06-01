@@ -1,7 +1,7 @@
-using IntuneWipeApi;
-using IntuneWipeApi.Actions;
-using IntuneWipeApi.Actions.Runners;
-using IntuneWipeApi.Middleware;
+using IntuneDeviceActions;
+using IntuneDeviceActions.Actions;
+using IntuneDeviceActions.Actions.Runners;
+using IntuneDeviceActions.Middleware;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -10,13 +10,13 @@ var host = new HostBuilder()
     {
         b.UseMiddleware<AppConfigRefreshMiddleware>();
     })
-    .ConfigureAppConfiguration((ctx, c) => c.AddIntuneWipeApiAppConfig(roleHint: "wipe"))
+    .ConfigureAppConfiguration((ctx, c) => c.AddIntuneDeviceActionsAppConfig(roleHint: "wipe"))
     .ConfigureServices((ctx, services) =>
     {
-        services.AddIntuneWipeApiCore();
+        services.AddIntuneDeviceActionsCore();
         services.AddGraphWipe();                  // privileged Graph identity LIVES here
         services.AddIdempotency();                // reserve / mark issued / mark failed
-        services.AddWipeStatusTracker();          // init state on wipe issued
+        services.AddActionStatusTracker();          // init state on wipe issued
         // The consumer function resolves WipeActionRunner directly (concrete type).
         services.AddSingleton<WipeActionRunner>();
         services.AddSingleton<IActionRunner>(sp => sp.GetRequiredService<WipeActionRunner>());

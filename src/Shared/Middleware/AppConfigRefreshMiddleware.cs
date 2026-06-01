@@ -2,7 +2,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Middleware;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Middleware;
+namespace IntuneDeviceActions.Middleware;
 
 /// <summary>
 /// Calls <c>TryRefreshAsync</c> on the captured Azure App Configuration

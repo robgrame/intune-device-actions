@@ -3,15 +3,15 @@ using Azure.Data.Tables;
 using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Queues;
-using IntuneWipeApi.Actions;
-using IntuneWipeApi.Middleware;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Actions;
+using IntuneDeviceActions.Middleware;
+using IntuneDeviceActions.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 
-namespace IntuneWipeApi;
+namespace IntuneDeviceActions;
 
 /// <summary>
 /// Cross-cutting DI registrations shared by all three Function App hosts
@@ -27,7 +27,7 @@ public static class HostBuilderExtensions
     /// 30s; <see cref="AppConfigRefresherHolder"/> exposes the refresher so
     /// individual functions can opt-in to a per-invocation TryRefreshAsync.
     /// </summary>
-    public static IConfigurationBuilder AddIntuneWipeApiAppConfig(this IConfigurationBuilder c, string roleHint)
+    public static IConfigurationBuilder AddIntuneDeviceActionsAppConfig(this IConfigurationBuilder c, string roleHint)
     {
         c.AddEnvironmentVariables();
         var preliminary = c.Build();
@@ -62,7 +62,7 @@ public static class HostBuilderExtensions
     /// first, then opt into the storage/Graph helpers + runners they need via
     /// the dedicated methods below.
     /// </summary>
-    public static IServiceCollection AddIntuneWipeApiCore(this IServiceCollection services)
+    public static IServiceCollection AddIntuneDeviceActionsCore(this IServiceCollection services)
     {
         services.AddSingleton<AppConfigRefreshMiddleware>();
         services.AddLogging();
@@ -149,7 +149,7 @@ public static class HostBuilderExtensions
             var cfg = sp.GetRequiredService<IConfiguration>();
             var cred = sp.GetRequiredService<TokenCredential>();
             var account = cfg["Idempotency:StorageAccount"] ?? cfg["AzureWebJobsStorage__accountName"];
-            var container = cfg["Idempotency:BlobContainer"] ?? "wipe-ledger";
+            var container = cfg["Idempotency:BlobContainer"] ?? "action-ledger";
             BlobContainerClient client;
             if (string.IsNullOrWhiteSpace(account))
             {
@@ -172,7 +172,7 @@ public static class HostBuilderExtensions
     /// Wipe status tracker (separate table from auditevents).
     /// Required by Wipe (init state on issue) and Proc (poller updates).
     /// </summary>
-    public static IServiceCollection AddWipeStatusTracker(this IServiceCollection services)
+    public static IServiceCollection AddActionStatusTracker(this IServiceCollection services)
     {
         services.AddSingleton(sp =>
         {
@@ -181,7 +181,7 @@ public static class HostBuilderExtensions
             var account = cfg["Audit:StorageAccount"]
                 ?? cfg["Idempotency:StorageAccount"]
                 ?? cfg["AzureWebJobsStorage__accountName"];
-            var tableName = cfg["WipeStatus:TableName"] ?? "wipestatus";
+            var tableName = cfg["ActionStatus:TableName"] ?? "actionstatus";
             try
             {
                 TableClient client;
@@ -197,19 +197,19 @@ public static class HostBuilderExtensions
                         tableName, cred);
                 }
                 client.CreateIfNotExists();
-                return new WipeStatusTracker(client,
+                return new ActionStatusTracker(client,
                     sp.GetService<GraphWipeService>(),
                     sp.GetRequiredService<AuditService>(),
                     cfg,
-                    sp.GetRequiredService<ILogger<WipeStatusTracker>>());
+                    sp.GetRequiredService<ILogger<ActionStatusTracker>>());
             }
             catch
             {
-                return new WipeStatusTracker(null,
+                return new ActionStatusTracker(null,
                     sp.GetService<GraphWipeService>(),
                     sp.GetRequiredService<AuditService>(),
                     cfg,
-                    sp.GetRequiredService<ILogger<WipeStatusTracker>>());
+                    sp.GetRequiredService<ILogger<ActionStatusTracker>>());
             }
         });
         return services;
@@ -219,7 +219,7 @@ public static class HostBuilderExtensions
     /// Sender-side <c>wipe-requests</c> queue client. Web app uses it to enqueue
     /// the initial request; Proc app consumes it via QueueTrigger (no DI client needed there).
     /// </summary>
-    public static IServiceCollection AddWipeRequestQueueSender(this IServiceCollection services)
+    public static IServiceCollection AddActionRequestSender(this IServiceCollection services)
     {
         services.AddSingleton(sp =>
         {
@@ -274,7 +274,7 @@ public static class HostBuilderExtensions
                     new Uri($"https://{account}.queue.core.windows.net/{queueName}"),
                     cred, options);
             }
-            return new ActionDispatchQueueClient(client);
+            return new ActionDispatchSender(client);
         });
         services.AddSingleton<ActionDispatchEnqueuer>();
         return services;
@@ -285,7 +285,7 @@ public static class HostBuilderExtensions
     /// Used by Proc (WipeForwardingRunner). The Wipe app consumes via QueueTrigger
     /// (no DI client needed there).
     /// </summary>
-    public static IServiceCollection AddWipeActionQueueSender(this IServiceCollection services)
+    public static IServiceCollection AddWipeActionSender(this IServiceCollection services)
     {
         services.AddSingleton(sp =>
         {
@@ -308,7 +308,7 @@ public static class HostBuilderExtensions
                     new Uri($"https://{account}.queue.core.windows.net/{queueName}"),
                     cred, options);
             }
-            return new WipeActionQueueClient(client);
+            return new WipeActionSender(client);
         });
         return services;
     }

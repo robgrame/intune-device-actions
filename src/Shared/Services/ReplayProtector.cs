@@ -2,7 +2,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Services;
+namespace IntuneDeviceActions.Services;
 
 /// <summary>
 /// Validates the freshness of a request via X-Request-Timestamp and ensures the

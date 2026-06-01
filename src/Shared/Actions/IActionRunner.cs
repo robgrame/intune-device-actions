@@ -1,4 +1,4 @@
-namespace IntuneWipeApi.Actions;
+namespace IntuneDeviceActions.Actions;
 
 /// <summary>
 /// Plug-in contract for a single action handler.

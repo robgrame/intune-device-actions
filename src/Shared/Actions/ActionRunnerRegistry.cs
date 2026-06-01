@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Actions;
+namespace IntuneDeviceActions.Actions;
 
 /// <summary>
 /// Resolves an <see cref="IActionRunner"/> by its <see cref="IActionRunner.Type"/>.

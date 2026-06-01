@@ -5,7 +5,7 @@ using Microsoft.Graph.DeviceManagement.ManagedDevices.Item.Wipe;
 using Microsoft.Graph.Devices.Item.CheckMemberGroups;
 using Microsoft.Graph.Models.ODataErrors;
 
-namespace IntuneWipeApi.Services;
+namespace IntuneDeviceActions.Services;
 
 public sealed class GraphWipeService
 {

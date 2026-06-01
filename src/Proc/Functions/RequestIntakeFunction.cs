@@ -1,13 +1,13 @@
 using System.Text.Json;
-using IntuneWipeApi.Actions;
-using IntuneWipeApi.Middleware;
-using IntuneWipeApi.Models;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Actions;
+using IntuneDeviceActions.Middleware;
+using IntuneDeviceActions.Models;
+using IntuneDeviceActions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Functions;
+namespace IntuneDeviceActions.Functions;
 
 /// <summary>
 /// Thin <b>dispatcher</b> over the <c>wipe-requests</c> storage queue.
@@ -19,7 +19,7 @@ namespace IntuneWipeApi.Functions;
 /// </para>
 /// <list type="number">
 ///   <item>guards the app role (this must be the worker app);</item>
-///   <item>parses the wipe-specific <see cref="WipeQueueMessage"/> intake payload;</item>
+///   <item>parses the wipe-specific <see cref="ActionRequestMessage"/> intake payload;</item>
 ///   <item>wraps it inside an <see cref="ActionDispatchMessage"/> envelope with <c>ActionType="wipe"</c>;</item>
 ///   <item>enqueues the envelope on the <c>action-dispatch</c> queue.</item>
 /// </list>
@@ -30,17 +30,17 @@ namespace IntuneWipeApi.Functions;
 /// stable while new capabilities are added behind <see cref="IActionRunner"/>.
 /// </para>
 /// </remarks>
-public sealed class WipeProcessorFunction
+public sealed class RequestIntakeFunction
 {
     private const string DefaultWipeActionType = "wipe";
 
     private readonly ActionDispatchEnqueuer _enqueuer;
     private readonly AuditService _audit;
-    private readonly ILogger<WipeProcessorFunction> _log;
+    private readonly ILogger<RequestIntakeFunction> _log;
     private readonly IConfiguration _cfg;
 
-    public WipeProcessorFunction(ActionDispatchEnqueuer enqueuer, AuditService audit,
-        IConfiguration cfg, ILogger<WipeProcessorFunction> log)
+    public RequestIntakeFunction(ActionDispatchEnqueuer enqueuer, AuditService audit,
+        IConfiguration cfg, ILogger<RequestIntakeFunction> log)
     {
         _enqueuer = enqueuer;
         _audit = audit;
@@ -79,12 +79,12 @@ public sealed class WipeProcessorFunction
         return actionType;
     }
 
-    [Function("WipeProcessor")]
+    [Function("RequestIntake")]
     public async Task Run(
         [QueueTrigger("%Queue:WipeQueueName%", Connection = "AzureWebJobsStorage")] string messageJson,
         CancellationToken ct)
     {
-        var msg = JsonSerializer.Deserialize<WipeQueueMessage>(messageJson)
+        var msg = JsonSerializer.Deserialize<ActionRequestMessage>(messageJson)
             ?? throw new InvalidOperationException("Empty/invalid queue payload");
 
         using var scope = _log.BeginScope(new Dictionary<string, object>

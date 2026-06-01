@@ -3,7 +3,7 @@ using Azure;
 using Azure.Data.Tables;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Services;
+namespace IntuneDeviceActions.Services;
 
 /// <summary>
 /// Long-term persistent sink for audit events backed by Azure Table Storage.

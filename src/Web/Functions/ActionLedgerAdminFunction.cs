@@ -1,13 +1,13 @@
 using System.Net;
 using System.Text.Json;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Functions;
+namespace IntuneDeviceActions.Functions;
 
 /// <summary>
 /// Operator-facing endpoints to inspect and manually reset the per-device
@@ -32,16 +32,16 @@ namespace IntuneWipeApi.Functions;
 /// do not contain this Function class).
 /// </para>
 /// </summary>
-public sealed class WipeLedgerAdminFunction
+public sealed class ActionLedgerAdminFunction
 {
     private readonly IdempotencyService _ledger;
-    private readonly WipeStatusTracker _tracker;
+    private readonly ActionStatusTracker _tracker;
     private readonly AuditService _audit;
     private readonly IConfiguration _cfg;
-    private readonly ILogger<WipeLedgerAdminFunction> _log;
+    private readonly ILogger<ActionLedgerAdminFunction> _log;
 
-    public WipeLedgerAdminFunction(IdempotencyService ledger, WipeStatusTracker tracker,
-        AuditService audit, IConfiguration cfg, ILogger<WipeLedgerAdminFunction> log)
+    public ActionLedgerAdminFunction(IdempotencyService ledger, ActionStatusTracker tracker,
+        AuditService audit, IConfiguration cfg, ILogger<ActionLedgerAdminFunction> log)
     {
         _ledger = ledger;
         _tracker = tracker;
@@ -55,9 +55,9 @@ public sealed class WipeLedgerAdminFunction
     /// entry joined with the most recent tracker snapshot (so operators see one
     /// page with everything needed to decide whether a manual reset is warranted).
     /// </summary>
-    [Function("WipeLedger_Get")]
+    [Function("ActionLedger_Get")]
     public async Task<IActionResult> Get(
-        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "wipe-ledger/{intuneDeviceId}")]
+        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "actions/ledger/{intuneDeviceId}")]
         HttpRequest req, string intuneDeviceId, CancellationToken ct)
     {
         if (!Allowed(req, out var deny)) return deny!;
@@ -66,7 +66,7 @@ public sealed class WipeLedgerAdminFunction
         if (entry is null)
             return new NotFoundObjectResult(new { intuneDeviceId, ledger = (object?)null });
 
-        WipeStatusSnapshot? snap = null;
+        ActionStatusSnapshot? snap = null;
         try
         {
             if (_tracker.IsEnabled && !string.IsNullOrEmpty(entry.CorrelationId))
@@ -97,9 +97,9 @@ public sealed class WipeLedgerAdminFunction
     /// JSON: <c>{ "reason": "...", "actor": "alice@contoso.com" }</c>. Both fields
     /// are mandatory so the audit trail is meaningful.
     /// </summary>
-    [Function("WipeLedger_Reset")]
+    [Function("ActionLedger_Reset")]
     public async Task<IActionResult> Reset(
-        [HttpTrigger(AuthorizationLevel.Function, "post", Route = "wipe-ledger/{intuneDeviceId}/reset")]
+        [HttpTrigger(AuthorizationLevel.Function, "post", Route = "actions/ledger/{intuneDeviceId}/reset")]
         HttpRequest req, string intuneDeviceId, CancellationToken ct)
     {
         if (!Allowed(req, out var deny)) return deny!;

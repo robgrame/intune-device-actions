@@ -1,14 +1,14 @@
 using System.Text.Json;
-using IntuneWipeApi.Models;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Models;
+using IntuneDeviceActions.Services;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Actions.Runners;
+namespace IntuneDeviceActions.Actions.Runners;
 
 /// <summary>
 /// <see cref="IActionRunner"/> for the <c>wipe</c> action — the original
 /// business logic that previously lived inline inside
-/// <c>WipeProcessorFunction</c>. Moving it here behind the
+/// <c>RequestIntakeFunction</c>. Moving it here behind the
 /// <see cref="IActionRunner"/> contract turns it into one plug-in among
 /// many that the router can dispatch to.
 /// </summary>
@@ -32,11 +32,11 @@ public sealed class WipeActionRunner : IActionRunner
     private readonly GraphWipeService _graph;
     private readonly IdempotencyService _ledger;
     private readonly AuditService _audit;
-    private readonly WipeStatusTracker _statusTracker;
+    private readonly ActionStatusTracker _statusTracker;
     private readonly ILogger<WipeActionRunner> _log;
 
     public WipeActionRunner(GraphWipeService graph, IdempotencyService ledger,
-        AuditService audit, WipeStatusTracker statusTracker, ILogger<WipeActionRunner> log)
+        AuditService audit, ActionStatusTracker statusTracker, ILogger<WipeActionRunner> log)
     {
         _graph = graph;
         _ledger = ledger;
@@ -47,7 +47,7 @@ public sealed class WipeActionRunner : IActionRunner
 
     public async Task RunAsync(ActionDispatchMessage envelope, CancellationToken ct)
     {
-        var msg = envelope.Payload.Deserialize<WipeQueueMessage>()
+        var msg = envelope.Payload.Deserialize<ActionRequestMessage>()
             ?? throw new InvalidOperationException("Wipe payload missing/invalid in dispatch envelope.");
 
         // Defensive fill-in if the producer didn't repeat fields at envelope level.
@@ -300,7 +300,7 @@ public sealed class WipeActionRunner : IActionRunner
         }
     }
 
-    private async Task TryNudgeAfterWipeAsync(WipeQueueMessage msg, string managedId, CancellationToken ct)
+    private async Task TryNudgeAfterWipeAsync(ActionRequestMessage msg, string managedId, CancellationToken ct)
     {
         var syncDelay   = _graph.SyncFallbackDelaySeconds;
         var rebootDelay = _graph.RebootFallbackDelaySeconds;
@@ -348,7 +348,7 @@ public sealed class WipeActionRunner : IActionRunner
         }
     }
 
-    private static Dictionary<string, string> BuildGraphErrProps(WipeQueueMessage msg, string managedId, Exception ex)
+    private static Dictionary<string, string> BuildGraphErrProps(ActionRequestMessage msg, string managedId, Exception ex)
     {
         var props = new Dictionary<string, string>
         {

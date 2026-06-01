@@ -1,10 +1,10 @@
 using Azure;
 using Azure.Data.Tables;
-using IntuneWipeApi.Models;
+using IntuneDeviceActions.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Services;
+namespace IntuneDeviceActions.Services;
 
 /// <summary>
 /// Persists per-wipe status rows in a dedicated Azure Table (one row per
@@ -23,7 +23,7 @@ namespace IntuneWipeApi.Services;
 ///     issue → writes a row <c>{Terminal=false, LastState=pending, IssuedAt=now}</c>.
 ///   </description></item>
 ///   <item><description>
-///     A timer trigger (<c>WipeStatusPollerFunction</c>) enumerates all
+///     A timer trigger (<c>ActionStatusPollerFunction</c>) enumerates all
 ///     non-terminal rows whose age is &lt; <see cref="PollMaxAgeHours"/> and
 ///     calls <see cref="PollOneAsync"/> for each. Graph returns the current
 ///     <c>deviceActionResults[wipe].actionState</c>, transitions are recorded
@@ -43,7 +43,7 @@ namespace IntuneWipeApi.Services;
 /// wipe — upsert semantics).
 /// </para>
 /// </remarks>
-public sealed class WipeStatusTracker
+public sealed class ActionStatusTracker
 {
     public const string RowKeyStatus = "status";
 
@@ -62,17 +62,17 @@ public sealed class WipeStatusTracker
     private readonly TableClient? _table;
     private readonly GraphWipeService? _graph;
     private readonly AuditService _audit;
-    private readonly ILogger<WipeStatusTracker> _log;
+    private readonly ILogger<ActionStatusTracker> _log;
     private readonly int _pollMaxAgeHours;
 
-    public WipeStatusTracker(TableClient? table, GraphWipeService? graph, AuditService audit,
-        IConfiguration cfg, ILogger<WipeStatusTracker> log)
+    public ActionStatusTracker(TableClient? table, GraphWipeService? graph, AuditService audit,
+        IConfiguration cfg, ILogger<ActionStatusTracker> log)
     {
         _table = table;
         _graph = graph;
         _audit = audit;
         _log = log;
-        _pollMaxAgeHours = int.TryParse(cfg["Wipe:StatusPollMaxAgeHours"], out var h) ? Math.Max(1, h) : 24;
+        _pollMaxAgeHours = int.TryParse(cfg["ActionStatus:PollMaxAgeHours"], out var h) ? Math.Max(1, h) : 24;
     }
 
     public bool IsEnabled => _table is not null;
@@ -83,14 +83,14 @@ public sealed class WipeStatusTracker
     /// tracking row exists (either the wipe was never issued, the row was
     /// purged, or the storage backend is disabled).
     /// </summary>
-    public async Task<WipeStatusSnapshot?> GetStatusAsync(string correlationId, CancellationToken ct)
+    public async Task<ActionStatusSnapshot?> GetStatusAsync(string correlationId, CancellationToken ct)
     {
         if (_table is null || string.IsNullOrWhiteSpace(correlationId)) return null;
         try
         {
             var resp = await _table.GetEntityAsync<TableEntity>(SanitizeKey(correlationId), RowKeyStatus, cancellationToken: ct).ConfigureAwait(false);
             var row = resp.Value;
-            return new WipeStatusSnapshot(
+            return new ActionStatusSnapshot(
                 CorrelationId:    correlationId,
                 DeviceName:       row.GetString("DeviceName") ?? string.Empty,
                 EntraDeviceId:    row.GetString("EntraDeviceId") ?? string.Empty,
@@ -115,7 +115,7 @@ public sealed class WipeStatusTracker
     /// Idempotent (uses upsert) — re-issuing for the same correlationId resets
     /// the tracking row without throwing.
     /// </summary>
-    public async Task InitializeAsync(WipeQueueMessage msg, string managedDeviceId, CancellationToken ct)
+    public async Task InitializeAsync(ActionRequestMessage msg, string managedDeviceId, CancellationToken ct)
     {
         if (_table is null) return;
 
@@ -143,7 +143,7 @@ public sealed class WipeStatusTracker
         {
             // Initialization failure is logged but not fatal — the wipe is
             // already issued, only the tracking is degraded.
-            _log.LogWarning(ex, "WipeStatusTracker: failed to initialize row for {Corr}", msg.CorrelationId);
+            _log.LogWarning(ex, "ActionStatusTracker: failed to initialize row for {Corr}", msg.CorrelationId);
         }
     }
 
@@ -178,7 +178,7 @@ public sealed class WipeStatusTracker
             // which must register GraphWipeService. Web never calls this method
             // (it only reads via GetStatusAsync) and therefore doesn't need Graph.
             throw new InvalidOperationException(
-                "WipeStatusTracker.PollOneAsync requires GraphWipeService. " +
+                "ActionStatusTracker.PollOneAsync requires GraphWipeService. " +
                 "Register it in the host via services.AddGraphWipe().");
         }
 
@@ -205,11 +205,11 @@ public sealed class WipeStatusTracker
             return;
         }
 
-        WipeStatusTracker.WipeActionSnapshotShim snap;
+        ActionStatusTracker.WipeActionSnapshotShim snap;
         try
         {
             var s = await _graph.GetWipeActionStatusAsync(managedDeviceId, ct).ConfigureAwait(false);
-            snap = new WipeStatusTracker.WipeActionSnapshotShim(
+            snap = new ActionStatusTracker.WipeActionSnapshotShim(
                 s.State, s.ActionStartedAt, s.ActionLastUpdated,
                 s.DeviceLastSync, s.ComplianceState, s.OsVersion, s.OperatingSystem);
         }

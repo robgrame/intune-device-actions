@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Services;
+namespace IntuneDeviceActions.Services;
 
 public sealed class ClientCertValidator
 {

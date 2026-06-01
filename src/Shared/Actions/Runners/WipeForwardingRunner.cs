@@ -1,15 +1,15 @@
 using System.Text.Json;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Services;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Actions.Runners;
+namespace IntuneDeviceActions.Actions.Runners;
 
 /// <summary>
 /// <see cref="IActionRunner"/> registered on the worker role for the
 /// <c>wipe</c> action type. Instead of executing the wipe in-process, it
 /// forwards the dispatch envelope to a dedicated per-capability Storage Queue
 /// (<c>wipe-action</c>) which is consumed by a separate Function App
-/// (<see cref="IntuneWipeApi.Functions.WipeActionConsumerFunction"/>).
+/// (<see cref="IntuneDeviceActions.Functions.WipeActionConsumerFunction"/>).
 /// </summary>
 /// <remarks>
 /// Architectural rationale:
@@ -24,13 +24,13 @@ public sealed class WipeForwardingRunner : IActionRunner
 {
     public string Type => "wipe";
 
-    private readonly WipeActionQueueClient _queue;
+    private readonly WipeActionSender _queue;
     private readonly AuditService _audit;
     private readonly ILogger<WipeForwardingRunner> _log;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public WipeForwardingRunner(WipeActionQueueClient queue, AuditService audit,
+    public WipeForwardingRunner(WipeActionSender queue, AuditService audit,
         ILogger<WipeForwardingRunner> log)
     {
         _queue = queue;

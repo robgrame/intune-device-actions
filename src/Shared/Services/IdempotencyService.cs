@@ -5,7 +5,7 @@ using Azure.Storage.Blobs.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Services;
+namespace IntuneDeviceActions.Services;
 
 /// <summary>
 /// Conditional-write based idempotency ledger. One blob per Intune device id.
@@ -17,7 +17,7 @@ namespace IntuneWipeApi.Services;
 /// re-wipes when <c>keepEnrollmentData=true</c> or after a failed wipe.
 /// </para>
 /// <para>
-/// New behaviour (this revision): the ledger consults <see cref="WipeStatusTracker"/>
+/// New behaviour (this revision): the ledger consults <see cref="ActionStatusTracker"/>
 /// at <see cref="ReserveAsync"/> time. If the previous wipe for the same device
 /// has reached an Intune-side terminal state (success / failure / pollTimeout
 /// past a configurable grace period), the ledger atomically re-arms itself
@@ -52,7 +52,7 @@ public sealed class IdempotencyService
     }
 
     private readonly BlobContainerClient _container;
-    private readonly WipeStatusTracker? _tracker;
+    private readonly ActionStatusTracker? _tracker;
     private readonly ILogger<IdempotencyService> _log;
     private readonly int _maxWipesPerDay;
     private readonly int _rearmGracePeriodHours;
@@ -60,7 +60,7 @@ public sealed class IdempotencyService
     private const int MaxRearmAttempts = 3;
     private static readonly TimeSpan RateWindow = TimeSpan.FromHours(24);
 
-    // Set of LastState values (from WipeStatusTracker) considered "wipe completed
+    // Set of LastState values (from ActionStatusTracker) considered "wipe completed
     // successfully on the device side". Lowercased for comparison.
     private static readonly HashSet<string> SuccessStates = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -75,7 +75,7 @@ public sealed class IdempotencyService
     };
 
     public IdempotencyService(BlobContainerClient container, IConfiguration cfg,
-        ILogger<IdempotencyService> log, WipeStatusTracker? tracker = null)
+        ILogger<IdempotencyService> log, ActionStatusTracker? tracker = null)
     {
         _container = container;
         _tracker = tracker;
@@ -414,7 +414,7 @@ public sealed class IdempotencyService
             return (RearmReason.None, null);
         }
 
-        WipeStatusSnapshot? snap;
+        ActionStatusSnapshot? snap;
         try
         {
             snap = await _tracker.GetStatusAsync(existing.CorrelationId, ct);

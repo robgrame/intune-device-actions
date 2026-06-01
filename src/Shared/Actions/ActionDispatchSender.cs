@@ -1,6 +1,6 @@
 using Azure.Storage.Queues;
 
-namespace IntuneWipeApi.Actions;
+namespace IntuneDeviceActions.Actions;
 
 /// <summary>
 /// Thin DI wrapper around a <see cref="QueueClient"/> that targets the
@@ -8,8 +8,8 @@ namespace IntuneWipeApi.Actions;
 /// ambiguity with the existing wipe-requests <see cref="QueueClient"/>
 /// registration without resorting to keyed services.
 /// </summary>
-public sealed class ActionDispatchQueueClient
+public sealed class ActionDispatchSender
 {
     public QueueClient Client { get; }
-    public ActionDispatchQueueClient(QueueClient client) => Client = client;
+    public ActionDispatchSender(QueueClient client) => Client = client;
 }

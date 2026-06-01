@@ -1,10 +1,10 @@
 using System.Text.Json;
-using IntuneWipeApi.Actions;
-using IntuneWipeApi.Services;
+using IntuneDeviceActions.Actions;
+using IntuneDeviceActions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneWipeApi.Functions;
+namespace IntuneDeviceActions.Functions;
 
 /// <summary>
 /// Generic plug-in router. Consumes the <c>action-dispatch</c> storage queue,

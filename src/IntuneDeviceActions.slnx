@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/Proc/">
+    <Project Path="Proc/IntuneDeviceActions.Proc.csproj" />
+  </Folder>
+  <Folder Name="/Shared/">
+    <Project Path="Shared/IntuneDeviceActions.Shared.csproj" />
+  </Folder>
+  <Folder Name="/Web/">
+    <Project Path="Web/IntuneDeviceActions.Web.csproj" />
+  </Folder>
+  <Folder Name="/Wipe/">
+    <Project Path="Wipe/IntuneDeviceActions.Wipe.csproj" />
+  </Folder>
+</Solution>
