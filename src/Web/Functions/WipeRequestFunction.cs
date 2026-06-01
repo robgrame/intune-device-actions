@@ -41,21 +41,6 @@ public sealed class WipeRequestFunction
         [HttpTrigger(AuthorizationLevel.Function, "post", Route = "wipe")] HttpRequest req,
         CancellationToken ct)
     {
-        // 0) App role guard: this function may run ONLY on the public web app.
-        //    The Functions runtime "Disabled" setting does not reliably block HTTP
-        //    triggers on dotnet-isolated, so fail closed here to keep the worker
-        //    app's HTTP surface inert even if reached.
-        if (!AppRoleGuard.IsAllowed(AppRoleGuard.Web))
-        {
-            _audit.TrackEvent(AuditEvents.DeniedAppRoleMismatch, new Dictionary<string, string>
-            {
-                [AuditEvents.Prop.ExpectedRole] = AppRoleGuard.Web,
-                [AuditEvents.Prop.ActualRole]   = AppRoleGuard.CurrentRole ?? "",
-            }, LogLevel.Warning);
-            return new ObjectResult(new { status = "gone", message = "endpoint not available on this host" })
-                { StatusCode = (int)HttpStatusCode.Gone };
-        }
-
         var correlationId = Guid.NewGuid().ToString("N");
         using var scope = _log.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId });
 

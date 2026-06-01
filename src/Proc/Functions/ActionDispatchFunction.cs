@@ -42,19 +42,6 @@ public sealed class ActionDispatchFunction
         [QueueTrigger("%Actions:DispatchQueueName%", Connection = "AzureWebJobsStorage")] string messageJson,
         CancellationToken ct)
     {
-        // App-role guard: this runs ONLY on the worker app (same as WipeProcessor).
-        if (!AppRoleGuard.IsAllowed(AppRoleGuard.Proc))
-        {
-            _audit.TrackEvent(AuditEvents.DeniedAppRoleMismatch, new Dictionary<string, string>
-            {
-                [AuditEvents.Prop.ExpectedRole] = AppRoleGuard.Proc,
-                [AuditEvents.Prop.ActualRole]   = AppRoleGuard.CurrentRole ?? "",
-                ["function"]                    = "ActionDispatch",
-            }, LogLevel.Error);
-            throw new InvalidOperationException(
-                $"App role mismatch: this Function App is not the worker (App__Role='{AppRoleGuard.CurrentRole}')");
-        }
-
         ActionDispatchMessage env;
         try
         {

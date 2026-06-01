@@ -18,7 +18,8 @@ public sealed class ActionDispatchEnqueuer
     private readonly AuditService _audit;
     private readonly ILogger<ActionDispatchEnqueuer> _log;
 
-    internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    internal static readonly JsonSerializerOptions JsonOptionsInternal = new(JsonSerializerDefaults.Web);
+    public static readonly JsonSerializerOptions JsonOptions = JsonOptionsInternal;
 
     public ActionDispatchEnqueuer(
         ActionDispatchQueueClient queue,

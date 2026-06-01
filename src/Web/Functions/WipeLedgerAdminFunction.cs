@@ -141,18 +141,10 @@ public sealed class WipeLedgerAdminFunction
     }
 
     /// <summary>
-    /// Combined gate: web-only role + per-environment kill switch
-    /// (<c>Idempotency:AdminApiEnabled</c>). Failures are audited.
+    /// Per-environment kill switch (<c>Idempotency:AdminApiEnabled</c>). Failures are audited.
     /// </summary>
     private bool Allowed(HttpRequest req, out IActionResult? deny)
     {
-        if (!AppRoleGuard.IsAllowed(AppRoleGuard.Web))
-        {
-            _audit.TrackEvent(AuditEvents.LedgerResetDenied,
-                new Dictionary<string, string> { ["reason"] = "wrong-app-role" }, LogLevel.Warning);
-            deny = new ObjectResult(new { message = "forbidden" }) { StatusCode = (int)HttpStatusCode.Forbidden };
-            return false;
-        }
         if (!bool.TryParse(_cfg["Idempotency:AdminApiEnabled"], out var enabled) || !enabled)
         {
             _audit.TrackEvent(AuditEvents.LedgerResetDenied,

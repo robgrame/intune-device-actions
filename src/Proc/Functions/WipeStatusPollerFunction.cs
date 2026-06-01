@@ -38,14 +38,6 @@ public sealed class WipeStatusPollerFunction
         [TimerTrigger("%WipeStatusPoller:CronExpression%")] TimerInfo timer,
         CancellationToken ct)
     {
-        // Defense-in-depth: only run on the worker app, never on the public web.
-        if (!AppRoleGuard.IsAllowed(AppRoleGuard.Proc))
-        {
-            _log.LogWarning("WipeStatusPoller skipped: role is {Role}, expected {Expected}",
-                AppRoleGuard.CurrentRole, AppRoleGuard.Proc);
-            return;
-        }
-
         if (!_tracker.IsEnabled)
         {
             _log.LogDebug("WipeStatusPoller skipped: tracker not configured");

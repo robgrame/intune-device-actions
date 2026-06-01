@@ -45,19 +45,6 @@ public sealed class WipeActionConsumerFunction
         [QueueTrigger("%WipeAction:QueueName%", Connection = "AzureWebJobsStorage")] string messageJson,
         CancellationToken ct)
     {
-        // App-role guard: this MUST run only on the dedicated wipe-runner app.
-        if (!AppRoleGuard.IsAllowed(AppRoleGuard.Wipe))
-        {
-            _audit.TrackEvent(AuditEvents.DeniedAppRoleMismatch, new Dictionary<string, string>
-            {
-                [AuditEvents.Prop.ExpectedRole] = AppRoleGuard.Wipe,
-                [AuditEvents.Prop.ActualRole]   = AppRoleGuard.CurrentRole ?? "",
-                ["function"]                    = "WipeAction",
-            }, LogLevel.Error);
-            throw new InvalidOperationException(
-                $"App role mismatch: this Function App is not the wipe-runner (App__Role='{AppRoleGuard.CurrentRole}')");
-        }
-
         ActionDispatchMessage env;
         try
         {

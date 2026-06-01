@@ -6,23 +6,17 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>IntuneWipeApi</RootNamespace>
+    <AssemblyName>IntuneWipeApi.Web</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Azure.Data.Tables" Version="12.11.0" />
+    <ProjectReference Include="..\Shared\IntuneWipeApi.Shared.csproj" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker" Version="2.52.0" />
-    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Timer" Version="4.3.1" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.7" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http" Version="3.3.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore" Version="2.1.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Storage.Queues" Version="5.5.4" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.ApplicationInsights" Version="2.50.0" />
     <PackageReference Include="Microsoft.ApplicationInsights.WorkerService" Version="3.1.1" />
-    <PackageReference Include="Azure.Identity" Version="1.21.0" />
-    <PackageReference Include="Azure.Storage.Queues" Version="12.26.0" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.26.0" />
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.AzureAppConfiguration" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Graph" Version="6.1.0" />
   </ItemGroup>
   <ItemGroup>
     <None Update="host.json"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>

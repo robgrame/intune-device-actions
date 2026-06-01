@@ -9,7 +9,7 @@ namespace IntuneWipeApi.Middleware;
 /// which is unreliable when the AppConfig source is added via the host's
 /// <c>ConfigureAppConfiguration</c> callback.
 /// </summary>
-internal static class AppConfigRefresherHolder
+public static class AppConfigRefresherHolder
 {
     public static IConfigurationRefresher? Instance { get; set; }
 }

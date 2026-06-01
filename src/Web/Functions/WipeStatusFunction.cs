@@ -52,12 +52,6 @@ public sealed class WipeStatusFunction
         string correlationId,
         CancellationToken ct)
     {
-        if (!AppRoleGuard.IsAllowed(AppRoleGuard.Web))
-        {
-            return new ObjectResult(new { status = "gone", message = "endpoint not available on this host" })
-                { StatusCode = (int)HttpStatusCode.Gone };
-        }
-
         if (string.IsNullOrWhiteSpace(correlationId) || correlationId.Length > 64)
         {
             return new BadRequestObjectResult(new { status = "error", message = "invalid correlationId" });

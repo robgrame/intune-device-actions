@@ -12,7 +12,7 @@ namespace IntuneWipeApi.Middleware;
 /// most once per configured interval (30s by default), so per-invocation calls
 /// are cheap.
 /// </summary>
-internal sealed class AppConfigRefreshMiddleware : IFunctionsWorkerMiddleware
+public sealed class AppConfigRefreshMiddleware : IFunctionsWorkerMiddleware
 {
     private readonly ILogger<AppConfigRefreshMiddleware> _log;
 
