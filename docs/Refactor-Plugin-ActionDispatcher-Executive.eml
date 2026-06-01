@@ -1,0 +1,249 @@
+X-Unsent: 1
+MIME-Version: 1.0
+From: Roberto Gramellini <roberto.gramellini@microsoft.com>
+To: 
+Subject: Intune Self-Wipe - Architettura, design e nuova evoluzione modulare
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html lang=3D"it">
+<head>
+<meta charset=3D"UTF-8">
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; font-size: 14px; color: =
+#1a1a1a; background: #f5f5f5; margin: 0; padding: 0; }
+  .wrapper { background: #ffffff; padding: 32px 40px; }
+  h1 { font-size: 22px; color: #0078d4; border-bottom: 2px solid #0078d4; p=
+adding-bottom: 8px; }
+  h2 { font-size: 17px; color: #106ebe; margin-top: 28px; }
+  h3 { font-size: 15px; color: #333; margin-top: 18px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th { background: #0078d4; color: #fff; padding: 8px 12px; text-align: lef=
+t; }
+  td { padding: 8px 12px; border: 1px solid #ddd; vertical-align: top; }
+  tr:nth-child(even) td { background: #f0f7ff; }
+  blockquote { border-left: 4px solid #0078d4; margin: 12px 0; padding: 8px=
+ 16px; background: #e8f2fc; color: #333; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 24px 0; }
+  ul li, ol li { margin: 4px 0; }
+  .highlight { background: #fff8e6; border-left: 4px solid #f0a500; padding=
+: 10px 14px; margin: 10px 0; }
+  .highlight strong { color: #8a6100; }
+  .sig { margin-top: 40px; padding-top: 20px; border-top: 2px solid #0078d4=
+; font-size: 13px; color: #555; }
+  .sig strong { color: #0078d4; font-size: 15px; display: block; margin-bot=
+tom: 4px; }
+</style>
+</head>
+<body>
+<div class=3D"wrapper">
+<p>Gentile Team,</p>
+<p>condivido un documento di sintesi sulla soluzione <strong>Intune Self-W=
+ipe</strong> realizzata in queste settimane, con focus su <strong>obiettiv=
+i</strong>, <strong>architettura</strong>, <strong>scelte di design</stron=
+g> e sull'<strong>evoluzione modulare</strong> appena rilasciata.</p>
+<p>Il documento =C3=A8 pensato per una lettura trasversale (business owner=
+, security, IT operations) e non entra nei dettagli implementativi.</p>
+<hr>
+
+<h1>Intune Self-Wipe =E2=80=94 Architettura ed evoluzione modulare</h1>
+
+<h2>1. Obiettivo</h2>
+<p>Mettere a disposizione degli utenti finali un meccanismo <strong>self-s=
+ervice</strong>, sicuro e tracciato, per richiedere il <strong>wipe del pr=
+oprio device aziendale</strong> in scenari critici (smarrimento, furto, sos=
+petta compromissione) <strong>senza passare dall'helpdesk</strong>.</p>
+<p>L'obiettivo non si esaurisce nella singola operazione di wipe: la solu=
+zione =C3=A8 stata progettata fin da subito come <strong>piattaforma di ri=
+ferimento</strong> per future operazioni privilegiate sui device (blocco r=
+emoto, rotazione chiave BitLocker, raccolta diagnostica, ecc.), in modo da=
+ capitalizzare l'investimento iniziale.</p>
+
+<h2>2. Esperienza utente</h2>
+<ol>
+  <li>L'utente lancia uno <strong>script PowerShell</strong> distribuito v=
+ia Intune sul proprio device.</li>
+  <li>Lo script si autentica al backend usando il <strong>certificato del =
+device</strong> rilasciato automaticamente da Intune (nessuna password ric=
+hiesta all'utente).</li>
+  <li>Il backend verifica che il device sia <strong>autorizzato</strong> a=
+ll'auto-wipe (gruppo Entra dedicato) e invia il comando a Microsoft Intune=
+.</li>
+  <li>Un meccanismo locale sul device aggiorna periodicamente l'utente sul=
+lo <strong>stato del comando</strong> (ricevuto, in attesa di riavvio, com=
+pletato), tramite notifiche native di Windows.</li>
+  <li>Il team di sicurezza dispone di un <strong>portale web</strong> dedi=
+cato per visualizzare richieste, esiti e storico audit.</li>
+</ol>
+
+<h2>3. Architettura ad alto livello</h2>
+
+<table>
+  <tr><th>Componente</th><th>Ruolo</th><th>Esposto su Internet?</th></tr>
+  <tr><td><strong>Client PowerShell</strong></td>
+      <td>Avvia la richiesta dal device, gestisce il polling dello stato e=
+ le notifiche all'utente.</td>
+      <td>No (gira sul device)</td></tr>
+  <tr><td><strong>API HTTP (Function App "web")</strong></td>
+      <td>Riceve le richieste dei client, valida l'autenticazione e le a=
+ccoda per la lavorazione.</td>
+      <td><strong>S=C3=AC</strong></td></tr>
+  <tr><td><strong>Backend di esecuzione (Function App "worker")</strong></=
+td>
+      <td>Esegue le operazioni privilegiate su Microsoft Intune via API u=
+fficiali (Microsoft Graph). Non =C3=A8 raggiungibile da Internet.</td>
+      <td>No</td></tr>
+  <tr><td><strong>Portale Web</strong></td>
+      <td>Dashboard per il team di sicurezza: stato richieste, esito coma=
+ndi, audit.</td>
+      <td>S=C3=AC (accesso autenticato)</td></tr>
+  <tr><td><strong>Storage applicativo</strong></td>
+      <td>Conserva traccia delle richieste, dello stato dei comandi e del=
+lo storico audit.</td>
+      <td>No (accessibile solo dai servizi tramite identit=C3=A0 gestita)<=
+/td></tr>
+</table>
+
+<h2>4. Principi di design</h2>
+
+<div class=3D"highlight">
+<strong>Separazione delle responsabilit=C3=A0.</strong> La parte esposta su=
+ Internet (intake delle richieste) =C3=A8 isolata dalla parte che opera con=
+ privilegi distruttivi sui device. Una compromissione della prima non d=C3=
+=A0 accesso ai permessi della seconda.
+</div>
+
+<div class=3D"highlight">
+<strong>Sicurezza per default.</strong> Identit=C3=A0 gestite Azure (nessu=
+n segreto archiviato), permessi assegnati con il principio del <em>least p=
+rivilege</em>, autenticazione del client basata sul certificato di device =
+Intune (non sulla credenziale utente).
+</div>
+
+<div class=3D"highlight">
+<strong>Tracciabilit=C3=A0 completa.</strong> Ogni richiesta, validazione,=
+ autorizzazione, chiamata a Intune e cambio di stato del comando viene reg=
+istrata su due canali: uno operativo (Application Insights) per il team Se=
+cOps, uno a storico immutabile per esigenze di compliance.
+</div>
+
+<div class=3D"highlight">
+<strong>Robustezza operativa.</strong> Le richieste passano attraverso un=
+a coda di lavorazione che protegge da picchi di carico, errori transitori =
+e indisponibilit=C3=A0 momentanee di Microsoft Graph. L'utente ottiene una=
+ risposta immediata e l'operazione viene completata in background con rite=
+ntativi automatici.
+</div>
+
+<div class=3D"highlight">
+<strong>Esperienza utente trasparente.</strong> L'utente non resta nel du=
+bbio sull'esito: il device stesso lo aggiorna sullo stato del comando di =
+wipe in modo nativo (notifiche Windows), senza popup intrusivi.
+</div>
+
+<div class=3D"highlight">
+<strong>Governance via Entra.</strong> Chi pu=C3=B2 fare self-wipe =C3=A8 =
+definito tramite un gruppo Entra dedicato, gestito dagli stessi processi =
+di Access Review e governance gi=C3=A0 in essere =E2=80=94 nessuna lista p=
+arallela da mantenere.
+</div>
+
+<h2>5. La nuova evoluzione modulare</h2>
+
+<p>Guardando avanti, abbiamo riconosciuto che le richieste future del cli=
+ente porteranno ad aggiungere alla piattaforma <strong>altre operazioni p=
+rivilegiate sui device</strong>, oltre al wipe. Per evitare che ogni nuov=
+a esigenza obblighi a rimettere mano alle componenti centrali della solu=
+zione =E2=80=94 con il rischio di introdurre regressioni in una superficie=
+ critica =E2=80=94 abbiamo riprogettato il backend in modo <strong>modula=
+re</strong>, ispirandoci a un pattern gi=C3=A0 adottato con successo in u=
+n'altra soluzione del cliente.</p>
+
+<h3>Come funziona, in sintesi</h3>
+<p>La piattaforma =C3=A8 stata divisa in due strati ben distinti:</p>
+<ul>
+  <li>uno strato <strong>core</strong>, che riceve le richieste, le valid=
+a, le mette in coda e le instrada =E2=80=94 questo strato <em>non viene p=
+i=C3=B9 toccato</em> per le evoluzioni future;</li>
+  <li>uno strato di <strong>capability</strong>, dove ciascuna funzional=
+it=C3=A0 (oggi <em>"wipe"</em>) =C3=A8 un modulo indipendente e sostituib=
+ile.</li>
+</ul>
+
+<p>Aggiungere una nuova capability (per esempio <em>"blocca device"</em>=
+) richiede di scrivere un nuovo modulo dedicato e registrarlo nella piat=
+taforma: <strong>nessuna modifica</strong> al core, alle API HTTP, al po=
+rtale, alle identit=C3=A0, alle policy di sicurezza o all'infrastruttura=
+.</p>
+
+<h3>Benefici per il cliente</h3>
+<table>
+  <tr><th>Beneficio</th><th>Cosa significa nella pratica</th></tr>
+  <tr><td><strong>Time-to-market ridotto</strong></td>
+      <td>Una nuova capability passa da settimane di sviluppo a pochi gio=
+rni. Il grosso del lavoro =E2=80=94 sicurezza, audit, gestione errori, m=
+onitoraggio =E2=80=94 =C3=A8 gi=C3=A0 fornito dal core.</td></tr>
+  <tr><td><strong>Rischio di regressione minimo</strong></td>
+      <td>Aggiungere una capability non comporta modifiche al flusso wipe=
+ esistente. Il comportamento gi=C3=A0 in produzione =C3=A8 protetto per c=
+ostruzione.</td></tr>
+  <tr><td><strong>Investimento capitalizzato</strong></td>
+      <td>Tutto ci=C3=B2 che =C3=A8 stato realizzato per il wipe (autenti=
+cazione, governance, audit, observability, portale, processi operativi) =
+viene riusato gratis da ogni nuova capability.</td></tr>
+  <tr><td><strong>Coerenza operativa</strong></td>
+      <td>Il team di sicurezza e l'helpdesk usano lo stesso portale, gli=
+ stessi report e gli stessi processi per ogni nuova operazione, senza do=
+ver imparare strumenti diversi.</td></tr>
+  <tr><td><strong>Roadmap evolutiva chiara</strong></td>
+      <td>=C3=88 ora possibile presentare al cliente un catalogo di prossi=
+me capability con tempistiche e costi prevedibili.</td></tr>
+</table>
+
+<h2>6. Stato attuale</h2>
+<ul>
+  <li>Soluzione <strong>completa, deployata e operativa</strong> in ambien=
+te di sviluppo del cliente.</li>
+  <li>Refactor modulare <strong>concluso, validato e verificato</strong> p=
+ost-deploy: tutti i componenti registrati e attivi, nessun errore rilevat=
+o sulla piattaforma di monitoraggio.</li>
+  <li>Codice sorgente, infrastruttura (IaC) e documentazione tecnica vers=
+ionati e aggiornati.</li>
+  <li>Comportamento end-to-end del wipe <strong>invariato</strong> rispe=
+tto alla versione precedente: nessun impatto su utenti, portale o proces=
+si esistenti.</li>
+</ul>
+
+<h2>7. Possibili prossimi passi</h2>
+<p>Con la piattaforma modulare in produzione, i candidati naturali per le=
+ prime nuove capability sono:</p>
+<ol>
+  <li><strong>Blocco remoto del device</strong> =E2=80=94 utile in scenari=
+ di smarrimento in cui non si vuole ancora ricorrere al wipe distruttivo.<=
+/li>
+  <li><strong>Rotazione della chiave BitLocker</strong> =E2=80=94 risposta=
+ rapida in caso di sospetta compromissione della chiave senza dover re-ar=
+ruolare il device.</li>
+  <li><strong>Raccolta remota di diagnostica</strong> =E2=80=94 trigger di=
+ raccolta log dal device con upload automatico al ticket di supporto.</li>
+</ol>
+<p>Tutte e tre realizzabili in tempi molto contenuti grazie all'architett=
+ura modulare.</p>
+
+<hr>
+<p>Resto a disposizione per un walkthrough della soluzione, una demo del =
+flusso end-to-end o per iniziare a pianificare l'implementazione della pr=
+ima nuova capability.</p>
+<p>Cordiali saluti,</p>
+
+<div class=3D"sig">
+  <strong>Roberto Gramellini</strong>
+  Modern Work CSA<br>
+  Mobile: <a href=3D"tel:+393351007104">+39 3351007104</a><br>
+  e-mail: <a href=3D"mailto:roberto.gramellini@microsoft.com">roberto.grame=
+llini@microsoft.com</a>
+</div>
+</div>
+</body>
+</html>

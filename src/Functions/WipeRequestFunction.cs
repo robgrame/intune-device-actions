@@ -6,6 +6,7 @@ using IntuneWipeApi.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace IntuneWipeApi.Functions;
@@ -21,15 +22,17 @@ public sealed class WipeRequestFunction
     private readonly ReplayProtector _replay;
     private readonly QueueClient _queue;
     private readonly AuditService _audit;
+    private readonly IConfiguration _cfg;
     private readonly ILogger<WipeRequestFunction> _log;
 
     public WipeRequestFunction(ClientCertValidator cert, ReplayProtector replay,
-        QueueClient queue, AuditService audit, ILogger<WipeRequestFunction> log)
+        QueueClient queue, AuditService audit, IConfiguration cfg, ILogger<WipeRequestFunction> log)
     {
         _cert = cert;
         _replay = replay;
         _queue = queue;
         _audit = audit;
+        _cfg = cfg;
         _log = log;
     }
 
@@ -184,7 +187,14 @@ public sealed class WipeRequestFunction
             }
         }
 
-        // 5) Enqueue
+        // 5) Enqueue. Allow operator-issued re-arm if BOTH the request asks for it
+        //    AND the worker is configured to honour it (Idempotency:AllowForceRearm).
+        //    This is a dev/testing escape hatch: in prod the header is silently ignored.
+        var headerSaysForce = req.Headers.TryGetValue("X-Force-Rearm", out var fhv)
+            && bool.TryParse(fhv.ToString(), out var fhb) && fhb;
+        var allowForceRearm = bool.TryParse(_cfg["Idempotency:AllowForceRearm"], out var afr) && afr;
+        var forceRearm      = headerSaysForce && allowForceRearm;
+
         var msg = new WipeQueueMessage
         {
             DeviceName = body.DeviceName!,
@@ -192,20 +202,27 @@ public sealed class WipeRequestFunction
             IntuneDeviceId = body.IntuneDeviceId!,
             CorrelationId = correlationId,
             ClientCertThumbprint = cert?.Thumbprint,
-            RequestedAt = DateTimeOffset.UtcNow
+            RequestedAt = DateTimeOffset.UtcNow,
+            ForceRearm = forceRearm,
         };
 
         var payload = JsonSerializer.Serialize(msg);
         await _queue.SendMessageAsync(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(payload)), ct);
 
-        _audit.TrackEvent(AuditEvents.RequestAccepted, new Dictionary<string, string>
+        var acceptProps = new Dictionary<string, string>
         {
             [AuditEvents.Prop.CorrelationId]  = correlationId,
             [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
             [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
             [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
             [AuditEvents.Prop.CertThumbprint] = msg.ClientCertThumbprint ?? "",
-        });
+        };
+        if (forceRearm) acceptProps[AuditEvents.Prop.ForceRearm] = "true";
+        // If the header was set but not allowed by config, leave a breadcrumb so
+        // operators can see attempted bypasses.
+        if (headerSaysForce && !allowForceRearm)
+            acceptProps["forceRearmRequestedButDisabled"] = "true";
+        _audit.TrackEvent(AuditEvents.RequestAccepted, acceptProps);
 
         return new AcceptedResult(string.Empty, new
         {

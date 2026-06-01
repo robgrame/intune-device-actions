@@ -176,8 +176,54 @@ public sealed class WipeActionRunner : IActionRunner
             return;
         }
 
-        // 4) Idempotency reservation
-        var (state, entry) = await _ledger.ReserveAsync(msg.IntuneDeviceId, msg.CorrelationId, ct);
+        // 4) Idempotency reservation (with auto-rearm + rate limiting)
+        var reserve = await _ledger.ReserveAsync(msg.IntuneDeviceId, msg.CorrelationId, msg.ForceRearm, ct);
+        var state = reserve.State;
+        var entry = reserve.Entry;
+
+        // Rate limiter trip: too many wipes for this device in the rolling 24h window.
+        if (state == IdempotencyService.State.RateLimited)
+        {
+            _audit.TrackEvent(AuditEvents.DeniedRateLimited, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]            = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]               = msg.DeviceName,
+                [AuditEvents.Prop.IntuneDeviceId]           = msg.IntuneDeviceId,
+                [AuditEvents.Prop.RecentWipesInWindow]      = reserve.RecentWipesInWindow.ToString(),
+                [AuditEvents.Prop.MaxWipesPerDevicePerDay]  = reserve.MaxWipesPerDay.ToString(),
+            }, LogLevel.Warning);
+            return;
+        }
+
+        // Auto-rearm happened: a previous wipe had reached terminal state
+        // (success / failure / timed-out past grace). Emit a dedicated audit
+        // so operators can see *why* the ledger was reset implicitly.
+        if (reserve.Rearmed != IdempotencyService.RearmReason.None)
+        {
+            var rearmEvent = reserve.Rearmed switch
+            {
+                IdempotencyService.RearmReason.AfterSuccess     => AuditEvents.LedgerRearmedAfterSuccess,
+                IdempotencyService.RearmReason.AfterFailure     => AuditEvents.LedgerRearmedAfterFailure,
+                IdempotencyService.RearmReason.AfterPollTimeout => AuditEvents.LedgerRearmedAfterTimeout,
+                IdempotencyService.RearmReason.Forced           => AuditEvents.LedgerRearmedForced,
+                _                                               => AuditEvents.LedgerRearmedAfterSuccess,
+            };
+            var props = new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]          = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]             = msg.DeviceName,
+                [AuditEvents.Prop.IntuneDeviceId]         = msg.IntuneDeviceId,
+                [AuditEvents.Prop.WipeSequence]           = entry.WipeSequence.ToString(),
+                [AuditEvents.Prop.PreviousTerminalState]  = entry.LastTerminalState ?? "(unknown)",
+                [AuditEvents.Prop.RearmReason]            = reserve.Rearmed.ToString(),
+            };
+            if (reserve.AgeSinceTerminalHours.HasValue)
+                props[AuditEvents.Prop.AgeSinceTerminalHours] = reserve.AgeSinceTerminalHours.Value.ToString("F2");
+            if (reserve.Rearmed == IdempotencyService.RearmReason.Forced)
+                props[AuditEvents.Prop.ForceRearm] = "true";
+            _audit.TrackEvent(rearmEvent, props);
+        }
+
         if (state == IdempotencyService.State.Issued)
         {
             _audit.TrackEvent(AuditEvents.WipeAlreadyIssued, new Dictionary<string, string>
@@ -186,6 +232,7 @@ public sealed class WipeActionRunner : IActionRunner
                 [AuditEvents.Prop.OriginalCorrelationId] = entry.CorrelationId,
                 [AuditEvents.Prop.DeviceName]            = msg.DeviceName,
                 [AuditEvents.Prop.IntuneDeviceId]        = msg.IntuneDeviceId,
+                [AuditEvents.Prop.WipeSequence]          = entry.WipeSequence.ToString(),
             });
             return;
         }

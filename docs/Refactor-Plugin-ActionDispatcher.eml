@@ -1,0 +1,425 @@
+X-Unsent: 1
+MIME-Version: 1.0
+From: Roberto Gramellini <roberto.gramellini@microsoft.com>
+To: 
+Subject: Intune Self-Wipe - Recap soluzione e refactor architettura plug-in
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html lang=3D"it">
+<head>
+<meta charset=3D"UTF-8">
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; font-size: 14px; color: =
+#1a1a1a; background: #f5f5f5; margin: 0; padding: 0; }
+  .wrapper { background: #ffffff; padding: 32px 40px; }
+  h1 { font-size: 22px; color: #0078d4; border-bottom: 2px solid #0078d4; p=
+adding-bottom: 8px; }
+  h2 { font-size: 17px; color: #106ebe; margin-top: 28px; }
+  h3 { font-size: 15px; color: #333; margin-top: 18px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th { background: #0078d4; color: #fff; padding: 8px 12px; text-align: lef=
+t; }
+  td { padding: 8px 12px; border: 1px solid #ddd; vertical-align: top; }
+  tr:nth-child(even) td { background: #f0f7ff; }
+  code { background: #f0f0f0; padding: 2px 5px; border-radius: 3px; font-si=
+ze: 13px; }
+  pre { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: =
+5px; overflow-x: auto; font-size: 13px; line-height: 1.5; white-space: pre-=
+wrap; }
+  pre code { background: none; padding: 0; color: inherit; }
+  blockquote { border-left: 4px solid #0078d4; margin: 12px 0; padding: 8px=
+ 16px; background: #e8f2fc; color: #333; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 24px 0; }
+  ul li, ol li { margin: 4px 0; }
+  .badge-ok  { background: #107c10; color: #fff; padding: 2px 8px; border-r=
+adius: 10px; font-size: 12px; }
+  .badge-new { background: #ca5010; color: #fff; padding: 2px 8px; border-r=
+adius: 10px; font-size: 12px; }
+  .rationale { background: #fff8e6; border-left: 4px solid #f0a500; padding=
+: 8px 14px; margin: 8px 0; font-size: 13px; }
+  .rationale strong { color: #8a6100; }
+  .sig { margin-top: 40px; padding-top: 20px; border-top: 2px solid #0078d4=
+; font-size: 13px; color: #555; }
+  .sig strong { color: #0078d4; font-size: 15px; display: block; margin-bot=
+tom: 4px; }
+</style>
+</head>
+<body>
+<div class=3D"wrapper">
+<p>Gentile Team,</p>
+<p>condivido un documento di sintesi sulla soluzione <strong>Intune Self-W=
+ipe</strong> che abbiamo costruito insieme, comprensivo di <strong>overvie=
+w architetturale</strong>, <strong>razionali delle scelte tecniche</strong>=
+ e del <strong>refactor plug-in</strong> appena rilasciato in ambiente di s=
+viluppo.</p>
+<p>Il documento =C3=A8 pensato per essere condiviso anche con stakeholder =
+non strettamente tecnici: la sezione 1 e 2 sono leggibili end-to-end, le se=
+zioni 3 e successive entrano nel dettaglio implementativo.</p>
+<hr>
+
+<h1>Intune Self-Wipe =E2=80=94 Recap soluzione e refactor plug-in</h1>
+
+<h2>1. Cosa fa la soluzione</h2>
+
+<p><strong>Obiettivo di business</strong>: consentire a un utente, dal pro=
+prio device aziendale gestito da Intune, di richiedere in autonomia un <st=
+rong>wipe del dispositivo</strong> in scenari di smarrimento, furto o sospe=
+tta compromissione, <strong>senza dover passare dall'helpdesk</strong>, ma=
+ntenendo al contempo controlli rigorosi di autorizzazione, tracciabilit=C3=
+=A0 e idempotenza.</p>
+
+<p><strong>Esperienza utente</strong>: l'utente lancia uno script <code>Po=
+werShell 5.1</code> (compatibile con tutti i client Windows in flotta senza=
+ prerequisiti aggiuntivi). Lo script si autentica con il <em>certificato d=
+i device Intune</em> emesso automaticamente al momento del join, raccoglie =
+gli identificativi del device (Entra Device ID, Intune Device ID, hostname)=
+ e li invia al backend. Il backend valida, autorizza ed esegue il wipe via =
+Microsoft Graph. Un task schedulato locale interroga periodicamente il back=
+end per restituire all'utente lo stato del comando di wipe sul device (rece=
+ived, pending, restart imminente).</p>
+
+<h3>Capability principali</h3>
+<ul>
+  <li><strong>Self-service wipe</strong> con autenticazione device-bound (=
+nessuna credenziale utente coinvolta).</li>
+  <li><strong>Allow-list di device</strong> autorizzati al wipe, gestita t=
+ramite un gruppo Entra dedicato.</li>
+  <li><strong>Idempotenza forte</strong>: un device non pu=C3=B2 emettere =
+due wipe nella stessa finestra (ledger su Blob Storage).</li>
+  <li><strong>Tracciabilit=C3=A0 e audit completi</strong>: dual-write su =
+App Insights (KQL) e Azure Table Storage (storico immutabile per compliance=
+).</li>
+  <li><strong>Monitoraggio stato wipe</strong> tramite poller server-side =
++ scheduled task client per feedback all'utente.</li>
+  <li><strong>Portale web</strong> dedicato (<code>intune-wipe-web</code>)=
+ per il team di sicurezza =E2=80=94 visualizzazione richieste, stato del co=
+mando Intune, audit search.</li>
+</ul>
+
+<h2>2. Overview architetturale</h2>
+
+<pre><code>            =E2=94=8C=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=
+=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=
+=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=
+=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=90
+            =E2=94=82  Client Windows (PowerShell 5.1)           =E2=94=82
+            =E2=94=82  - cert device Intune                      =E2=94=82
+            =E2=94=82  - scheduled task di polling stato         =E2=94=82
+            =E2=94=94=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=AC=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=98
+                         =E2=94=82  mTLS + replay-protection
+                         =E2=96=BC
+            =E2=94=8C=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=90
+            =E2=94=82  App Service "WEB" =E2=80=94 Function HTTP    =E2=
+=94=82
+            =E2=94=82  POST /api/wipe   GET /api/wipe-status        =E2=
+=94=82
+            =E2=94=82  - validazione certificato                    =E2=
+=94=82
+            =E2=94=82  - allow-list device                          =E2=
+=94=82
+            =E2=94=82  - emette su queue                            =E2=
+=94=82
+            =E2=94=94=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=AC=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=98
+                         =E2=94=82  [wipe-requests]
+                         =E2=96=BC
+            =E2=94=8C=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=90
+            =E2=94=82  App Service "WORKER" =E2=80=94 Functions     =E2=
+=94=82
+            =E2=94=82                                                =E2=
+=94=82
+            =E2=94=82  WipeProcessor (DISPATCHER, ~80 righe)         =E2=
+=94=82
+            =E2=94=82          =E2=94=82                                =
+   =E2=94=82
+            =E2=94=82          =E2=96=BC  [action-dispatch]              =
+   =E2=94=82
+            =E2=94=82  ActionDispatchFunction (ROUTER)                =
+=E2=94=82
+            =E2=94=82          =E2=94=82  ActionRunnerRegistry.Resolve   =
+   =E2=94=82
+            =E2=94=82          =E2=96=BC                                  =
+ =E2=94=82
+            =E2=94=82  WipeActionRunner (PLUG-IN)                    =E2=
+=94=82
+            =E2=94=82    =E2=80=A2 ownership Entra=E2=86=94Intune          =
+       =E2=94=82
+            =E2=94=82    =E2=80=A2 reserve idempotency ledger (blob)      =
+       =E2=94=82
+            =E2=94=82    =E2=80=A2 Graph /wipe                            =
+       =E2=94=82
+            =E2=94=82    =E2=80=A2 status tracker init + sync/reboot nudge=
+       =E2=94=82
+            =E2=94=82                                                =
+=E2=94=82
+            =E2=94=82  WipeStatusPoller (TIMER ogni 2 min)           =E2=
+=94=82
+            =E2=94=82    =E2=80=A2 polling Graph managedDeviceActions      =
+      =E2=94=82
+            =E2=94=82    =E2=80=A2 aggiorna status tracker su Table        =
+      =E2=94=82
+            =E2=94=94=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=AC=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=98
+                         =E2=94=82  Managed Identity + RBAC graph
+                         =E2=96=BC
+            =E2=94=8C=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=90
+            =E2=94=82  Microsoft Graph                              =E2=
+=94=82
+            =E2=94=82  - /deviceManagement/managedDevices           =E2=
+=94=82
+            =E2=94=82  - /wipe  (keepEnrollmentData=3Dtrue in DEV)   =E2=
+=94=82
+            =E2=94=94=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=
+=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=80=E2=94=98
+
+Storage account dedicato:
+  =E2=80=A2 Blob: idempotency ledger
+  =E2=80=A2 Table: audit trail + status tracker
+  =E2=80=A2 Queue: wipe-requests, action-dispatch
+</code></pre>
+
+<h2>3. Razionali delle scelte tecniche</h2>
+
+<h3>3.1 Due Function App distinte (web pubblica + worker privata)</h3>
+<div class=3D"rationale">
+<strong>Perch=C3=A9</strong>: la superficie esposta su Internet (intake HTT=
+P del client) e quella che pilota Graph sui device (worker) hanno profili d=
+i rischio radicalmente diversi. Tenerle nello stesso processo significherebb=
+e che una vulnerabilit=C3=A0 sulla parte HTTP darebbe accesso diretto al to=
+ken Graph con privilegi distruttivi.<br>
+<strong>Beneficio</strong>: il worker non ha endpoint pubblici; la sua UAM=
+I =C3=A8 l'unica con permessi <code>DeviceManagementManagedDevices.Privileg=
+edOperations.All</code>. Compromissione della web app =E2=86=92 nessun acc=
+esso a Graph privilegiato.
+</div>
+
+<h3>3.2 Autenticazione mTLS con certificato di device Intune</h3>
+<div class=3D"rationale">
+<strong>Perch=C3=A9</strong>: il certificato =C3=A8 emesso automaticamente=
+ al join, =C3=A8 device-bound (chiave privata in TPM quando disponibile), =
+e non richiede gestione di credenziali utente. Il client PowerShell 5.1 lo =
+seleziona dal cert store di Local Machine e lo presenta come client cert.<=
+br>
+<strong>Beneficio</strong>: zero password, zero refresh token, attacco rep=
+lay reso difficile dall'header anti-replay; un device tolto da Intune perd=
+e automaticamente la capability senza alcuna azione esplicita.
+</div>
+
+<h3>3.3 Coda <code>wipe-requests</code> tra HTTP e worker</h3>
+<div class=3D"rationale">
+<strong>Perch=C3=A9</strong>: la chiamata Graph <code>/wipe</code> non =C3=
+=A8 idempotente lato Microsoft e pu=C3=B2 essere lenta. Bufferizzare la ri=
+chiesta consente di rispondere al client in &lt;200ms e ritentare lato wo=
+rker in caso di errore transitorio.<br>
+<strong>Beneficio</strong>: l'utente non aspetta n=C3=A9 percepisce errori=
+ transitori; la queue =C3=A8 il punto naturale di "at-least-once" su cui =
+si appoggia il ledger di idempotency.
+</div>
+
+<h3>3.4 Idempotency ledger su Blob Storage</h3>
+<div class=3D"rationale">
+<strong>Perch=C3=A9</strong>: at-least-once delivery + retry queue =3D dup=
+licate possibili. Senza ledger, un device potrebbe ricevere pi=C3=B9 coman=
+di di wipe consecutivi. Usiamo blob lease/ETag come lock distribuito a co=
+sto zero (no servizi aggiuntivi tipo Redis/Cosmos).<br>
+<strong>Beneficio</strong>: garantito at-most-once-per-window per device,=
+ fail-safe sul comportamento pi=C3=B9 critico del sistema.
+</div>
+
+<h3>3.5 Allow-list device via gruppo Entra</h3>
+<div class=3D"rationale">
+<strong>Perch=C3=A9</strong>: il wipe distruttivo deve essere un'opzione e=
+splicita per device che hanno effettivamente bisogno della capability self=
+-service (es. flotta mobile, field engineers). Gestire l'allow-list come =
+gruppo Entra significa potersi appoggiare a regole dinamiche, Access Revi=
+ew e governance esistente.<br>
+<strong>Beneficio</strong>: chi gestisce gli accessi su Entra gestisce a=
+nche chi pu=C3=B2 fare self-wipe =E2=80=94 nessuna lista da mantenere a p=
+arte.
+</div>
+
+<h3>3.6 Dual-write audit (App Insights + Table Storage)</h3>
+<div class=3D"rationale">
+<strong>Perch=C3=A9</strong>: App Insights =C3=A8 perfetto per query KQL =
+operative ma ha una retention finita (90gg di default). Per esigenze di c=
+ompliance/forensics serve uno storico stabile e a basso costo =E2=86=92 T=
+able Storage.<br>
+<strong>Beneficio</strong>: una sola pipeline di emissione, due consumer =
+indipendenti =E2=80=94 il team SecOps fa caccia su KQL, il legale ha lo s=
+torico immutabile.
+</div>
+
+<h3>3.7 Status Poller server-side + scheduled task client</h3>
+<div class=3D"rationale">
+<strong>Perch=C3=A9</strong>: il comando di wipe Intune ha un ciclo di vi=
+ta asincrono (pending =E2=86=92 received =E2=86=92 actionRequiresClientCo=
+nnectivity =E2=86=92 done). Il poller server-side aggiorna lo stato in Ta=
+ble con un timer; lo scheduled task client interroga il backend ogni 30-6=
+0s e d=C3=A0 feedback all'utente <em>senza</em> usare msg.exe (toast nati=
+vo Windows). Cos=C3=AC l'utente sa quando spegnere/lasciare il device col=
+legato per il restart.<br>
+<strong>Beneficio</strong>: nessuna confusione sull'esito; il client perc=
+episce il wipe come un'operazione "trasparente e tracciata" anzich=C3=A9 c=
+ome un fire-and-forget.
+</div>
+
+<h3>3.8 Refactor plug-in (Action Dispatcher pattern) =E2=80=94 ultima evol=
+uzione</h3>
+<div class=3D"rationale">
+<strong>Perch=C3=A9</strong>: la richiesta del cliente di poter aggiunge=
+re in futuro altre operazioni privilegiate sui device (lock, rotazione Bi=
+tLocker, raccolta diagnostica) rende necessario un punto di estensione fo=
+rmale. Senza, ogni nuova capability obbligherebbe a toccare il <code>Wipe=
+Processor</code>, con rischio di regressione sul flusso wipe esistente.<b=
+r>
+<strong>Beneficio</strong>: nuove capability =3D nuova classe runner + u=
+na riga di DI. Zero modifiche al core. Pattern gi=C3=A0 collaudato nella =
+repo sorella <code>Intune.Up</code>.
+</div>
+
+<h2>4. Il refactor plug-in in dettaglio</h2>
+
+<h3>4.1 Pattern</h3>
+<p><em>Dispatcher</em> + <em>Router</em> + <em>Runner Registry</em>:</p>
+<ul>
+  <li><strong>Dispatcher</strong> (<code>WipeProcessorFunction</code>, or=
+a ~80 righe contro 331 originarie): valida app-role, deserializza la rich=
+iesta, costruisce una <em>busta generica</em> <code>ActionDispatchMessage=
+{ActionType=3D"wipe"}</code> e la accoda.</li>
+  <li><strong>Router</strong> (<code>ActionDispatchFunction</code>, nuovo=
+): queue trigger generico sulla nuova coda <code>action-dispatch</code>. =
+Non sa nulla di wipe: legge l'<code>ActionType</code>, chiama il registry,=
+ esegue il runner risolto.</li>
+  <li><strong>Runner Registry</strong> (<code>ActionRunnerRegistry</code>=
+, nuovo): popolato a startup raccogliendo da DI tutte le implementazioni =
+di <code>IActionRunner</code>. Lookup case-insensitive per <code>Type</co=
+de>.</li>
+  <li><strong>Runner</strong> (<code>WipeActionRunner</code>, primo plug=
+-in concreto): contiene l'intera logica wipe estratta dal vecchio process=
+or.</li>
+</ul>
+
+<h3>4.2 Come si aggiunge una nuova capability =E2=80=94 esempio "lock"</h=
+3>
+<pre><code>// 1) nuovo file: src/Actions/Runners/LockActionRunner.cs
+public sealed class LockActionRunner : IActionRunner
+{
+    public string Type =3D&gt; "lock";
+    public async Task RunAsync(ActionDispatchMessage env, CancellationTok=
+en ct) { /* ... */ }
+}
+
+// 2) Program.cs - UNA SOLA RIGA
+services.AddSingleton&lt;IActionRunner, LockActionRunner&gt;();
+</code></pre>
+<p>Nessuna modifica a HTTP function, code, dispatcher, router, identit=C3=
+=A0 o Bicep.</p>
+
+<h3>4.3 Nuovi eventi audit della pipeline plug-in</h3>
+<table>
+  <tr><th>Evento</th><th>Significato</th></tr>
+  <tr><td><code>action.dispatch.enqueued</code></td><td>Busta accodata su=
+ <code>action-dispatch</code>.</td></tr>
+  <tr><td><code>action.dispatch.received</code></td><td>Router ha consum=
+ato la busta.</td></tr>
+  <tr><td><code>action.dispatch.completed</code></td><td>Runner concluso=
+ senza eccezioni (con durata ms).</td></tr>
+  <tr><td><code>action.dispatch.runner-failed</code></td><td>Runner ha l=
+anciato eccezione (con flag <code>failOnError</code>).</td></tr>
+  <tr><td><code>action.dispatch.no-runner</code></td><td>Nessun runner =
+registrato per il tipo richiesto =E2=80=94 messaggio scartato, alert.</td=
+></tr>
+  <tr><td><code>action.dispatch.invalid-envelope</code></td><td>Busta JS=
+ON malformata =E2=80=94 scartata, no poison loop.</td></tr>
+</table>
+<p>Tutti gli eventi <code>wipe.*</code> esistenti restano <strong>invar=
+iati</strong>: KQL e workbook in produzione continuano a funzionare.</p>
+
+<h2>5. Sicurezza =E2=80=94 controlli applicati</h2>
+<ul>
+  <li><strong>Rubber-duck review</strong> indipendente prima del deploy:=
+ ha individuato e corretto due blocker
+    <ul>
+      <li><em>queue encoding mismatch</em> tra producer e queue trigger =
+=E2=86=92 risolto con <code>QueueMessageEncoding.Base64</code>;</li>
+      <li><em>defense-in-depth</em>: aggiunto <code>AzureWebJobs.ActionD=
+ispatch.Disabled=3Dtrue</code> sull'app pubblica per impedire bindings i=
+nattesi.</li>
+    </ul>
+  </li>
+  <li><strong>Behaviour-preserving</strong>: idempotency e retry policy =
+identiche al pre-refactor.</li>
+  <li><strong>Nessuna nuova role assignment</strong>: la UAMI del worke=
+r aveva gi=C3=A0 <code>Storage Queue Data Contributor</code> a livello s=
+torage account.</li>
+  <li><strong>Isolamento delle due Function App</strong> confermato pos=
+t-deploy.</li>
+  <li><strong>Build pulita</strong> .NET 10, 0 warning, 0 error.</li>
+</ul>
+
+<h2>6. Verifica post-deploy</h2>
+<ul>
+  <li><span class=3D"badge-ok">OK</span> Coda <code>action-dispatch</co=
+de> creata sullo storage del worker (<code>intwipestpqupxwx6egkr3e</code=
+>).</li>
+  <li><span class=3D"badge-ok">OK</span> Tutte e 5 le function registr=
+ate sul worker: <code>ActionDispatch</code>, <code>WipeProcessor</code>,=
+ <code>WipeRequest</code>, <code>WipeStatus</code>, <code>WipeStatusPoll=
+er</code>.</li>
+  <li><span class=3D"badge-ok">OK</span> Host stabile, <code>WipeStatu=
+sPoller</code> tick ogni 2 min senza errori; nessuna eccezione in App In=
+sights nei 15 minuti post-deploy.</li>
+  <li><span class=3D"badge-ok">OK</span> Commit <code>128a300</code> p=
+ushato su <code>main</code>; README aggiornato con diagramma plug-in e g=
+uida "how-to-add-runner".</li>
+</ul>
+
+<h2>7. Roadmap suggerita</h2>
+<p>Con il dispatcher in produzione, i primi candidati a diventare runne=
+r plug-in sono:</p>
+<ol>
+  <li><strong>Lock device</strong> =E2=80=94 blocco remoto per smarrim=
+ento senza distruzione dati.</li>
+  <li><strong>BitLocker key rotation</strong> =E2=80=94 risposta a so=
+spetta compromissione chiave senza re-enrollment.</li>
+  <li><strong>Diagnostic collection</strong> =E2=80=94 raccolta log r=
+emota <code>collectDiagnostics</code> con upload al ticket.</li>
+</ol>
+<p>Tempistica indicativa: ~100-200 righe per runner + DI, nessun impa=
+tto sull'esistente.</p>
+
+<hr>
+<p>Resto a disposizione per dettagli ulteriori, demo della pipeline,=
+ oppure per pianificare l'implementazione del prossimo runner.</p>
+<p>Cordiali saluti,</p>
+
+<div class=3D"sig">
+  <strong>Roberto Gramellini</strong>
+  Modern Work CSA<br>
+  Mobile: <a href=3D"tel:+393351007104">+39 3351007104</a><br>
+  e-mail: <a href=3D"mailto:roberto.gramellini@microsoft.com">roberto=
+.gramellini@microsoft.com</a>
+</div>
+</div>
+</body>
+</html>

@@ -41,6 +41,26 @@ public static class AuditEvents
     public const string WipeAlreadyIssued        = "wipe.already-issued";
     public const string WipeInProgressElsewhere  = "wipe.in-progress-elsewhere";
 
+    // Ledger lifecycle — re-arm decisions taken by IdempotencyService when a
+    // previous wipe for the same device has already reached a terminal state
+    // on the Intune side (as observed by WipeStatusTracker). These are the
+    // signals operators look at to validate that "test wipe ×N" or
+    // "re-wipe after legitimate failure" flows behave as designed.
+    public const string LedgerRearmedAfterSuccess = "wipe.ledger.rearmed.after-success";
+    public const string LedgerRearmedAfterFailure = "wipe.ledger.rearmed.after-failure";
+    public const string LedgerRearmedAfterTimeout = "wipe.ledger.rearmed.after-timeout";
+    public const string LedgerRearmedForced       = "wipe.ledger.rearmed.forced";
+    public const string LedgerRearmConflict       = "wipe.ledger.rearm-conflict";
+    public const string LedgerNoTracker           = "wipe.ledger.no-tracker";
+    public const string LedgerWaitingGrace        = "wipe.ledger.waiting-grace-period";
+
+    // Rate limiting (per-device daily cap on wipes)
+    public const string DeniedRateLimited        = "wipe.denied.rate-limited";
+
+    // Admin operations on the ledger (manual reset by SecOps).
+    public const string LedgerResetManual        = "wipe.ledger.reset-manual";
+    public const string LedgerResetDenied        = "wipe.ledger.reset-denied";
+
     // Graph outcomes
     public const string WipeIssued          = "wipe.graph.issued";
     public const string WipeFailedPermanent = "wipe.graph.failed-permanent";
@@ -114,5 +134,20 @@ public static class AuditEvents
         // Plug-in dispatch
         public const string ActionType              = "actionType";
         public const string SchemaVersion           = "schemaVersion";
+        // Ledger / rearm context
+        public const string WipeSequence            = "wipeSequence";
+        public const string PreviousTerminalState   = "previousTerminalState";
+        public const string PreviousIssuedAt        = "previousIssuedAt";
+        public const string RearmReason             = "rearmReason";
+        public const string ForceRearm              = "forceRearm";
+        public const string RecentWipesInWindow     = "recentWipesInWindow";
+        public const string MaxWipesPerDevicePerDay = "maxWipesPerDevicePerDay";
+        public const string GracePeriodHours        = "gracePeriodHours";
+        public const string AgeSinceTerminalHours   = "ageSinceTerminalHours";
+        // Admin context
+        public const string AdminReason             = "adminReason";
+        public const string Actor                   = "actor";
+        public const string AdminCallerIp           = "adminCallerIp";
+        public const string ArchiveBlobName         = "archiveBlobName";
     }
 }

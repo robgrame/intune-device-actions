@@ -75,6 +75,17 @@ param wipeStatusTableName string = 'wipestatus'
 @description('NCRONTAB expression for the wipe-action status poller. Default: every 2 minutes (tight polling for prompt operator visibility on stuck wipes).')
 param wipeStatusPollerCron string = '0 */2 * * * *'
 
+// Idempotency ledger re-arm controls (see IdempotencyService for behaviour).
+// Defaults are dev-friendly; tighten in prod via main.parameters.json.
+@description('Max wipes per device per 24h. Hard ceiling enforced by the ledger.')
+param idempotencyMaxWipesPerDay int = 5
+@description('Hours to wait before auto-rearming a ledger whose previous wipe ended in pollTimeout.')
+param idempotencyRearmGracePeriodHours int = 48
+@description('If true, the X-Force-Rearm HTTP header bypasses the tracker-based rearm gate. Keep false in prod.')
+param idempotencyAllowForceRearm bool = true
+@description('If true, the /api/admin/wipe-ledger/* endpoints are reachable (function key still required). Default false in prod.')
+param idempotencyAdminApiEnabled bool = true
+
 var suffix = uniqueString(resourceGroup().id)
 var stWebRaw = toLower('${namePrefix}stw${suffix}')
 var stWebName = length(stWebRaw) > 24 ? substring(stWebRaw, 0, 24) : stWebRaw
@@ -239,6 +250,10 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
     httpsOnly: true
     clientCertEnabled: true
     clientCertMode: 'Required'
+    // Admin/operator endpoints don't use mTLS device auth — they rely on the
+    // function key plus the Idempotency:AdminApiEnabled kill switch. Exempt
+    // the wipe-ledger admin path from the device-cert requirement.
+    clientCertExclusionPaths: '/api/wipe-ledger'
     keyVaultReferenceIdentity: uamiWeb.id
     siteConfig: {
       minTlsVersion: '1.2'
@@ -270,7 +285,21 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
         // Audit persistence (dual-write to Table Storage alongside App Insights).
         { name: 'Audit__StorageAccount', value: storageProc.name }
         { name: 'Audit__TableName', value: auditTableName }
-        // Client cert / replay protection (HTTP surface).
+        // Idempotency ledger access (web reads/resets via admin endpoints).
+        { name: 'Idempotency__StorageAccount',          value: storageProc.name }
+        { name: 'Idempotency__BlobContainer',           value: ledgerContainerName }
+        { name: 'Idempotency__AllowForceRearm',         value: string(idempotencyAllowForceRearm) }
+        { name: 'Idempotency__AdminApiEnabled',         value: string(idempotencyAdminApiEnabled) }
+        { name: 'Idempotency__MaxWipesPerDevicePerDay', value: string(idempotencyMaxWipesPerDay) }
+        { name: 'Idempotency__RearmGracePeriodHours',   value: string(idempotencyRearmGracePeriodHours) }
+        // Wipe status table (web reads for admin GET join view).
+        { name: 'WipeStatus__TableName', value: wipeStatusTableName }
+        // GraphWipeService is pulled in transitively by WipeStatusTracker (DI graph)
+        // even though the web app never calls Graph. Required to avoid startup
+        // construction failure of the admin endpoint resolver.
+        { name: 'Wipe__AllowedGroupId',     value: allowedGroupId }
+        { name: 'Wipe__KeepEnrollmentData', value: string(keepEnrollmentData) }
+        { name: 'Wipe__KeepUserData',       value: string(keepUserData) }
         { name: 'ClientCert__TrustedCaThumbprints',           value: trustedCaThumbprints }
         { name: 'ClientCert__TrustedRootCertificates',        value: trustedRootCertificatesBase64 }
         { name: 'ClientCert__TrustedIntermediateCertificates', value: trustedIntermediateCertificatesBase64 }
@@ -341,6 +370,10 @@ resource funcProc 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'Actions__DispatchQueueName', value: actionDispatchQueueName }
         { name: 'Idempotency__BlobContainer', value: ledgerContainerName }
         { name: 'Idempotency__StorageAccount', value: storageProc.name }
+        { name: 'Idempotency__AllowForceRearm',         value: string(idempotencyAllowForceRearm) }
+        { name: 'Idempotency__AdminApiEnabled',         value: string(idempotencyAdminApiEnabled) }
+        { name: 'Idempotency__MaxWipesPerDevicePerDay', value: string(idempotencyMaxWipesPerDay) }
+        { name: 'Idempotency__RearmGracePeriodHours',   value: string(idempotencyRearmGracePeriodHours) }
         // Audit persistence (dual-write to Table Storage alongside App Insights).
         { name: 'Audit__StorageAccount', value: storageProc.name }
         { name: 'Audit__TableName', value: auditTableName }
@@ -367,6 +400,7 @@ var queueDataContributor  = subscriptionResourceId('Microsoft.Authorization/role
 var tableDataContributor  = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
 // Sender is enqueue-only — does NOT allow read/peek/delete on the queue.
 var queueDataMessageSender = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'c6a89b2d-59bc-44d0-9896-0f6e12d7b80a')
+var blobDataContributor    = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
 
 // Worker identity → full data-plane on its own storage account.
 // Functions host (identity-based AzureWebJobsStorage) needs Blob (host lease
@@ -422,6 +456,16 @@ resource raWebTableOnProc 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   name: guid(storageProc.id, uamiWeb.id, 'table-audit')
   scope: storageProc
   properties: { roleDefinitionId: tableDataContributor, principalId: uamiWeb.properties.principalId, principalType: 'ServicePrincipal' }
+}
+
+// Admin ledger endpoints (web app) need to read+reset blobs in the wipe-ledger
+// container on the worker's storage account. Scoped to the single container,
+// least privilege: no access to any other blob namespace (eml archives,
+// AzureWebJobs internals, etc.).
+resource raWebLedger 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(ledgerContainer.id, uamiWeb.id, 'blob-ledger')
+  scope: ledgerContainer
+  properties: { roleDefinitionId: blobDataContributor, principalId: uamiWeb.properties.principalId, principalType: 'ServicePrincipal' }
 }
 
 output webAppName string = funcWeb.name
