@@ -107,6 +107,39 @@ function Start-StatusPoller {
     }
 }
 
+function Invoke-LocalMdmNudge {
+    <#
+        Force a local MDM check-in so Intune Management Extension picks up the
+        freshly-issued wipe within seconds instead of waiting up to 8 hours
+        for the next scheduled sync. Combines with the server-side syncDevice
+        + rebootNow nudges already issued by WipeActionRunner; either path
+        alone is enough — running both shortens worst-case latency further.
+
+        Returns the structured result from Invoke-MdmSyncNudge so the caller
+        can persist it in last-result.json for telemetry.
+    #>
+    param(
+        [bool] $AllowReboot = $false,
+        [int]  $RebootDelaySeconds = 60
+    )
+    $modPath = Join-Path $InstallDir 'MdmSyncNudge.psm1'
+    if (-not (Test-Path $modPath)) {
+        Write-Host ("WARN: MdmSyncNudge.psm1 not found at {0} — skipping local nudge." -f $modPath)
+        return @{ ok = $false; method = 'module-missing'; taskCount = 0; attempts = @() }
+    }
+    try {
+        Import-Module $modPath -Force -DisableNameChecking -ErrorAction Stop
+        $params = @{ RebootDelaySeconds = $RebootDelaySeconds }
+        if ($AllowReboot) { $params['AllowRebootFallback'] = $true }
+        $result = Invoke-MdmSyncNudge @params
+        Write-Host ("Local MDM nudge: method={0} ok={1} taskCount={2}" -f $result.method, $result.ok, $result.taskCount)
+        return $result
+    } catch {
+        Write-Host ("WARN: Invoke-LocalMdmNudge failed: {0}" -f $_.Exception.Message)
+        return @{ ok = $false; method = 'error'; taskCount = 0; attempts = @(); error = $_.Exception.Message }
+    }
+}
+
 function Get-ErrJsonFromOutput {
     param($Lines)
     foreach ($line in $Lines) {
@@ -191,8 +224,29 @@ try {
         }
     }
 
-    Write-Result -Status 'ok' -Message 'Wipe request accepted by the API.' -CorrelationId $corr
-    Write-WipeEventLog -EntryType Information -EventId 1001 -Message ("Wipe request accepted by the API. CorrelationId={0}, Device={1}" -f $corr, $env:COMPUTERNAME)
+    # Best-effort local MDM nudge: force IME to fetch the freshly-issued wipe
+    # NOW (PushLaunch task → fallback to any EnterpriseMgmt sync task →
+    # optional scheduled reboot). Combined with the server-side syncDevice
+    # + rebootNow calls issued by WipeActionRunner, this collapses end-to-end
+    # latency from "tens of minutes" to "tens of seconds" on the typical path.
+    $allowReboot = $false
+    $rebootDelay = 60
+    if ($cfg.PSObject.Properties.Name -contains 'AllowRebootFallback') {
+        $allowReboot = [bool]$cfg.AllowRebootFallback
+    }
+    if ($cfg.PSObject.Properties.Name -contains 'MdmNudgeRebootDelaySeconds') {
+        try { $rebootDelay = [int]$cfg.MdmNudgeRebootDelaySeconds } catch { }
+    }
+    $nudge = Invoke-LocalMdmNudge -AllowReboot $allowReboot -RebootDelaySeconds $rebootDelay
+
+    $extraOk = @{
+        mdmNudgeMethod    = [string]$nudge.method
+        mdmNudgeOk        = [bool]$nudge.ok
+        mdmNudgeTaskCount = [int]$nudge.taskCount
+    }
+    Write-Result -Status 'ok' -Message 'Wipe request accepted by the API.' -CorrelationId $corr -Extra $extraOk
+    Write-WipeEventLog -EntryType Information -EventId 1001 -Message ("Wipe request accepted by the API. CorrelationId={0}, Device={1}, LocalMdmNudge={2} (ok={3}, tasks={4})" -f `
+        $corr, $env:COMPUTERNAME, $nudge.method, $nudge.ok, $nudge.taskCount)
     Start-StatusPoller -CorrelationId $corr
     exit 0
 }

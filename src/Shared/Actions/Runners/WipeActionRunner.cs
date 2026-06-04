@@ -307,45 +307,154 @@ public sealed class WipeActionRunner : IActionRunner
 
         if (syncDelay > 0)
         {
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(syncDelay), ct);
-                await _graph.SyncDeviceAsync(managedId, ct);
-                _audit.TrackEvent(AuditEvents.SyncFallbackIssued, new Dictionary<string, string>
-                {
-                    [AuditEvents.Prop.CorrelationId]   = msg.CorrelationId,
-                    [AuditEvents.Prop.DeviceName]      = msg.DeviceName,
-                    [AuditEvents.Prop.ManagedDeviceId] = managedId,
-                    ["delaySeconds"]                   = syncDelay.ToString(),
-                });
-            }
+            try { await Task.Delay(TimeSpan.FromSeconds(syncDelay), ct); }
             catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                _audit.TrackEvent(AuditEvents.SyncFallbackFailed, ex, BuildGraphErrProps(msg, managedId, ex), LogLevel.Warning);
-            }
+            await RunNudgeWithRetryAsync(
+                action:           ct2 => _graph.SyncDeviceAsync(managedId, ct2),
+                maxAttempts:      _graph.SyncFallbackMaxAttempts,
+                issuedEvent:      AuditEvents.SyncFallbackIssued,
+                retryingEvent:    AuditEvents.SyncFallbackRetrying,
+                failedEvent:      AuditEvents.SyncFallbackFailed,
+                exhaustedEvent:   AuditEvents.SyncFallbackExhausted,
+                extraIssuedProps: new() { ["delaySeconds"] = syncDelay.ToString() },
+                msg:              msg,
+                managedId:        managedId,
+                ct:               ct);
         }
 
         if (rebootDelay > 0)
         {
+            try { await Task.Delay(TimeSpan.FromSeconds(rebootDelay), ct); }
+            catch (OperationCanceledException) { throw; }
+            await RunNudgeWithRetryAsync(
+                action:           ct2 => _graph.RebootAsync(managedId, ct2),
+                maxAttempts:      _graph.RebootFallbackMaxAttempts,
+                issuedEvent:      AuditEvents.RebootFallbackIssued,
+                retryingEvent:    AuditEvents.RebootFallbackRetrying,
+                failedEvent:      AuditEvents.RebootFallbackFailed,
+                exhaustedEvent:   AuditEvents.RebootFallbackExhausted,
+                extraIssuedProps: new() { ["delaySeconds"] = rebootDelay.ToString() },
+                msg:              msg,
+                managedId:        managedId,
+                ct:               ct);
+        }
+    }
+
+    /// <summary>
+    /// Runs a post-wipe nudge (syncDevice or rebootNow) with bounded retries on
+    /// transient Graph errors. Never throws (the wipe itself already succeeded);
+    /// failures end up as audit events that operators can alert on.
+    /// </summary>
+    /// <remarks>
+    /// Backoff sequence (ms): 1000, 3000, 10000, 30000, 60000 — capped at
+    /// <paramref name="maxAttempts"/> entries. Total worst-case latency for
+    /// the default 3 attempts is ~14s.
+    /// </remarks>
+    private async Task RunNudgeWithRetryAsync(
+        Func<CancellationToken, Task> action,
+        int maxAttempts,
+        string issuedEvent,
+        string retryingEvent,
+        string failedEvent,
+        string exhaustedEvent,
+        Dictionary<string, string> extraIssuedProps,
+        ActionRequestMessage msg,
+        string managedId,
+        CancellationToken ct)
+    {
+        // Fixed backoff schedule. Keep it short — the runner is on a Service Bus
+        // lock and we have *two* nudges back-to-back. Total upper bound at
+        // maxAttempts=5 is ~104s, well within the 10-minute auto-renew window.
+        int[] backoffMs = { 1000, 3000, 10000, 30000, 60000 };
+
+        Exception? lastException = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(rebootDelay), ct);
-                await _graph.RebootAsync(managedId, ct);
-                _audit.TrackEvent(AuditEvents.RebootFallbackIssued, new Dictionary<string, string>
+                await action(ct);
+                var props = new Dictionary<string, string>(extraIssuedProps)
                 {
                     [AuditEvents.Prop.CorrelationId]   = msg.CorrelationId,
                     [AuditEvents.Prop.DeviceName]      = msg.DeviceName,
                     [AuditEvents.Prop.ManagedDeviceId] = managedId,
-                    ["delaySeconds"]                   = rebootDelay.ToString(),
-                });
+                    [AuditEvents.Prop.AttemptNumber]   = attempt.ToString(),
+                    [AuditEvents.Prop.MaxAttempts]     = maxAttempts.ToString(),
+                };
+                _audit.TrackEvent(issuedEvent, props);
+                return;
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                _audit.TrackEvent(AuditEvents.RebootFallbackFailed, ex, BuildGraphErrProps(msg, managedId, ex), LogLevel.Warning);
+                lastException = ex;
+                var kind = GraphWipeService.Classify(ex);
+
+                // Permanent errors (4xx other than 408/429): don't waste retries.
+                // E.g., 404 here is expected when the device is already gone from
+                // Intune because the wipe is being applied.
+                if (kind == GraphWipeService.GraphErrorKind.Permanent)
+                {
+                    _audit.TrackEvent(failedEvent, ex,
+                        BuildNudgeErrProps(msg, managedId, ex, attempt, maxAttempts),
+                        LogLevel.Warning);
+                    return;
+                }
+
+                // Transient. If we have budget left, sleep and try again.
+                if (attempt < maxAttempts)
+                {
+                    var sleep = backoffMs[Math.Min(attempt - 1, backoffMs.Length - 1)];
+                    var props = BuildNudgeErrProps(msg, managedId, ex, attempt, maxAttempts);
+                    props[AuditEvents.Prop.BackoffMs] = sleep.ToString();
+                    _audit.TrackEvent(retryingEvent, ex, props, LogLevel.Information);
+                    try { await Task.Delay(sleep, ct); }
+                    catch (OperationCanceledException) { throw; }
+                    continue;
+                }
             }
         }
+
+        // Exhausted: all attempts threw transient errors. Surface a dedicated
+        // event so operators can alert on it separately from per-attempt failures.
+        // lastException is guaranteed non-null here (the loop either returns on
+        // success/Permanent or sets lastException on every transient attempt),
+        // but the compiler can't prove it — handle both overloads explicitly.
+        var exhaustedProps = BuildNudgeErrProps(msg, managedId, lastException, maxAttempts, maxAttempts);
+        if (lastException is not null)
+        {
+            _audit.TrackEvent(exhaustedEvent, lastException, exhaustedProps, LogLevel.Warning);
+        }
+        else
+        {
+            _audit.TrackEvent(exhaustedEvent, exhaustedProps, LogLevel.Warning);
+        }
+    }
+
+    private static Dictionary<string, string> BuildNudgeErrProps(
+        ActionRequestMessage msg, string managedId, Exception? ex,
+        int attempt, int maxAttempts)
+    {
+        var props = new Dictionary<string, string>
+        {
+            [AuditEvents.Prop.CorrelationId]   = msg.CorrelationId,
+            [AuditEvents.Prop.DeviceName]      = msg.DeviceName,
+            [AuditEvents.Prop.ManagedDeviceId] = managedId,
+            [AuditEvents.Prop.AttemptNumber]   = attempt.ToString(),
+            [AuditEvents.Prop.MaxAttempts]     = maxAttempts.ToString(),
+        };
+        if (ex is not null)
+        {
+            props[AuditEvents.Prop.ExceptionType]    = ex.GetType().FullName ?? "(unknown)";
+            props[AuditEvents.Prop.ExceptionMessage] = ex.Message ?? string.Empty;
+            if (ex is Microsoft.Graph.Models.ODataErrors.ODataError oe)
+            {
+                props["graphStatusCode"] = oe.ResponseStatusCode.ToString();
+                props["graphErrorCode"]  = oe.Error?.Code ?? string.Empty;
+                props["graphErrorMsg"]   = oe.Error?.Message ?? string.Empty;
+            }
+        }
+        return props;
     }
 
     private static Dictionary<string, string> BuildGraphErrProps(ActionRequestMessage msg, string managedId, Exception ex)

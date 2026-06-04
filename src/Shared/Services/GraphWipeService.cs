@@ -16,6 +16,8 @@ public sealed class GraphWipeService
     private readonly string _allowedGroupId;
     private readonly int _syncFallbackDelaySeconds;
     private readonly int _rebootFallbackDelaySeconds;
+    private readonly int _syncFallbackMaxAttempts;
+    private readonly int _rebootFallbackMaxAttempts;
 
     public GraphWipeService(GraphServiceClient graph, IConfiguration cfg, ILogger<GraphWipeService> log)
     {
@@ -30,10 +32,20 @@ public sealed class GraphWipeService
         // rebootNow 60s after the sync. Set either to 0 to disable that step.
         _syncFallbackDelaySeconds   = int.TryParse(cfg["Wipe:SyncFallbackDelaySeconds"],   out var s) ? Math.Max(0, s) : 60;
         _rebootFallbackDelaySeconds = int.TryParse(cfg["Wipe:RebootFallbackDelaySeconds"], out var r) ? Math.Max(0, r) : 60;
+
+        // Per-nudge retry budget. We promote the nudges from best-effort to
+        // "best-effort with retry" so a single transient Graph 429/503 doesn't
+        // silently degrade wipe latency for the user. Caps at 5 to keep total
+        // runner duration well within the Service Bus auto-renew window
+        // (host.json maxAutoLockRenewalDuration = 00:10:00).
+        _syncFallbackMaxAttempts   = int.TryParse(cfg["Wipe:SyncFallbackMaxAttempts"],   out var sa) ? Math.Clamp(sa, 1, 5) : 3;
+        _rebootFallbackMaxAttempts = int.TryParse(cfg["Wipe:RebootFallbackMaxAttempts"], out var ra) ? Math.Clamp(ra, 1, 5) : 3;
     }
 
-    public int SyncFallbackDelaySeconds   => _syncFallbackDelaySeconds;
-    public int RebootFallbackDelaySeconds => _rebootFallbackDelaySeconds;
+    public int SyncFallbackDelaySeconds    => _syncFallbackDelaySeconds;
+    public int RebootFallbackDelaySeconds  => _rebootFallbackDelaySeconds;
+    public int SyncFallbackMaxAttempts     => _syncFallbackMaxAttempts;
+    public int RebootFallbackMaxAttempts   => _rebootFallbackMaxAttempts;
     public bool KeepEnrollmentData         => _keepEnrollment;
     public bool KeepUserData               => _keepUserData;
 

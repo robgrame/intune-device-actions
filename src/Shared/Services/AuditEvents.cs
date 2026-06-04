@@ -68,10 +68,14 @@ public static class AuditEvents
     // Post-wipe fallback nudges (best-effort: syncDevice + rebootNow to push the
     // managed-device to pick up the pending wipe even if it didn't kick in
     // immediately). Failures here do NOT reverse the successful wipe.
-    public const string SyncFallbackIssued   = "wipe.graph.sync-fallback.issued";
-    public const string SyncFallbackFailed   = "wipe.graph.sync-fallback.failed";
-    public const string RebootFallbackIssued = "wipe.graph.reboot-fallback.issued";
-    public const string RebootFallbackFailed = "wipe.graph.reboot-fallback.failed";
+    public const string SyncFallbackIssued     = "wipe.graph.sync-fallback.issued";
+    public const string SyncFallbackRetrying   = "wipe.graph.sync-fallback.retrying";
+    public const string SyncFallbackFailed     = "wipe.graph.sync-fallback.failed";
+    public const string SyncFallbackExhausted  = "wipe.graph.sync-fallback.exhausted";
+    public const string RebootFallbackIssued   = "wipe.graph.reboot-fallback.issued";
+    public const string RebootFallbackRetrying = "wipe.graph.reboot-fallback.retrying";
+    public const string RebootFallbackFailed   = "wipe.graph.reboot-fallback.failed";
+    public const string RebootFallbackExhausted= "wipe.graph.reboot-fallback.exhausted";
 
     // Post-issue wipe action tracking (polled by ActionStatusPollerFunction every
     // few minutes against Graph's managedDevices/{id}.deviceActionResults).
@@ -155,5 +159,9 @@ public static class AuditEvents
         public const string Actor                   = "actor";
         public const string AdminCallerIp           = "adminCallerIp";
         public const string ArchiveBlobName         = "archiveBlobName";
+        // Post-wipe nudge retry context
+        public const string AttemptNumber           = "attemptNumber";
+        public const string MaxAttempts             = "maxAttempts";
+        public const string BackoffMs               = "backoffMs";
     }
 }

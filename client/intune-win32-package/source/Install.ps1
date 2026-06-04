@@ -71,6 +71,7 @@ try {
         'Show-WipeProgressDialog.ps1',
         'Launch-Wipe.ps1',
         'DeviceIdentity.psm1',
+        'MdmSyncNudge.psm1',
         'version.txt'
     )
     foreach ($f in $payload) {
