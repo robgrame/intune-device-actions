@@ -397,6 +397,18 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
     clientCertMode: 'Required'
     clientCertExclusionPaths: '/api/actions/ledger'
     keyVaultReferenceIdentity: uamiWeb.id
+    // VNet integration (Option B). web-subnet is delegated to
+    // Microsoft.Web/serverFarms. vnetRouteAllEnabled=false keeps Internet
+    // outbound on App Service public IPs (Graph / Service Bus / AppConfig /
+    // App Insights — high volume); only RFC1918 destinations (the storage
+    // PE IPs resolved via the linked private DNS zones) traverse the VNet.
+    // vnetContentShareEnabled=true is REQUIRED so the Azure Files content
+    // share (WEBSITE_CONTENTSHARE on storageWeb) also flows through the
+    // VNet → file PE, otherwise the EP1 platform breaks when storage is
+    // locked down.
+    virtualNetworkSubnetId: webSubnet.id
+    vnetRouteAllEnabled: false
+    vnetContentShareEnabled: true
     siteConfig: {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
@@ -482,6 +494,12 @@ resource funcProc 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: planProc.id
     httpsOnly: true
     keyVaultReferenceIdentity: uami.id
+    // Flex Consumption VNet integration. proc-flex-subnet is delegated to
+    // Microsoft.App/environments. Flex always routes ALL outbound through
+    // the VNet when integrated, so Graph / Service Bus / AppConfig / App
+    // Insights egress through the NAT Gateway on this subnet → 1 static
+    // public IP. Storage hits the blob PE via the linked private DNS zone.
+    virtualNetworkSubnetId: procFlexSubnet.id
     functionAppConfig: {
       deployment: {
         storage: {
@@ -580,6 +598,10 @@ resource funcWipe 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: planWipe.id
     httpsOnly: true
     keyVaultReferenceIdentity: uamiWipe.id
+    // Flex Consumption VNet integration. wipe-flex-subnet is delegated to
+    // Microsoft.App/environments and shares the NAT Gateway with proc-flex
+    // for stable SNAT to Graph (wipe is the heaviest Graph consumer).
+    virtualNetworkSubnetId: wipeFlexSubnet.id
     functionAppConfig: {
       deployment: {
         storage: {
@@ -893,22 +915,151 @@ resource raAppConfigWipe 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Private Endpoint infrastructure (Option A — dormant PE)
+// Private Endpoint + VNet integration infrastructure (Option B — active)
 //
-// Adds a minimal VNet + private DNS zones + private endpoints for the three
-// storage accounts so the platform is ready to flip into a fully private
-// network topology. The Function Apps are NOT VNet-integrated in this phase:
-// they continue to reach storage via the public endpoint with
-// publicNetworkAccess=Enabled + defaultAction=Deny + bypass=AzureServices +
-// IP whitelist for operator access. To activate the PE path, a future change
-// would (a) add a delegated integration subnet per Function App,
-// (b) set virtualNetworkSubnetId + vnetRouteAllEnabled on each funcApp, and
-// (c) flip storage publicNetworkAccess=Disabled. Costs at rest: 1 VNet
-// (free) + 6 PEs (one NIC each) + 4 private DNS zones (free) + 4 DNS links
-// (free).
+// All 3 Function Apps are VNet-integrated. Storage is reachable ONLY via
+// Private Endpoints from inside the VNet (plus a dev IP whitelist). Flex
+// outbound to public services (Graph, Service Bus, App Configuration, App
+// Insights) flows through a NAT Gateway → 1 Standard public IP for stable
+// SNAT. Web (EP1) keeps vnetRouteAllEnabled=false so its Internet outbound
+// stays on App Service public IPs (avoids NAT SNAT cost on high-volume Graph
+// calls); only its RFC1918 destinations (the storage PEs) route through VNet.
+// Web has vnetContentShareEnabled=true so the Azure Files content-share path
+// (WEBSITE_CONTENTSHARE) also goes through the VNet → file PE.
+//
+// Subnet budget (10.20.0.0/24):
+//   pe-subnet         10.20.0.0/27   (.0-.31)   — 6 PEs
+//   reserved          10.20.0.32/27  (.32-.63)
+//   proc-flex-subnet  10.20.0.64/26  (.64-.127) — Microsoft.App/environments
+//   wipe-flex-subnet  10.20.0.128/26 (.128-.191) — Microsoft.App/environments
+//   web-subnet        10.20.0.192/26 (.192-.255) — Microsoft.Web/serverFarms
+//
+// 2 NSGs (flex shared, web dedicated). PE subnet has no NSG because
+// privateEndpointNetworkPolicies=Disabled disables NSG enforcement on PE NICs.
+// 1 NAT Gateway + 1 Standard Public IP, attached to both flex subnets.
 // ─────────────────────────────────────────────────────────────────────────────
-var vnetName     = toLower('${namePrefix}-vnet-${suffix}')
-var peSubnetName = 'pe-subnet'
+var vnetName           = toLower('${namePrefix}-vnet-${suffix}')
+var peSubnetName       = 'pe-subnet'
+var webSubnetName      = 'web-subnet'
+var procFlexSubnetName = 'proc-flex-subnet'
+var wipeFlexSubnetName = 'wipe-flex-subnet'
+var nsgFlexName        = toLower('${namePrefix}-nsg-flex-${suffix}')
+var nsgWebName         = toLower('${namePrefix}-nsg-web-${suffix}')
+var natGatewayName     = toLower('${namePrefix}-natgw-${suffix}')
+var natPipName         = toLower('${namePrefix}-natgw-pip-${suffix}')
+
+// NSGs need to exist BEFORE the subnets that reference them, and they must
+// be parented at the resource group (not the VNet). Azure default rules
+// already allow VNet-to-VNet + outbound-to-Internet and deny inbound from
+// Internet; we add no explicit rules (empty securityRules) to keep this
+// behavior. Tighten later if specific deny rules become necessary.
+resource nsgFlex 'Microsoft.Network/networkSecurityGroups@2024-01-01' = {
+  name: nsgFlexName
+  location: location
+  properties: {
+    securityRules: [
+      // Explicitly allow outbound to Storage service tag (PE traffic stays on
+      // private path; this rule documents intent and would still permit any
+      // future fallback to public storage endpoint). Default Azure rules
+      // would also allow this; making it explicit aids security review.
+      {
+        name: 'Allow-Outbound-Storage'
+        properties: {
+          priority: 100
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: '*'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'Storage'
+          destinationPortRange: '*'
+        }
+      }
+      // Explicitly allow outbound to AzureCloud (covers Service Bus, Graph,
+      // App Configuration, App Insights, Entra ID via service tags).
+      {
+        name: 'Allow-Outbound-AzureCloud'
+        properties: {
+          priority: 110
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: '*'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'AzureCloud'
+          destinationPortRange: '*'
+        }
+      }
+    ]
+  }
+}
+
+resource nsgWeb 'Microsoft.Network/networkSecurityGroups@2024-01-01' = {
+  name: nsgWebName
+  location: location
+  properties: {
+    securityRules: [
+      {
+        name: 'Allow-Outbound-Storage'
+        properties: {
+          priority: 100
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: '*'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'Storage'
+          destinationPortRange: '*'
+        }
+      }
+      // Web has vnetRouteAllEnabled=false so non-RFC1918 traffic stays on
+      // App Service public outbound — these AzureCloud destinations
+      // (Service Bus, Graph, etc.) won't actually traverse this subnet.
+      // Rule kept for symmetry with nsgFlex.
+      {
+        name: 'Allow-Outbound-AzureCloud'
+        properties: {
+          priority: 110
+          direction: 'Outbound'
+          access: 'Allow'
+          protocol: '*'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'AzureCloud'
+          destinationPortRange: '*'
+        }
+      }
+    ]
+  }
+}
+
+// Standard Public IP (zone-redundant) for the NAT Gateway. Static so the
+// Graph allowlist (if/when added at the tenant level) can pin the IP.
+resource natPip 'Microsoft.Network/publicIPAddresses@2024-01-01' = {
+  name: natPipName
+  location: location
+  sku: { name: 'Standard' }
+  zones: [ '1', '2', '3' ]
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+    idleTimeoutInMinutes: 4
+  }
+}
+
+// NAT Gateway shared by both Flex subnets. Flex routes ALL outbound through
+// the VNet when integrated, so without NAT GW the apps would have no Internet
+// path for Graph / Service Bus / App Configuration.
+resource natGateway 'Microsoft.Network/natGateways@2024-01-01' = {
+  name: natGatewayName
+  location: location
+  sku: { name: 'Standard' }
+  zones: [ '1' ]
+  properties: {
+    idleTimeoutInMinutes: 4
+    publicIpAddresses: [ { id: natPip.id } ]
+  }
+}
 
 resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
   name: vnetName
@@ -925,6 +1076,50 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
           privateLinkServiceNetworkPolicies: 'Enabled'
         }
       }
+      {
+        name: procFlexSubnetName
+        properties: {
+          addressPrefix: '10.20.0.64/26'
+          delegations: [
+            {
+              name: 'flex-delegation'
+              properties: { serviceName: 'Microsoft.App/environments' }
+            }
+          ]
+          networkSecurityGroup: { id: nsgFlex.id }
+          natGateway: { id: natGateway.id }
+          privateEndpointNetworkPolicies: 'Enabled'
+        }
+      }
+      {
+        name: wipeFlexSubnetName
+        properties: {
+          addressPrefix: '10.20.0.128/26'
+          delegations: [
+            {
+              name: 'flex-delegation'
+              properties: { serviceName: 'Microsoft.App/environments' }
+            }
+          ]
+          networkSecurityGroup: { id: nsgFlex.id }
+          natGateway: { id: natGateway.id }
+          privateEndpointNetworkPolicies: 'Enabled'
+        }
+      }
+      {
+        name: webSubnetName
+        properties: {
+          addressPrefix: '10.20.0.192/26'
+          delegations: [
+            {
+              name: 'web-delegation'
+              properties: { serviceName: 'Microsoft.Web/serverFarms' }
+            }
+          ]
+          networkSecurityGroup: { id: nsgWeb.id }
+          privateEndpointNetworkPolicies: 'Enabled'
+        }
+      }
     ]
   }
 }
@@ -932,6 +1127,21 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
 resource peSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' existing = {
   parent: vnet
   name: peSubnetName
+}
+
+resource webSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' existing = {
+  parent: vnet
+  name: webSubnetName
+}
+
+resource procFlexSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' existing = {
+  parent: vnet
+  name: procFlexSubnetName
+}
+
+resource wipeFlexSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-01-01' existing = {
+  parent: vnet
+  name: wipeFlexSubnetName
 }
 
 // One private DNS zone per storage subresource we PE. Storage suffix is
@@ -1113,6 +1323,13 @@ output automationPrincipalId string = enableRunbookVariant ? automationAccount.i
 
 output vnetName              string = vnet.name
 output peSubnetName          string = peSubnetName
+output webSubnetName         string = webSubnetName
+output procFlexSubnetName    string = procFlexSubnetName
+output wipeFlexSubnetName    string = wipeFlexSubnetName
+output nsgFlexName           string = nsgFlex.name
+output nsgWebName            string = nsgWeb.name
+output natGatewayName        string = natGateway.name
+output natGatewayPipAddress  string = natPip.properties.ipAddress
 output privateDnsZoneBlob    string = pdnsBlob.name
 output privateDnsZoneFile    string = pdnsFile.name
 output privateDnsZoneQueue   string = pdnsQueue.name
