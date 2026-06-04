@@ -9,11 +9,13 @@ var host = new HostBuilder()
     {
         b.UseDefaultWorkerMiddleware();
         b.UseMiddleware<AppConfigRefreshMiddleware>();
+        b.UseMiddleware<ServiceBusTraceContextMiddleware>();
     })
     .ConfigureAppConfiguration((ctx, c) => c.AddIntuneDeviceActionsAppConfig(roleHint: "web"))
     .ConfigureServices((ctx, services) =>
     {
         services.AddIntuneDeviceActionsCore();
+        services.AddIntuneDeviceActionsOpenTelemetry(role: "web");
         // Web-only: cert mTLS + replay nonce + directory resolver (Graph lookup for non-GUID claim).
         services.AddSingleton<ClientCertValidator>();
         services.AddSingleton<ReplayProtector>();

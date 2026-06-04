@@ -9,11 +9,13 @@ var host = new HostBuilder()
     .ConfigureFunctionsWorkerDefaults(b =>
     {
         b.UseMiddleware<AppConfigRefreshMiddleware>();
+        b.UseMiddleware<ServiceBusTraceContextMiddleware>();
     })
     .ConfigureAppConfiguration((ctx, c) => c.AddIntuneDeviceActionsAppConfig(roleHint: "proc"))
     .ConfigureServices((ctx, services) =>
     {
         services.AddIntuneDeviceActionsCore();
+        services.AddIntuneDeviceActionsOpenTelemetry(role: "proc");
         services.AddGraphWipe();                  // poller uses GraphWipeService
         services.AddIdempotency();                // processor may inspect ledger entry on prep
         services.AddActionDispatchSender();       // processor → ActionDispatch queue

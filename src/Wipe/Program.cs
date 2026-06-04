@@ -9,11 +9,13 @@ var host = new HostBuilder()
     .ConfigureFunctionsWorkerDefaults(b =>
     {
         b.UseMiddleware<AppConfigRefreshMiddleware>();
+        b.UseMiddleware<ServiceBusTraceContextMiddleware>();
     })
     .ConfigureAppConfiguration((ctx, c) => c.AddIntuneDeviceActionsAppConfig(roleHint: "wipe"))
     .ConfigureServices((ctx, services) =>
     {
         services.AddIntuneDeviceActionsCore();
+        services.AddIntuneDeviceActionsOpenTelemetry(role: "wipe");
         services.AddGraphWipe();                  // privileged Graph identity LIVES here
         services.AddIdempotency();                // reserve / mark issued / mark failed
         services.AddActionStatusTracker();          // init state on wipe issued

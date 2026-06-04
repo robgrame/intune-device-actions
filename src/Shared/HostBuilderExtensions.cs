@@ -2,15 +2,19 @@ using Azure.Core;
 using Azure.Data.Tables;
 using Azure.Identity;
 using Azure.Messaging.ServiceBus;
+using Azure.Monitor.OpenTelemetry.Exporter;
 using Azure.Storage.Blobs;
 using IntuneDeviceActions.Actions;
 using IntuneDeviceActions.Middleware;
 using IntuneDeviceActions.Services;
+using IntuneDeviceActions.Telemetry;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace IntuneDeviceActions;
 
@@ -66,12 +70,19 @@ public static class HostBuilderExtensions
     public static IServiceCollection AddIntuneDeviceActionsCore(this IServiceCollection services)
     {
         services.AddSingleton<AppConfigRefreshMiddleware>();
+        services.AddSingleton<ServiceBusTraceContextMiddleware>();
         services.AddLogging();
         services.AddApplicationInsightsTelemetryWorkerService(options =>
         {
             // Sampling DISABLED so security audit customEvents are never dropped.
             options.SamplingRatio = 1.0f;
             options.EnableTraceBasedLogsSampler = false;
+            // Dependency tracking is now owned by the OpenTelemetry pipeline
+            // (AddIntuneDeviceActionsOpenTelemetry → Azure Monitor exporter).
+            // Disabling the classic AI dependency module avoids duplicate
+            // dependency rows in App Insights for Service Bus / HTTP / Azure
+            // SDK calls that OTel also covers.
+            options.EnableDependencyTrackingTelemetryModule = false;
         });
         services.AddMemoryCache(o => o.SizeLimit = 100_000);
 
@@ -289,6 +300,109 @@ public static class HostBuilderExtensions
             var queueName = cfg["ServiceBus:WipeActionQueue"] ?? "wipe-action";
             return new WipeActionSender(client.CreateSender(queueName));
         });
+        return services;
+    }
+
+    /// <summary>
+    /// Registers an OpenTelemetry <c>TracerProvider</c> wired to the Azure
+    /// Monitor exporter. This is the layer that gives App Insights a single
+    /// end-to-end trace across Web → Service Bus → Proc → Service Bus → Wipe.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Instrumentations enabled:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><b>HttpClient</b> — replaces the classic AI dependency module
+    ///         (disabled in <see cref="AddIntuneDeviceActionsCore"/>) and
+    ///         covers Microsoft Graph calls made by <c>GraphServiceClient</c>.</item>
+    ///   <item><b>Azure SDK sources</b> (Service Bus, Storage, Tables, Core HTTP)
+    ///         — gives us send/receive spans with W3C trace propagation built in.</item>
+    ///   <item><b>Custom source <see cref="InstrumentationActivity.ServiceName"/></b>
+    ///         — used by <see cref="Middleware.ServiceBusTraceContextMiddleware"/>
+    ///         to root the consumer-side function activity under the producer's
+    ///         trace context (the link that stitches the pipeline together).</item>
+    /// </list>
+    /// <para>
+    /// We deliberately do NOT add ASP.NET Core or Functions-worker auto-
+    /// instrumentation: the classic Functions App Insights bridge still owns
+    /// the <c>requests</c> table, and adding either would produce duplicate
+    /// invocation rows.
+    /// </para>
+    /// <para>
+    /// The exporter reads <c>APPLICATIONINSIGHTS_CONNECTION_STRING</c> from
+    /// the environment automatically; we still pass it through explicitly
+    /// when configured to keep the wiring obvious in code review.
+    /// </para>
+    /// <para>
+    /// Sampling is set to <c>AlwaysOnSampler</c> for parity with the AI
+    /// worker telemetry options (<c>SamplingRatio = 1.0f</c>): audit-relevant
+    /// spans must never be dropped.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">Service collection to attach to.</param>
+    /// <param name="role">Logical role of this host (e.g. <c>"web"</c>,
+    /// <c>"proc"</c>, <c>"wipe"</c>). Used as the
+    /// <c>service.name</c> resource attribute so the three apps show up as
+    /// distinct nodes in the App Insights application map.</param>
+    public static IServiceCollection AddIntuneDeviceActionsOpenTelemetry(
+        this IServiceCollection services,
+        string role)
+    {
+        var serviceName = $"idactions-{role}";
+        var instanceId = Environment.MachineName;
+
+        services.AddOpenTelemetry()
+            .WithTracing(tracing => tracing
+                .SetResourceBuilder(ResourceBuilder.CreateDefault()
+                    .AddService(
+                        serviceName: serviceName,
+                        serviceNamespace: "IntuneDeviceActions",
+                        serviceVersion: typeof(HostBuilderExtensions).Assembly.GetName().Version?.ToString() ?? "1.0.0",
+                        serviceInstanceId: instanceId)
+                    .AddAttributes(new[]
+                    {
+                        new KeyValuePair<string, object>("deployment.environment",
+                            Environment.GetEnvironmentVariable("AZURE_ENV_NAME")
+                                ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+                                ?? "production"),
+                        new KeyValuePair<string, object>("idactions.role", role),
+                    }))
+                .SetSampler(new AlwaysOnSampler())
+                // Custom spans (e.g. the ServiceBusTraceContextMiddleware consumer span).
+                .AddSource(InstrumentationActivity.ServiceName)
+                // Azure SDK activity sources — names must be exact, wildcards are
+                // not supported by AddSource. List the SDKs we actually use.
+                .AddSource("Azure.Messaging.ServiceBus")
+                .AddSource("Azure.Messaging.ServiceBus.Sender")
+                .AddSource("Azure.Messaging.ServiceBus.Receiver")
+                .AddSource("Azure.Messaging.ServiceBus.Processor")
+                .AddSource("Azure.Storage.Blobs")
+                .AddSource("Azure.Data.Tables")
+                .AddSource("Azure.Core.Http")
+                // HttpClient — covers Microsoft Graph calls. We disabled the
+                // classic AI DependencyTrackingTelemetryModule to prevent
+                // double-counting; OTel is now the single source of truth for
+                // outbound HTTP dependencies.
+                .AddHttpClientInstrumentation(o =>
+                {
+                    // Skip the Functions worker's internal gRPC channel — it
+                    // would otherwise show up as a noisy "POST localhost:..."
+                    // dependency on every invocation.
+                    o.FilterHttpRequestMessage = req =>
+                        req?.RequestUri is not null
+                        && !string.Equals(req.RequestUri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(req.RequestUri.Host, "127.0.0.1", StringComparison.Ordinal);
+                })
+                .AddAzureMonitorTraceExporter(o =>
+                {
+                    var conn = Environment.GetEnvironmentVariable("APPLICATIONINSIGHTS_CONNECTION_STRING");
+                    if (!string.IsNullOrWhiteSpace(conn))
+                    {
+                        o.ConnectionString = conn;
+                    }
+                }));
+
         return services;
     }
 }
