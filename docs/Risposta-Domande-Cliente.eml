@@ -1,0 +1,300 @@
+From: Roberto Gramellini <robertogramellini@hotmail.com>
+To: <destinatario@example.com>
+Subject: Re: Soluzione "Intune Device Self-Wipe" - risposte alle vostre domande
+Date: Wed, 3 Jun 2026 18:45:00 +0200
+Message-ID: <177998733000.61580.9182734651928364712@idactions.local>
+X-Unsent: 1
+X-Mailer: Microsoft Outlook
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============6712843901276583994=="
+
+--===============6712843901276583994==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Buongiorno,
+
+grazie per i punti sollevati: rispondo nell'ordine in cui li avete posti.
+
+1) WIPE IMMEDIATO (no attesa del prossimo sync MDM)
+Si', e' raggiungibile, e proponiamo di usare due leve complementari:
+
+  a) Nudge lato server (gia' presente, da rafforzare).
+     Subito dopo la chiamata "wipe" su Microsoft Graph il backend invoca
+     anche "syncDevice" e, opzionalmente, "rebootNow" sullo stesso device.
+     Sono gia' implementati come best-effort nell'esecutore privilegiato;
+     possiamo promuoverli a step obbligatori con retry. Questo accorcia
+     la finestra dal "prossimo check-in Intune" (fino a 8 ore) a tipicamente
+     1-5 minuti.
+
+  b) Trigger MDM locale lato client (deterministico).
+     Lo script PowerShell, subito dopo aver ricevuto il "202 Accepted",
+     forza un sync dell'agente Intune con i meccanismi standard di
+     Windows (in ordine di preferenza, con fallback):
+       1. avvio del task pianificato "PushLaunch" del nodo
+          EnterpriseMgmt del device (equivalente al "Sync" del pannello
+          Account aziendale di Settings);
+       2. invocazione dell'MDM CSP via syncML (richiede contesto SYSTEM,
+          gia' disponibile nella nostra esecuzione);
+       3. in ultima istanza, riavvio pianificato a 60 secondi
+          (shutdown /r /t 60): al boot l'agente fa sync e raccoglie
+          il comando.
+
+Combinando server nudge + client push, il wipe parte tipicamente entro
+1-3 minuti dal click utente: comparabile a quanto avverrebbe lanciando
+SystemReset.exe in locale, ma mantenendo il vantaggio architetturale per
+cui il device non sa "come" ne' "se" puo' fare il wipe: lo decide il
+backend, che mantiene allow-list, ownership check e audit centrale.
+
+L'alternativa "tutto locale" (SystemReset.exe o Reset-WindowsDevice
+invocati dallo script) la teniamo solo come piano B operativo: salta il
+backend e quindi tutti i controlli centrali, perdendo revoca, audit e
+idempotency.
+
+2) CALENDARIZZAZIONE A ONDATE (rollout dell'icona)
+Si', in piu' modi non mutuamente esclusivi. Il punto chiave e' disaccoppiare
+"il device e' in allow-list" (controllo a posteriori, server-side) da
+"il device vede l'icona oggi" (rollout, client-side / orchestrazione Intune).
+
+Tre approcci, da combinare:
+
+  a) Win32 app Intune con availability date per gruppo-ondata
+     (zero codice, raccomandato come default).
+     La distribuzione dell'icona/shortcut diventa una Win32 app Intune
+     assegnata a piu' gruppi (Wave-1, Wave-2, ...) ciascuno con la
+     propria "Available from" date. Intune nasconde l'icona finche'
+     la data non e' raggiunta. E' nativo, audit-friendly, gestibile dal
+     pannello Intune senza toccare il backend.
+
+  b) Gruppi dinamici con attributo "wave" su extensionAttribute.
+     Si popola un extensionAttribute (es. extensionAttribute1=wave-N)
+     sui device tramite onboarding o import CSV; si creano gruppi
+     dinamici corrispondenti e li si lega alle availability date di
+     Intune oppure al gating server (punto c).
+
+  c) Eligibility endpoint server-side
+     (per controllo fine e audit centrale).
+     Aggiungiamo un endpoint GET "wipe/eligibility" (mTLS, stessi
+     controlli del wipe meno l'esecuzione) che ritorna un esito tipo
+     {eligible:true|false, notBefore, reason} leggendo una rollout
+     schedule da Azure App Configuration o da una tabella dedicata.
+     Lo script interroga l'endpoint all'avvio: se non eleggibile, non
+     mostra l'icona oppure mostra un messaggio "disponibile dal X".
+     Il vantaggio e' l'audit centrale (chi e' in quale ondata, snapshot
+     temporali) e la possibilita' di mettere in pausa o anticipare
+     un'ondata senza ridistribuire l'app Intune.
+
+In pratica proponiamo: (a) per la distribuzione, (c) per il gating
+runtime, e l'allow-list Entra rimane come ultima verifica fail-closed
+lato API. Tre livelli di difesa indipendenti.
+
+3) SVILUPPO DELLA PIATTAFORMA - L'INVESTIMENTO INIZIALE
+L'investimento iniziale che abbiamo citato copre quattro aree, che
+possiamo dettagliare in una proposta dedicata:
+
+  a) Setup ambiente target (DEV + PROD).
+     Subscription/Resource Group dedicati, pubblicazione della CA
+     SCEP/PKCS via Intune con pinning del thumbprint, gruppo Entra di
+     allow-list, Managed Identity e consent dei ruoli Microsoft Graph,
+     seeding di Azure App Configuration, observability (Application
+     Insights + Log Analytics), eventuale APIM/WAF davanti alla Web
+     Function. Hand-off documentato.
+
+  b) Hardening e integrazione tenant.
+     Adattamento del cert validator al template CA effettivo del
+     cliente, mappatura thumbprint -> deviceId per certificati che non
+     espongono il deviceId nel Subject, integrazione con i processi
+     di grant Graph esistenti (PIM/approvazioni), spostamento dei
+     segreti su Key Vault references, rate-limit per device,
+     alerting Azure Monitor con runbook collegati.
+
+  c) Distribuzione client e UX.
+     Packaging Win32 dello script con icona e shortcut, branding del
+     cliente, dialog WinForms localizzato (IT/EN), rollout a ondate
+     (vedi punto 2), telemetria end-to-end click -> 202 su Application
+     Insights, runbook di rollback distribuzione.
+
+  d) Operativita' e trasferimento.
+     Runbook SecOps (reset ledger, unblock device, revoca di un'ondata),
+     procedure di Incident Response, documentazione operativa completa,
+     sessione di training al team del cliente, periodo di hyper-care
+     post go-live.
+
+Sul fronte run cost Azure, l'architettura e' progettata per essere
+economicamente leggera: la sola componente sempre attiva e' la Web
+Function (necessariamente always-on per terminare il mTLS senza cold
+start), mentre i due piani esecutivi (dispatcher/router e esecutore
+privilegiato) sono in Flex Consumption con scale-to-zero, e non
+consumano risorse quando non ci sono richieste. Il costo operativo
+mensile e' quindi nell'ordine delle decine/poche centinaia di euro
+al mese a tenant, con la componente fissa che pesa piu' dei consumi
+variabili; lo dettagliamo puntualmente in fase di proposal una volta
+dimensionato il volume atteso (numero di device idonei, finestra di
+rollout, eventuale presenza di APIM/WAF).
+
+Il punto chiave e' che si tratta di un investimento one-shot che
+produce una piattaforma estendibile: il modello plug-in che abbiamo
+adottato permette di aggiungere nuove azioni amministrative (lock,
+bitlocker rotate, retire, ...) senza re-investire sull'infrastruttura
+core - niente nuove Function App, niente nuove code, niente nuovi
+controlli di sicurezza da riprogettare. E' esattamente questo riuso
+che giustifica il termine "piattaforma" e non "script".
+
+Resto a disposizione per una call di approfondimento sui tre punti
+e per pianificare i prossimi passi.
+
+Cordiali saluti,
+Roberto Gramellini
+
+--===============6712843901276583994==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html><body style=3D"font-family:Segoe UI,Arial,sans-serif;font-size:14px;col=
+or:#222;line-height:1.5;max-width:820px">
+
+<p>Buongiorno,</p>
+
+<p>grazie per i punti sollevati: rispondo nell'ordine in cui li avete posti.<=
+/p>
+
+<h3 style=3D"color:#0b5394;margin-bottom:4px">1) Wipe immediato (no attesa de=
+l prossimo sync MDM)</h3>
+<p>Si', e' raggiungibile, e proponiamo di usare <b>due leve complementari</b>=
+:</p>
+<ul>
+<li><b>Nudge lato server</b> (gia' presente, da rafforzare). Subito dopo la
+chiamata <code>wipe</code> su Microsoft Graph il backend invoca anche
+<code>syncDevice</code> e, opzionalmente, <code>rebootNow</code> sullo stesso
+device. Possiamo promuoverli da best-effort a step obbligatori con retry:
+questo accorcia la finestra dal &laquo;prossimo check-in Intune&raquo; (fino =
+a 8 ore)
+a tipicamente <b>1&ndash;5 minuti</b>.</li>
+<li><b>Trigger MDM locale lato client</b> (deterministico). Lo script PowerSh=
+ell,
+subito dopo aver ricevuto il <code>202 Accepted</code>, forza un sync
+dell'agente Intune con i meccanismi standard di Windows, in ordine di
+preferenza con fallback:
+  <ol>
+    <li>avvio del task pianificato <code>PushLaunch</code> del nodo
+    <i>EnterpriseMgmt</i> del device (equivalente al &laquo;Sync&raquo; del
+    pannello <i>Account aziendale</i> di Settings);</li>
+    <li>invocazione dell'MDM CSP via syncML (richiede contesto SYSTEM, gia'
+    disponibile nella nostra esecuzione);</li>
+    <li>in ultima istanza, riavvio pianificato a 60 secondi
+    (<code>shutdown /r /t 60</code>): al boot l'agente fa sync e raccoglie
+    il comando.</li>
+  </ol>
+</li>
+</ul>
+<p>Combinando server nudge + client push, il wipe parte tipicamente entro
+<b>1&ndash;3 minuti</b> dal click utente: comparabile a quanto avverrebbe lan=
+ciando
+<code>SystemReset.exe</code> in locale, ma mantenendo il vantaggio architettu=
+rale
+per cui il device non sa <i>come</i> ne' <i>se</i> puo' fare il wipe: lo deci=
+de
+il backend, che mantiene allow-list, ownership check e audit centrale.</p>
+<p>L'alternativa &laquo;tutto locale&raquo; (<code>SystemReset.exe</code> o
+<code>Reset-WindowsDevice</code> invocati dallo script) la teniamo solo come
+piano B operativo: salta il backend e quindi tutti i controlli centrali,
+perdendo revoca, audit e idempotency.</p>
+
+<h3 style=3D"color:#0b5394;margin-bottom:4px">2) Calendarizzazione a ondate (=
+rollout dell'icona)</h3>
+<p>Si', in piu' modi non mutuamente esclusivi. Il punto chiave e' <b>disaccop=
+piare</b>
+&laquo;il device e' in allow-list&raquo; (controllo a posteriori, server-side=
+)
+da &laquo;il device vede l'icona oggi&raquo; (rollout, client-side /
+orchestrazione Intune).</p>
+<p>Tre approcci, da combinare:</p>
+<ul>
+<li><b>(a) Win32 app Intune con <i>availability date</i> per gruppo-ondata</b=
+>
+<i>(zero codice, raccomandato come default)</i>. La distribuzione dell'icona =
+o
+shortcut diventa una Win32 app Intune assegnata a piu' gruppi (Wave-1,
+Wave-2, ...) ciascuno con la propria &laquo;Available from&raquo; date. Intun=
+e
+nasconde l'icona finche' la data non e' raggiunta. E' nativo, audit-friendly,
+gestibile dal pannello Intune senza toccare il backend.</li>
+<li><b>(b) Gruppi dinamici con attributo <code>wave</code> su
+<code>extensionAttribute</code></b>. Si popola un extensionAttribute (es.
+<code>extensionAttribute1=3Dwave-N</code>) sui device tramite onboarding o
+import CSV; si creano gruppi dinamici corrispondenti e li si lega alle
+availability date di Intune oppure al gating server (punto c).</li>
+<li><b>(c) Eligibility endpoint server-side</b> <i>(per controllo fine e audi=
+t
+centrale)</i>. Aggiungiamo un endpoint <code>GET wipe/eligibility</code>
+(mTLS, stessi controlli del wipe meno l'esecuzione) che ritorna un esito tipo
+<code>{eligible, notBefore, reason}</code> leggendo una rollout schedule da
+Azure App Configuration o da una tabella dedicata. Lo script interroga
+l'endpoint all'avvio: se non eleggibile, non mostra l'icona o mostra un
+messaggio &laquo;disponibile dal X&raquo;. Il vantaggio e' l'<b>audit central=
+e</b>
+(chi e' in quale ondata, snapshot temporali) e la possibilita' di mettere in
+<b>pausa</b> o anticipare un'ondata senza ridistribuire l'app Intune.</li>
+</ul>
+<p>In pratica proponiamo: <b>(a) per la distribuzione, (c) per il gating
+runtime</b>, e l'allow-list Entra rimane come ultima verifica fail-closed
+lato API. Tre livelli di difesa indipendenti.</p>
+
+<h3 style=3D"color:#0b5394;margin-bottom:4px">3) Sviluppo della piattaforma &=
+mdash; l'investimento iniziale</h3>
+<p>L'investimento iniziale che abbiamo citato copre <b>quattro aree</b>, che
+possiamo dettagliare in una proposta dedicata:</p>
+<ul>
+<li><b>(a) Setup ambiente target</b> (DEV + PROD): Subscription/Resource Grou=
+p
+dedicati, pubblicazione della CA SCEP/PKCS via Intune con pinning del
+thumbprint, gruppo Entra di allow-list, Managed Identity e consent dei
+ruoli Microsoft Graph, seeding di Azure App Configuration, observability
+(Application Insights + Log Analytics), eventuale APIM/WAF davanti alla
+Web Function. Hand-off documentato.</li>
+<li><b>(b) Hardening e integrazione tenant</b>: adattamento del cert
+validator al template CA effettivo del cliente, mappatura
+<code>thumbprint &rarr; deviceId</code> per certificati che non espongono il
+deviceId nel Subject, integrazione con i processi di grant Graph esistenti
+(PIM/approvazioni), spostamento dei segreti su Key Vault references,
+rate-limit per device, alerting Azure Monitor con runbook collegati.</li>
+<li><b>(c) Distribuzione client e UX</b>: packaging Win32 dello script con
+icona e shortcut, branding del cliente, dialog WinForms localizzato (IT/EN),
+rollout a ondate (vedi punto 2), telemetria end-to-end click &rarr;
+<code>202</code> su Application Insights, runbook di rollback distribuzione.<=
+/li>
+<li><b>(d) Operativita' e trasferimento</b>: runbook SecOps (reset ledger,
+unblock device, revoca di un'ondata), procedure di Incident Response,
+documentazione operativa completa, sessione di training al team del cliente,
+periodo di hyper-care post go-live.</li>
+</ul>
+
+<p>Sul fronte <b>run cost Azure</b>, l'architettura e' progettata per essere
+economicamente leggera: la sola componente sempre attiva e' la Web Function
+(necessariamente always-on per terminare il mTLS senza cold start), mentre
+i due piani esecutivi (dispatcher/router ed esecutore privilegiato) sono in
+<b>Flex Consumption con scale-to-zero</b> e non consumano risorse quando non
+ci sono richieste. Il costo operativo mensile e' quindi nell'ordine delle
+<b>decine o poche centinaia di euro al mese a tenant</b>, con la componente
+fissa che pesa piu' dei consumi variabili; lo dettagliamo puntualmente in
+fase di proposal una volta dimensionato il volume atteso (numero di device
+idonei, finestra di rollout, eventuale presenza di APIM/WAF).</p>
+
+<p>Il punto chiave e' che si tratta di un investimento <b>one-shot</b> che
+produce una <b>piattaforma estendibile</b>: il modello plug-in che abbiamo
+adottato permette di aggiungere nuove azioni amministrative (<i>lock</i>,
+<i>bitlocker rotate</i>, <i>retire</i>, ...) senza re-investire
+sull'infrastruttura core &mdash; niente nuove Function App, niente nuove
+code, niente nuovi controlli di sicurezza da riprogettare. E' esattamente
+questo riuso che giustifica il termine <b>&laquo;piattaforma&raquo;</b> e non
+<b>&laquo;script&raquo;</b>.</p>
+
+<p>Resto a disposizione per una call di approfondimento sui tre punti
+e per pianificare i prossimi passi.</p>
+
+<p>Cordiali saluti,<br><b>Roberto Gramellini</b></p>
+
+</body></html>
+
+--===============6712843901276583994==--
