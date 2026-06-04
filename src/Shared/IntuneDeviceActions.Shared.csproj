@@ -7,6 +7,15 @@
     <AssemblyName>IntuneDeviceActions.Shared</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <!--
+      ASP.NET Core types (HttpRequest, IActionResult, Mvc) are provided by the
+      shared framework. Using a FrameworkReference instead of the legacy
+      Microsoft.AspNetCore.Http/Mvc.Core 2.3.0 packages avoids dragging in
+      Newtonsoft.Json (we standardize on System.Text.Json).
+    -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Azure.Data.Tables" Version="12.11.0" />
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
     <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.18.2" />
@@ -14,14 +23,7 @@
     <PackageReference Include="Microsoft.Azure.Functions.Worker" Version="2.52.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.ApplicationInsights" Version="2.50.0" />
     <PackageReference Include="Microsoft.ApplicationInsights.WorkerService" Version="3.1.1" />
-    <PackageReference Include="Microsoft.AspNetCore.Http" Version="2.3.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.3.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Core" Version="2.3.0" />
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.AzureAppConfiguration" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.3" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.3" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
     <PackageReference Include="Microsoft.Graph" Version="6.1.0" />
   </ItemGroup>
 </Project>
