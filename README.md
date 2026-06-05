@@ -127,7 +127,7 @@ Service Bus o al Bicep. Eventi audit dedicati: `action.dispatch.enqueued`,
 | 4g | **`WipeAction`** (Service Bus trigger, non esposta) | **Wipe** | Consumer dedicato che risolve direttamente `WipeActionRunner`. È l'unica function deployata sull'app privilegiata. |
 | 4h | **`WipeActionRunner`** (`IActionRunner`, Type=`wipe`) | **Wipe** | Logica wipe vera: risolve device Entra, verifica membership gruppo, verifica ownership Intune↔Entra, **riserva slot idempotency su blob ledger**, esegue `POST /deviceManagement/managedDevices/{id}/wipe`, inizializza status tracker, esegue nudges (sync + reboot) best-effort. |
 | 5 | **Blob container** `action-ledger` | Wipe | Ledger idempotency: un blob per `intuneDeviceId` con stato `Reserved`/`Issued`/`Failed` per garantire un singolo wipe anche con retry at-least-once. |
-| 6a | **`ActionStatus`** (HTTP Function) | **Web** | `GET /api/actions/status` — in mTLS, ritorna lo stato di un wipe (proiezione tabella `actionstatus`). Binding cert↔device anti-IDOR. |
+| 6a | **`ActionStatus`** (HTTP Function) | **Web** | `GET /api/actions/status/{correlationId}` (canonico, action-agnostic) + `GET /api/actions/wipe/status/{correlationId}` (alias legacy per il client v1.0.x). In mTLS, ritorna la proiezione della tabella `actionstatus`. Binding cert↔device anti-IDOR. |
 | 6b | **`ActionStatusPoller`** (Timer trigger) | **Proc** | Poller schedulato che interroga Graph per `actionState` dei wipe non terminali e aggiorna `actionstatus` + audit. |
 | 6c | **`ActionLedger_Get`** / **`ActionLedger_Reset`** (HTTP) | **Web** | Endpoint SecOps `GET`/`POST /api/action-ledger/{intuneDeviceId}[/reset]` per ispezionare/resettare il ledger. Gated da `Idempotency:AdminApiEnabled` (off di default). |
 | 7 | **Tre User-Assigned Managed Identity** | — | `idactions-uami-web` (no Graph privilegiato), `idactions-uami` (worker/proc, `Device.Read.All` + `DeviceManagementManagedDevices.Read.All` per il poller), `idactions-uami-wipe` (l'unica con i consent Graph distruttivi). |
@@ -324,13 +324,19 @@ Risposta `202 Accepted`:
 | 403 | Device fuori allow-list o ownership mismatch |
 | 502 | Errore upstream Microsoft Graph (riconciliato via retry coda) |
 
-### `GET /api/actions/status`
+### `GET /api/actions/status/{correlationId}`
 
-Stato di un wipe precedentemente accodato (proiezione della tabella `actionstatus`,
-aggiornata dal poller). Stessi requisiti di auth di `POST /api/actions/wipe`
-(mTLS + binding cert↔device): un device può leggere solo il proprio esito.
-Esiti possibili: `404` (nessuna riga), `401` (cert/binding), `403` (riga di un
-altro device).
+Stato di un'azione precedentemente accodata (proiezione della tabella `actionstatus`,
+aggiornata dal poller). Action-agnostic: il `correlationId` identifica univocamente
+la richiesta, l'`actionType` è opaco al chiamante. Stessi requisiti di auth di
+`POST /api/actions` (mTLS + binding cert↔device): un device può leggere solo il
+proprio esito. Esiti possibili: `404` (nessuna riga), `401` (cert/binding),
+`403` (riga di un altro device).
+
+> **Alias legacy**: `GET /api/actions/wipe/status/{correlationId}` resta attivo per
+> compatibilità con il client v1.0.x già distribuito (il `Watch-WipeStatus.ps1`
+> appende `/status/{id}` a un `ApiUrl` wipe-specifico). Tutti i nuovi client devono
+> usare il path canonico sopra.
 
 ### `GET` / `POST /api/action-ledger/{intuneDeviceId}[/reset]`
 

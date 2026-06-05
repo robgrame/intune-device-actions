@@ -8,25 +8,39 @@ using Microsoft.Extensions.Logging;
 namespace IntuneDeviceActions.Functions;
 
 /// <summary>
-/// Public HTTP endpoint that surfaces the outcome of a previously-issued wipe.
-/// Reads the row tracked by <see cref="ActionStatusTracker"/> in the
-/// <c>wipestatus</c> table and returns a small JSON projection.
+/// Public HTTP endpoint exposing two co-existing routes that both surface the
+/// outcome of a previously-issued action:
+/// <list type="bullet">
+///   <item><description><b>Canonical</b>: <c>GET /api/actions/status/{correlationId}</c>
+///   — action-agnostic shape mirroring <see cref="ActionRequestFunction"/>'s
+///   <c>POST /api/actions</c>. Preferred by all new clients.</description></item>
+///   <item><description><b>Legacy alias</b>: <c>GET /api/actions/wipe/status/{correlationId}</c>
+///   — kept so the already-deployed v1.0.x <c>.intunewin</c> client (whose
+///   <c>Watch-WipeStatus.ps1</c> derives the URL by appending <c>/status/{id}</c>
+///   to the wipe-specific <c>ApiUrl</c>) keeps working untouched during the
+///   rolling upgrade.</description></item>
+/// </list>
+/// Both routes read the row tracked by <see cref="ActionStatusTracker"/> in
+/// the <c>actionstatus</c> table and return a small JSON projection. The
+/// concrete action type is opaque to this function and is carried verbatim
+/// in the snapshot.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Authentication mirrors <see cref="ActionRequestFunction"/>: mTLS is required
 /// and the caller's certificate-bound device id must match the EntraDeviceId
 /// of the row being read. This prevents one enrolled device from snooping the
-/// wipe outcome of another (basic IDOR defense).
+/// action outcome of another (basic IDOR defense).
 /// </para>
 /// <para>
 /// HTTP contract:
 /// <list type="bullet">
 ///   <item><description><c>200 OK</c> with snapshot if the row exists and the caller is authorized.</description></item>
+///   <item><description><c>400 Bad Request</c> if the correlationId is missing or malformed.</description></item>
 ///   <item><description><c>401 Unauthorized</c> on cert/binding failure.</description></item>
 ///   <item><description><c>403 Forbidden</c> if the bound device id doesn't match the row owner.</description></item>
 ///   <item><description><c>404 Not Found</c> if no row exists for the correlationId.</description></item>
-///   <item><description><c>410 Gone</c> if invoked on the worker app (role mismatch).</description></item>
+///   <item><description><c>503 Service Unavailable</c> if status tracking isn't configured on this deployment.</description></item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -47,10 +61,28 @@ public sealed class ActionStatusFunction
     }
 
     [Function("ActionStatus")]
-    public async Task<IActionResult> Run(
+    public Task<IActionResult> Run(
+        [HttpTrigger(AuthorizationLevel.Function, "get", Route = "actions/status/{correlationId}")] HttpRequest req,
+        string correlationId,
+        CancellationToken ct)
+        => HandleAsync(req, correlationId, ct);
+
+    /// <summary>
+    /// Legacy alias kept for the v1.0.x <c>.intunewin</c> client whose
+    /// <c>Watch-WipeStatus.ps1</c> appends <c>/status/{correlationId}</c> to
+    /// a wipe-specific <c>ApiUrl</c> (e.g. <c>https://host/api/actions/wipe</c>),
+    /// resulting in <c>/api/actions/wipe/status/{correlationId}</c>. New
+    /// clients should target the canonical <c>/api/actions/status/{correlationId}</c>
+    /// endpoint above.
+    /// </summary>
+    [Function("ActionStatusLegacy")]
+    public Task<IActionResult> RunLegacy(
         [HttpTrigger(AuthorizationLevel.Function, "get", Route = "actions/wipe/status/{correlationId}")] HttpRequest req,
         string correlationId,
         CancellationToken ct)
+        => HandleAsync(req, correlationId, ct);
+
+    private async Task<IActionResult> HandleAsync(HttpRequest req, string correlationId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(correlationId) || correlationId.Length > 64)
         {
@@ -87,7 +119,7 @@ public sealed class ActionStatusFunction
             return new NotFoundObjectResult(new
             {
                 status = "not-found",
-                message = "no wipe status recorded for the supplied correlationId",
+                message = "no action status recorded for the supplied correlationId",
                 correlationId
             });
         }
@@ -118,7 +150,7 @@ public sealed class ActionStatusFunction
                     [AuditEvents.Prop.EntraDeviceId]  = snapshot.EntraDeviceId,
                 }, LogLevel.Warning);
                 return new ObjectResult(new { status = "forbidden",
-                    message = "this client cert is not bound to the device that issued the wipe",
+                    message = "this client cert is not bound to the device that issued the action",
                     correlationId })
                     { StatusCode = (int)HttpStatusCode.Forbidden };
             }
