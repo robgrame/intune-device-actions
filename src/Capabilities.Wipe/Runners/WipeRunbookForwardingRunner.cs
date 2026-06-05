@@ -1,13 +1,14 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using IntuneDeviceActions.Actions;
 using IntuneDeviceActions.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneDeviceActions.Actions.Runners;
+namespace IntuneDeviceActions.Capabilities.Wipe.Runners;
 
 /// <summary>
-/// <see cref="IActionRunner"/> registered on the worker role for the
+/// <see cref="IActionRunner"/> registered on the proc role for the
 /// <c>wipe-runbook</c> action type. Instead of forwarding to a Function App
 /// queue (like <see cref="WipeForwardingRunner"/>), it POSTs the dispatch
 /// envelope to an Azure Automation Runbook webhook — the runbook

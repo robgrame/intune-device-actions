@@ -1,6 +1,7 @@
 using System.Text.Json;
 using IntuneDeviceActions.Actions;
-using IntuneDeviceActions.Actions.Runners;
+using IntuneDeviceActions.Capabilities.Wipe.Audit;
+using IntuneDeviceActions.Capabilities.Wipe.Runners;
 using IntuneDeviceActions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
@@ -54,7 +55,7 @@ public sealed class WipeActionConsumerFunction
         }
         catch (Exception ex)
         {
-            _audit.TrackEvent(AuditEvents.WipeActionInvalidEnvelope, ex, new Dictionary<string, string>
+            _audit.TrackEvent(WipeAuditEvents.WipeActionInvalidEnvelope, ex, new Dictionary<string, string>
             {
                 ["payloadLength"] = (messageJson?.Length ?? 0).ToString(),
             });
@@ -69,7 +70,7 @@ public sealed class WipeActionConsumerFunction
             ["DeviceName"]    = env.DeviceName,
         });
 
-        _audit.TrackEvent(AuditEvents.WipeActionConsumed, new Dictionary<string, string>
+        _audit.TrackEvent(WipeAuditEvents.WipeActionConsumed, new Dictionary<string, string>
         {
             [AuditEvents.Prop.CorrelationId]  = env.CorrelationId,
             [AuditEvents.Prop.ActionType]     = env.ActionType,
@@ -82,7 +83,7 @@ public sealed class WipeActionConsumerFunction
         {
             await _runner.RunAsync(env, ct);
             sw.Stop();
-            _audit.TrackEvent(AuditEvents.WipeActionCompleted, new Dictionary<string, string>
+            _audit.TrackEvent(WipeAuditEvents.WipeActionCompleted, new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId] = env.CorrelationId,
                 ["durationMs"]                   = sw.ElapsedMilliseconds.ToString(),
@@ -91,7 +92,7 @@ public sealed class WipeActionConsumerFunction
         catch (Exception ex)
         {
             sw.Stop();
-            _audit.TrackEvent(AuditEvents.WipeActionRunnerFailed, ex, new Dictionary<string, string>
+            _audit.TrackEvent(WipeAuditEvents.WipeActionRunnerFailed, ex, new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId]    = env.CorrelationId,
                 [AuditEvents.Prop.ExceptionType]    = ex.GetType().FullName ?? "(unknown)",

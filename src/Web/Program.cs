@@ -19,11 +19,11 @@ var host = new HostBuilder()
         // Web-only: cert mTLS + replay nonce + directory resolver (Graph lookup for non-GUID claim).
         services.AddSingleton<ClientCertValidator>();
         services.AddSingleton<ReplayProtector>();
-        services.AddGraphWipe();                  // GraphServiceClient (DeviceDirectoryResolver only — NOT for status tracker)
+        services.AddGraphClient();                // bare GraphServiceClient — DeviceDirectoryResolver only (NO wipe capability here)
         services.AddSingleton<DeviceDirectoryResolver>();
-        services.AddIdempotency();                // admin reset endpoint
-        services.AddActionRequestSender();     // enqueue to proc
-        services.AddActionStatusTracker();          // GET /api/actions/status reads it (Graph not used on this code path)
+        services.AddActionIdempotency();          // admin reset endpoint
+        services.AddActionRequestSender();        // enqueue to proc
+        services.AddActionStatusTracker();        // GET /api/actions/status reads it (no probes registered → tracker won't poll from web)
     })
     .Build();
 

@@ -1,16 +1,16 @@
 using System.Text.Json;
+using IntuneDeviceActions.Actions;
+using IntuneDeviceActions.Capabilities.Wipe.Audit;
+using IntuneDeviceActions.Capabilities.Wipe.Services;
 using IntuneDeviceActions.Models;
 using IntuneDeviceActions.Services;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneDeviceActions.Actions.Runners;
+namespace IntuneDeviceActions.Capabilities.Wipe.Runners;
 
 /// <summary>
-/// <see cref="IActionRunner"/> for the <c>wipe</c> action — the original
-/// business logic that previously lived inline inside
-/// <c>RequestIntakeFunction</c>. Moving it here behind the
-/// <see cref="IActionRunner"/> contract turns it into one plug-in among
-/// many that the router can dispatch to.
+/// <see cref="IActionRunner"/> for the <c>wipe</c> action — the privileged
+/// executor that actually calls Graph and issues the wipe + post-wipe nudges.
 /// </summary>
 /// <remarks>
 /// Steps:
@@ -18,7 +18,7 @@ namespace IntuneDeviceActions.Actions.Runners;
 ///   <item>resolve Entra directory object id;</item>
 ///   <item>check membership of the allowed Entra group;</item>
 ///   <item>validate Intune↔Entra mapping (ownership);</item>
-///   <item>reserve an idempotency ledger entry — skip if a wipe was already issued;</item>
+///   <item>reserve an idempotency ledger entry — skip if an action was already issued;</item>
 ///   <item>call Graph wipe; mark ledger Issued/Failed accordingly;</item>
 ///   <item>open the status-tracker row and best-effort sync/reboot nudges.</item>
 /// </list>
@@ -30,12 +30,12 @@ public sealed class WipeActionRunner : IActionRunner
     public string Type => "wipe";
 
     private readonly GraphWipeService _graph;
-    private readonly IdempotencyService _ledger;
+    private readonly ActionIdempotencyService _ledger;
     private readonly AuditService _audit;
     private readonly ActionStatusTracker _statusTracker;
     private readonly ILogger<WipeActionRunner> _log;
 
-    public WipeActionRunner(GraphWipeService graph, IdempotencyService ledger,
+    public WipeActionRunner(GraphWipeService graph, ActionIdempotencyService ledger,
         AuditService audit, ActionStatusTracker statusTracker, ILogger<WipeActionRunner> log)
     {
         _graph = graph;
@@ -181,64 +181,64 @@ public sealed class WipeActionRunner : IActionRunner
         var state = reserve.State;
         var entry = reserve.Entry;
 
-        // Rate limiter trip: too many wipes for this device in the rolling 24h window.
-        if (state == IdempotencyService.State.RateLimited)
+        // Rate limiter trip: too many actions for this device in the rolling 24h window.
+        if (state == ActionIdempotencyService.State.RateLimited)
         {
             _audit.TrackEvent(AuditEvents.DeniedRateLimited, new Dictionary<string, string>
             {
-                [AuditEvents.Prop.CorrelationId]            = msg.CorrelationId,
-                [AuditEvents.Prop.DeviceName]               = msg.DeviceName,
-                [AuditEvents.Prop.IntuneDeviceId]           = msg.IntuneDeviceId,
-                [AuditEvents.Prop.RecentWipesInWindow]      = reserve.RecentWipesInWindow.ToString(),
-                [AuditEvents.Prop.MaxWipesPerDevicePerDay]  = reserve.MaxWipesPerDay.ToString(),
+                [AuditEvents.Prop.CorrelationId]               = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]                  = msg.DeviceName,
+                [AuditEvents.Prop.IntuneDeviceId]              = msg.IntuneDeviceId,
+                [AuditEvents.Prop.RecentActionsInWindow]       = reserve.RecentActionsInWindow.ToString(),
+                [AuditEvents.Prop.MaxActionsPerDevicePerDay]   = reserve.MaxActionsPerDevicePerDay.ToString(),
             }, LogLevel.Warning);
             return;
         }
 
-        // Auto-rearm happened: a previous wipe had reached terminal state
+        // Auto-rearm happened: a previous action had reached terminal state
         // (success / failure / timed-out past grace). Emit a dedicated audit
         // so operators can see *why* the ledger was reset implicitly.
-        if (reserve.Rearmed != IdempotencyService.RearmReason.None)
+        if (reserve.Rearmed != ActionIdempotencyService.RearmReason.None)
         {
             var rearmEvent = reserve.Rearmed switch
             {
-                IdempotencyService.RearmReason.AfterSuccess     => AuditEvents.LedgerRearmedAfterSuccess,
-                IdempotencyService.RearmReason.AfterFailure     => AuditEvents.LedgerRearmedAfterFailure,
-                IdempotencyService.RearmReason.AfterPollTimeout => AuditEvents.LedgerRearmedAfterTimeout,
-                IdempotencyService.RearmReason.Forced           => AuditEvents.LedgerRearmedForced,
-                _                                               => AuditEvents.LedgerRearmedAfterSuccess,
+                ActionIdempotencyService.RearmReason.AfterSuccess     => AuditEvents.LedgerRearmedAfterSuccess,
+                ActionIdempotencyService.RearmReason.AfterFailure     => AuditEvents.LedgerRearmedAfterFailure,
+                ActionIdempotencyService.RearmReason.AfterPollTimeout => AuditEvents.LedgerRearmedAfterTimeout,
+                ActionIdempotencyService.RearmReason.Forced           => AuditEvents.LedgerRearmedForced,
+                _                                                     => AuditEvents.LedgerRearmedAfterSuccess,
             };
             var props = new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId]          = msg.CorrelationId,
                 [AuditEvents.Prop.DeviceName]             = msg.DeviceName,
                 [AuditEvents.Prop.IntuneDeviceId]         = msg.IntuneDeviceId,
-                [AuditEvents.Prop.WipeSequence]           = entry.WipeSequence.ToString(),
+                [AuditEvents.Prop.ActionSequence]         = entry.ActionSequence.ToString(),
                 [AuditEvents.Prop.PreviousTerminalState]  = entry.LastTerminalState ?? "(unknown)",
                 [AuditEvents.Prop.RearmReason]            = reserve.Rearmed.ToString(),
             };
             if (reserve.AgeSinceTerminalHours.HasValue)
                 props[AuditEvents.Prop.AgeSinceTerminalHours] = reserve.AgeSinceTerminalHours.Value.ToString("F2");
-            if (reserve.Rearmed == IdempotencyService.RearmReason.Forced)
+            if (reserve.Rearmed == ActionIdempotencyService.RearmReason.Forced)
                 props[AuditEvents.Prop.ForceRearm] = "true";
             _audit.TrackEvent(rearmEvent, props);
         }
 
-        if (state == IdempotencyService.State.Issued)
+        if (state == ActionIdempotencyService.State.Issued)
         {
-            _audit.TrackEvent(AuditEvents.WipeAlreadyIssued, new Dictionary<string, string>
+            _audit.TrackEvent(AuditEvents.ActionAlreadyIssued, new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId]         = msg.CorrelationId,
                 [AuditEvents.Prop.OriginalCorrelationId] = entry.CorrelationId,
                 [AuditEvents.Prop.DeviceName]            = msg.DeviceName,
                 [AuditEvents.Prop.IntuneDeviceId]        = msg.IntuneDeviceId,
-                [AuditEvents.Prop.WipeSequence]          = entry.WipeSequence.ToString(),
+                [AuditEvents.Prop.ActionSequence]        = entry.ActionSequence.ToString(),
             });
             return;
         }
-        if (state == IdempotencyService.State.Reserved && entry.CorrelationId != msg.CorrelationId)
+        if (state == ActionIdempotencyService.State.Reserved && entry.CorrelationId != msg.CorrelationId)
         {
-            _audit.TrackEvent(AuditEvents.WipeInProgressElsewhere, new Dictionary<string, string>
+            _audit.TrackEvent(AuditEvents.ActionInProgressElsewhere, new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId]         = msg.CorrelationId,
                 [AuditEvents.Prop.OriginalCorrelationId] = entry.CorrelationId,
@@ -254,25 +254,25 @@ public sealed class WipeActionRunner : IActionRunner
         {
             await _graph.WipeAsync(managedId, ct);
             await _ledger.MarkIssuedAsync(msg.IntuneDeviceId, msg.CorrelationId, ct);
-            _audit.TrackEvent(AuditEvents.WipeIssued, new Dictionary<string, string>
+            _audit.TrackEvent(WipeAuditEvents.WipeIssued, new Dictionary<string, string>
             {
-                [AuditEvents.Prop.CorrelationId]      = msg.CorrelationId,
-                [AuditEvents.Prop.DeviceName]         = msg.DeviceName,
-                [AuditEvents.Prop.EntraDeviceId]      = msg.EntraDeviceId,
-                [AuditEvents.Prop.IntuneDeviceId]     = msg.IntuneDeviceId,
-                [AuditEvents.Prop.ManagedDeviceId]    = managedId,
-                [AuditEvents.Prop.KeepEnrollmentData] = _graph.KeepEnrollmentData.ToString(),
-                [AuditEvents.Prop.KeepUserData]       = _graph.KeepUserData.ToString(),
+                [AuditEvents.Prop.CorrelationId]               = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]                  = msg.DeviceName,
+                [AuditEvents.Prop.EntraDeviceId]               = msg.EntraDeviceId,
+                [AuditEvents.Prop.IntuneDeviceId]              = msg.IntuneDeviceId,
+                [AuditEvents.Prop.ManagedDeviceId]             = managedId,
+                [WipeAuditEvents.Prop.KeepEnrollmentData]      = _graph.KeepEnrollmentData.ToString(),
+                [WipeAuditEvents.Prop.KeepUserData]            = _graph.KeepUserData.ToString(),
             });
             wipeSucceeded = true;
 
-            try { await _statusTracker.InitializeAsync(msg, managedId, ct); }
+            try { await _statusTracker.InitializeAsync(msg, Type, managedId, ct); }
             catch (Exception ex) { _log.LogWarning(ex, "Status tracker initialization failed for {Corr}", msg.CorrelationId); }
         }
         catch (Exception ex) when (GraphWipeService.Classify(ex) == GraphWipeService.GraphErrorKind.Permanent)
         {
             await _ledger.MarkFailedAsync(msg.IntuneDeviceId, msg.CorrelationId, ex.Message, ct);
-            _audit.TrackEvent(AuditEvents.WipeFailedPermanent, ex, new Dictionary<string, string>
+            _audit.TrackEvent(WipeAuditEvents.WipeFailedPermanent, ex, new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId]   = msg.CorrelationId,
                 [AuditEvents.Prop.DeviceName]      = msg.DeviceName,
@@ -283,7 +283,7 @@ public sealed class WipeActionRunner : IActionRunner
         }
         catch (Exception ex)
         {
-            _audit.TrackEvent(AuditEvents.WipeTransientError, ex, new Dictionary<string, string>
+            _audit.TrackEvent(WipeAuditEvents.WipeTransientError, ex, new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId]   = msg.CorrelationId,
                 [AuditEvents.Prop.DeviceName]      = msg.DeviceName,
@@ -312,10 +312,10 @@ public sealed class WipeActionRunner : IActionRunner
             await RunNudgeWithRetryAsync(
                 action:           ct2 => _graph.SyncDeviceAsync(managedId, ct2),
                 maxAttempts:      _graph.SyncFallbackMaxAttempts,
-                issuedEvent:      AuditEvents.SyncFallbackIssued,
-                retryingEvent:    AuditEvents.SyncFallbackRetrying,
-                failedEvent:      AuditEvents.SyncFallbackFailed,
-                exhaustedEvent:   AuditEvents.SyncFallbackExhausted,
+                issuedEvent:      WipeAuditEvents.SyncFallbackIssued,
+                retryingEvent:    WipeAuditEvents.SyncFallbackRetrying,
+                failedEvent:      WipeAuditEvents.SyncFallbackFailed,
+                exhaustedEvent:   WipeAuditEvents.SyncFallbackExhausted,
                 extraIssuedProps: new() { ["delaySeconds"] = syncDelay.ToString() },
                 msg:              msg,
                 managedId:        managedId,
@@ -329,10 +329,10 @@ public sealed class WipeActionRunner : IActionRunner
             await RunNudgeWithRetryAsync(
                 action:           ct2 => _graph.RebootAsync(managedId, ct2),
                 maxAttempts:      _graph.RebootFallbackMaxAttempts,
-                issuedEvent:      AuditEvents.RebootFallbackIssued,
-                retryingEvent:    AuditEvents.RebootFallbackRetrying,
-                failedEvent:      AuditEvents.RebootFallbackFailed,
-                exhaustedEvent:   AuditEvents.RebootFallbackExhausted,
+                issuedEvent:      WipeAuditEvents.RebootFallbackIssued,
+                retryingEvent:    WipeAuditEvents.RebootFallbackRetrying,
+                failedEvent:      WipeAuditEvents.RebootFallbackFailed,
+                exhaustedEvent:   WipeAuditEvents.RebootFallbackExhausted,
                 extraIssuedProps: new() { ["delaySeconds"] = rebootDelay.ToString() },
                 msg:              msg,
                 managedId:        managedId,
@@ -415,11 +415,7 @@ public sealed class WipeActionRunner : IActionRunner
             }
         }
 
-        // Exhausted: all attempts threw transient errors. Surface a dedicated
-        // event so operators can alert on it separately from per-attempt failures.
-        // lastException is guaranteed non-null here (the loop either returns on
-        // success/Permanent or sets lastException on every transient attempt),
-        // but the compiler can't prove it — handle both overloads explicitly.
+        // Exhausted: all attempts threw transient errors.
         var exhaustedProps = BuildNudgeErrProps(msg, managedId, lastException, maxAttempts, maxAttempts);
         if (lastException is not null)
         {
@@ -453,25 +449,6 @@ public sealed class WipeActionRunner : IActionRunner
                 props["graphErrorCode"]  = oe.Error?.Code ?? string.Empty;
                 props["graphErrorMsg"]   = oe.Error?.Message ?? string.Empty;
             }
-        }
-        return props;
-    }
-
-    private static Dictionary<string, string> BuildGraphErrProps(ActionRequestMessage msg, string managedId, Exception ex)
-    {
-        var props = new Dictionary<string, string>
-        {
-            [AuditEvents.Prop.CorrelationId]    = msg.CorrelationId,
-            [AuditEvents.Prop.DeviceName]       = msg.DeviceName,
-            [AuditEvents.Prop.ManagedDeviceId]  = managedId,
-            [AuditEvents.Prop.ExceptionType]    = ex.GetType().FullName ?? "(unknown)",
-            [AuditEvents.Prop.ExceptionMessage] = ex.Message ?? string.Empty,
-        };
-        if (ex is Microsoft.Graph.Models.ODataErrors.ODataError oe)
-        {
-            props["graphStatusCode"] = oe.ResponseStatusCode.ToString();
-            props["graphErrorCode"]  = oe.Error?.Code ?? string.Empty;
-            props["graphErrorMsg"]   = oe.Error?.Message ?? string.Empty;
         }
         return props;
     }

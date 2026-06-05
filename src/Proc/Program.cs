@@ -1,6 +1,5 @@
 using IntuneDeviceActions;
-using IntuneDeviceActions.Actions;
-using IntuneDeviceActions.Actions.Runners;
+using IntuneDeviceActions.Capabilities.Wipe;
 using IntuneDeviceActions.Middleware;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -16,17 +15,18 @@ var host = new HostBuilder()
     {
         services.AddIntuneDeviceActionsCore();
         services.AddIntuneDeviceActionsOpenTelemetry(role: "proc");
-        services.AddGraphWipe();                  // poller uses GraphWipeService
-        services.AddIdempotency();                // processor may inspect ledger entry on prep
+        services.AddGraphClient();                // bare GraphServiceClient for the wipe probe (no privileged execution surface here)
+        services.AddActionIdempotency();          // processor may inspect ledger entry on prep
         services.AddActionDispatchSender();       // processor → ActionDispatch queue
-        services.AddWipeActionSender();      // WipeForwardingRunner → wipe-action queue
-        services.AddActionStatusTracker();          // poller updates wipestatus table
-        services.AddSingleton<ActionRunnerRegistry>();
-        // Plug-in runners — dispatcher resolves by ActionType:
-        //   "wipe"         → WipeForwardingRunner       → wipe-action queue → Wipe Function App
-        //   "wipe-runbook" → WipeRunbookForwardingRunner → Automation webhook (PowerShell 7.2 runbook)
-        services.AddSingleton<IActionRunner, WipeForwardingRunner>();
-        services.AddSingleton<IActionRunner, WipeRunbookForwardingRunner>();
+        services.AddSingleton<IntuneDeviceActions.Actions.ActionRunnerRegistry>();
+        services.AddActionStatusTracker();        // poller updates actionstatus table
+
+        // Wipe capability — proc role only forwards (does NOT execute).
+        //   AddWipeForwarding: WipeActionSender + WipeForwardingRunner (wipe-action queue)
+        //                      + WipeRunbookForwardingRunner (Automation webhook)
+        //   AddWipeProbe:      WipeActionStatusProbe so the poller can probe "wipe" rows.
+        services.AddWipeForwarding();
+        services.AddWipeProbe();
     })
     .Build();
 

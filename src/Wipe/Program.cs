@@ -1,6 +1,5 @@
 using IntuneDeviceActions;
-using IntuneDeviceActions.Actions;
-using IntuneDeviceActions.Actions.Runners;
+using IntuneDeviceActions.Capabilities.Wipe;
 using IntuneDeviceActions.Middleware;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -16,12 +15,14 @@ var host = new HostBuilder()
     {
         services.AddIntuneDeviceActionsCore();
         services.AddIntuneDeviceActionsOpenTelemetry(role: "wipe");
-        services.AddGraphWipe();                  // privileged Graph identity LIVES here
-        services.AddIdempotency();                // reserve / mark issued / mark failed
-        services.AddActionStatusTracker();          // init state on wipe issued
+        services.AddGraphClient();                // bare GraphServiceClient (privileged identity is granted on the app, not in code)
+        services.AddActionIdempotency();          // reserve / mark issued / mark failed
+        services.AddActionStatusTracker();        // init state on action issued (probe registered by AddWipeExecutor below)
+
+        // Wipe capability — wipe role hosts the privileged executor:
+        //   AddWipeExecutor: GraphWipeService + WipeActionRunner (+ probe).
         // The consumer function resolves WipeActionRunner directly (concrete type).
-        services.AddSingleton<WipeActionRunner>();
-        services.AddSingleton<IActionRunner>(sp => sp.GetRequiredService<WipeActionRunner>());
+        services.AddWipeExecutor();
     })
     .Build();
 

@@ -9,36 +9,32 @@ namespace IntuneDeviceActions.Services;
 
 /// <summary>
 /// Conditional-write based idempotency ledger. One blob per Intune device id.
+/// Action-agnostic: the same ledger is consulted by any per-action runner
+/// before issuing the action to the back-end, ensuring one-action-per-device
+/// at-most-once semantics across the whole pipeline.
 /// <para>
-/// Original behaviour (pre-rearm): a single wipe per device was permitted; any
-/// subsequent attempt returned <see cref="State.Issued"/> until the blob was
-/// manually deleted. That was safe for destructive wipes (the device gets a
-/// fresh <c>IntuneDeviceId</c> after re-enrollment) but blocked legitimate
-/// re-wipes when <c>keepEnrollmentData=true</c> or after a failed wipe.
-/// </para>
-/// <para>
-/// New behaviour (this revision): the ledger consults <see cref="ActionStatusTracker"/>
-/// at <see cref="ReserveAsync"/> time. If the previous wipe for the same device
-/// has reached an Intune-side terminal state (success / failure / pollTimeout
-/// past a configurable grace period), the ledger atomically re-arms itself
+/// The ledger consults <see cref="ActionStatusTracker"/> at
+/// <see cref="ReserveAsync"/> time. If the previous action for the same device
+/// has reached a back-end terminal state (success / failure / pollTimeout past
+/// a configurable grace period), the ledger atomically re-arms itself
 /// (new correlationId, incremented sequence, prior outcome preserved for
-/// audit) and lets the new wipe proceed. A per-device daily rate limit
+/// audit) and lets the new action proceed. A per-device daily rate limit
 /// prevents runaway loops. A dev-only <c>forceRearm</c> path skips the
 /// tracker check entirely.
 /// </para>
 /// <para>
 /// Blob lifecycle (one Entry per device, JSON):
 /// <list type="bullet">
-///   <item><c>State=Reserved</c> — a wipe is in flight for this correlationId.</item>
-///   <item><c>State=Issued</c> — Graph wipe was successfully issued; tracker owns the outcome.</item>
-///   <item><c>State=Failed</c> — permanent Graph failure on the previous attempt.</item>
+///   <item><c>State=Reserved</c> — an action is in flight for this correlationId.</item>
+///   <item><c>State=Issued</c> — the back-end action was successfully issued; tracker owns the outcome.</item>
+///   <item><c>State=Failed</c> — permanent back-end failure on the previous attempt.</item>
 /// </list>
 /// All updates after the initial create use ETag-based optimistic concurrency
 /// so concurrent rearms (two queue workers picking up duplicate messages) cannot
 /// double-issue.
 /// </para>
 /// </summary>
-public sealed class IdempotencyService
+public sealed class ActionIdempotencyService
 {
     public enum State { New, Reserved, Issued, Failed, RateLimited }
 
@@ -53,74 +49,74 @@ public sealed class IdempotencyService
 
     private readonly BlobContainerClient _container;
     private readonly ActionStatusTracker? _tracker;
-    private readonly ILogger<IdempotencyService> _log;
-    private readonly int _maxWipesPerDay;
+    private readonly ILogger<ActionIdempotencyService> _log;
+    private readonly int _maxActionsPerDay;
     private readonly int _rearmGracePeriodHours;
     private readonly bool _allowForceRearm;
     private const int MaxRearmAttempts = 3;
     private static readonly TimeSpan RateWindow = TimeSpan.FromHours(24);
 
-    // Set of LastState values (from ActionStatusTracker) considered "wipe completed
-    // successfully on the device side". Lowercased for comparison.
+    // Set of LastState values (from ActionStatusTracker) considered "action
+    // completed successfully on the device side". Lowercased for comparison.
     private static readonly HashSet<string> SuccessStates = new(StringComparer.OrdinalIgnoreCase)
     {
         "done", "removedfromintune"
     };
 
-    // Set of LastState values considered "wipe failed permanently" — a re-wipe
+    // Set of LastState values considered "action failed permanently" — a re-issue
     // is legitimate without operator intervention.
     private static readonly HashSet<string> FailureStates = new(StringComparer.OrdinalIgnoreCase)
     {
         "failed", "canceled", "notsupported"
     };
 
-    public IdempotencyService(BlobContainerClient container, IConfiguration cfg,
-        ILogger<IdempotencyService> log, ActionStatusTracker? tracker = null)
+    public ActionIdempotencyService(BlobContainerClient container, IConfiguration cfg,
+        ILogger<ActionIdempotencyService> log, ActionStatusTracker? tracker = null)
     {
         _container = container;
         _tracker = tracker;
         _log = log;
-        _maxWipesPerDay        = int.TryParse(cfg["Idempotency:MaxWipesPerDevicePerDay"], out var m) ? Math.Max(1, m) : 5;
+        _maxActionsPerDay      = int.TryParse(cfg["Idempotency:MaxActionsPerDevicePerDay"], out var m) ? Math.Max(1, m) : 5;
         _rearmGracePeriodHours = int.TryParse(cfg["Idempotency:RearmGracePeriodHours"], out var g) ? Math.Max(1, g) : 48;
         _allowForceRearm       = bool.TryParse(cfg["Idempotency:AllowForceRearm"], out var f) && f;
     }
 
-    public int MaxWipesPerDay => _maxWipesPerDay;
+    public int MaxActionsPerDevicePerDay => _maxActionsPerDay;
     public int RearmGracePeriodHours => _rearmGracePeriodHours;
     public bool AllowForceRearm => _allowForceRearm;
 
     /// <summary>
-    /// One row of the ledger. Backward-compatible with old blobs:
-    /// missing fields deserialize to their CLR defaults.
+    /// One row of the ledger. Missing fields deserialize to their CLR defaults
+    /// (forward-compat with older blobs).
     /// </summary>
     public sealed class Entry
     {
         public string IntuneDeviceId { get; set; } = string.Empty;
         public string CorrelationId { get; set; } = string.Empty;
-        public string State { get; set; } = nameof(IdempotencyService.State.Reserved);
+        public string State { get; set; } = nameof(ActionIdempotencyService.State.Reserved);
         public DateTimeOffset ReservedAt { get; set; } = DateTimeOffset.UtcNow;
         public DateTimeOffset? IssuedAt { get; set; }
         public DateTimeOffset? FailedAt { get; set; }
         public string? FailureReason { get; set; }
         public int Attempts { get; set; } = 1;
 
-        // --- Re-arm bookkeeping (added in the rearm refactor) ----------
-        /// <summary>Increments on every successful rearm (1 for the first wipe).</summary>
-        public int WipeSequence { get; set; } = 1;
+        // --- Re-arm bookkeeping ----------------------------------------
+        /// <summary>Increments on every successful rearm (1 for the first action).</summary>
+        public int ActionSequence { get; set; } = 1;
         public DateTimeOffset? LastRearmedAt { get; set; }
-        /// <summary>Terminal Intune-side state of the wipe that was superseded by the last rearm.</summary>
+        /// <summary>Terminal back-end state of the action that was superseded by the last rearm.</summary>
         public string? LastTerminalState { get; set; }
-        public IdempotencyService.RearmReason LastRearmReason { get; set; } = IdempotencyService.RearmReason.None;
-        /// <summary>UTC timestamps of every wipe successfully <em>issued</em> for this device (append on MarkIssued).
+        public ActionIdempotencyService.RearmReason LastRearmReason { get; set; } = ActionIdempotencyService.RearmReason.None;
+        /// <summary>UTC timestamps of every action successfully <em>issued</em> for this device (append on MarkIssued).
         /// Pruned to entries within the rate-limit window (24h) on read. Drives per-device daily rate limiting.</summary>
-        public List<DateTimeOffset> RecentWipeTimestamps { get; set; } = new();
+        public List<DateTimeOffset> RecentActionTimestamps { get; set; } = new();
     }
 
     /// <summary>
-    /// Outcome of a <see cref="ReserveAsync"/> call. The caller (typically
-    /// <c>WipeActionRunner</c>) uses <see cref="State"/> to decide whether to
-    /// proceed with the Graph wipe and uses <see cref="Rearmed"/> and
-    /// <see cref="RecentWipesInWindow"/> to emit the appropriate audit events.
+    /// Outcome of a <see cref="ReserveAsync"/> call. The caller (any
+    /// per-action runner) uses <see cref="State"/> to decide whether to
+    /// proceed with the back-end call and uses <see cref="Rearmed"/> and
+    /// <see cref="RecentActionsInWindow"/> to emit the appropriate audit events.
     /// </summary>
     public sealed class ReserveResult
     {
@@ -128,15 +124,15 @@ public sealed class IdempotencyService
         public Entry Entry { get; init; } = new();
         /// <summary>Non-None when this call re-armed an existing Issued/Failed ledger.</summary>
         public RearmReason Rearmed { get; init; } = RearmReason.None;
-        public int RecentWipesInWindow { get; init; }
+        public int RecentActionsInWindow { get; init; }
         /// <summary>Set when <see cref="State"/>=RateLimited; reflects the configured cap at decision time.</summary>
-        public int MaxWipesPerDay { get; init; }
-        /// <summary>Hours elapsed since the prior wipe reached terminal state (for AfterTimeout/AfterSuccess audits).</summary>
+        public int MaxActionsPerDevicePerDay { get; init; }
+        /// <summary>Hours elapsed since the prior action reached terminal state (for AfterTimeout/AfterSuccess audits).</summary>
         public double? AgeSinceTerminalHours { get; init; }
     }
 
     /// <summary>
-    /// Reserves the idempotency slot for a wipe attempt. See class summary for
+    /// Reserves the idempotency slot for an action attempt. See class summary for
     /// the decision matrix. Returns a <see cref="ReserveResult"/> describing
     /// whether the caller should proceed, was rejected as duplicate, was
     /// rate-limited, or triggered an automatic rearm.
@@ -148,13 +144,13 @@ public sealed class IdempotencyService
         _log.LogDebug("Idempotency ReserveAsync entry: device={Device} corr={Corr} forceRearm={Force} blob={Blob}",
             intuneDeviceId, correlationId, forceRearm, blob.Name);
 
-        // Attempt #1: optimistic create (no prior wipe for this device id).
+        // Attempt #1: optimistic create (no prior action for this device id).
         var fresh = new Entry
         {
             IntuneDeviceId = intuneDeviceId,
             CorrelationId  = correlationId,
             State          = nameof(State.Reserved),
-            WipeSequence   = 1,
+            ActionSequence = 1,
         };
         var freshBytes = JsonSerializer.SerializeToUtf8Bytes(fresh);
 
@@ -165,7 +161,7 @@ public sealed class IdempotencyService
                 new BlobUploadOptions { Conditions = new BlobRequestConditions { IfNoneMatch = ETag.All } },
                 cancellationToken: ct);
             _log.LogDebug("Idempotency NEW reservation created device={Device} corr={Corr}", intuneDeviceId, correlationId);
-            return new ReserveResult { State = State.New, Entry = fresh, MaxWipesPerDay = _maxWipesPerDay };
+            return new ReserveResult { State = State.New, Entry = fresh, MaxActionsPerDevicePerDay = _maxActionsPerDay };
         }
         catch (RequestFailedException ex) when (ex.Status == 409 || ex.Status == 412)
         {
@@ -186,7 +182,7 @@ public sealed class IdempotencyService
                 {
                     State = ParseState(existing.State),
                     Entry = existing,
-                    MaxWipesPerDay = _maxWipesPerDay,
+                    MaxActionsPerDevicePerDay = _maxActionsPerDay,
                 };
             }
 
@@ -199,7 +195,7 @@ public sealed class IdempotencyService
                 {
                     State = State.Reserved,
                     Entry = existing,
-                    MaxWipesPerDay = _maxWipesPerDay,
+                    MaxActionsPerDevicePerDay = _maxActionsPerDay,
                 };
             }
 
@@ -214,28 +210,28 @@ public sealed class IdempotencyService
                 {
                     State = existingState,
                     Entry = existing,
-                    MaxWipesPerDay = _maxWipesPerDay,
+                    MaxActionsPerDevicePerDay = _maxActionsPerDay,
                     AgeSinceTerminalHours = ageHours,
                 };
             }
 
-            // Rate limiter — prune wipes outside the 24h window, count what's left.
+            // Rate limiter — prune actions outside the 24h window, count what's left.
             var now = DateTimeOffset.UtcNow;
-            var recent = (existing.RecentWipeTimestamps ?? new List<DateTimeOffset>())
+            var recent = (existing.RecentActionTimestamps ?? new List<DateTimeOffset>())
                 .Where(t => now - t < RateWindow)
                 .OrderBy(t => t)
                 .ToList();
 
-            if (recent.Count >= _maxWipesPerDay && rearmDecision != RearmReason.Forced)
+            if (recent.Count >= _maxActionsPerDay && rearmDecision != RearmReason.Forced)
             {
                 _log.LogDebug("Idempotency RATE-LIMITED device={Device} recentCount={Recent} cap={Cap}",
-                    intuneDeviceId, recent.Count, _maxWipesPerDay);
+                    intuneDeviceId, recent.Count, _maxActionsPerDay);
                 return new ReserveResult
                 {
                     State = State.RateLimited,
                     Entry = existing,
-                    RecentWipesInWindow = recent.Count,
-                    MaxWipesPerDay = _maxWipesPerDay,
+                    RecentActionsInWindow = recent.Count,
+                    MaxActionsPerDevicePerDay = _maxActionsPerDay,
                     AgeSinceTerminalHours = ageHours,
                 };
             }
@@ -248,13 +244,13 @@ public sealed class IdempotencyService
                 State                  = nameof(State.Reserved),
                 ReservedAt             = now,
                 Attempts               = 1,
-                WipeSequence           = existing.WipeSequence + 1,
+                ActionSequence         = existing.ActionSequence + 1,
                 LastRearmedAt          = now,
                 LastTerminalState      = string.IsNullOrEmpty(existing.LastTerminalState)
                                           ? ToTerminalDescriptor(existing)
                                           : existing.LastTerminalState,
                 LastRearmReason        = rearmDecision,
-                RecentWipeTimestamps   = recent,
+                RecentActionTimestamps = recent,
             };
             // On Forced rearm we still capture the original outcome for audit.
             if (rearmDecision == RearmReason.Forced && _tracker is not null)
@@ -281,8 +277,8 @@ public sealed class IdempotencyService
                     State = State.New,
                     Entry = rearmed,
                     Rearmed = rearmDecision,
-                    RecentWipesInWindow = recent.Count,
-                    MaxWipesPerDay = _maxWipesPerDay,
+                    RecentActionsInWindow = recent.Count,
+                    MaxActionsPerDevicePerDay = _maxActionsPerDay,
                     AgeSinceTerminalHours = ageHours,
                 };
             }
@@ -303,7 +299,7 @@ public sealed class IdempotencyService
         {
             State = ParseState(final.State),
             Entry = final,
-            MaxWipesPerDay = _maxWipesPerDay,
+            MaxActionsPerDevicePerDay = _maxActionsPerDay,
         };
     }
 
@@ -313,10 +309,10 @@ public sealed class IdempotencyService
         {
             e.State = nameof(State.Issued);
             e.IssuedAt = now;
-            e.RecentWipeTimestamps ??= new List<DateTimeOffset>();
-            e.RecentWipeTimestamps.Add(now);
+            e.RecentActionTimestamps ??= new List<DateTimeOffset>();
+            e.RecentActionTimestamps.Add(now);
             // Trim recent list to the rate window to keep blob size bounded.
-            e.RecentWipeTimestamps = e.RecentWipeTimestamps
+            e.RecentActionTimestamps = e.RecentActionTimestamps
                 .Where(t => now - t < RateWindow)
                 .OrderBy(t => t)
                 .ToList();
@@ -352,7 +348,7 @@ public sealed class IdempotencyService
     /// <summary>
     /// Operator-driven manual reset: archives the current ledger blob under
     /// <c>_archive/{deviceId}/{timestamp}.json</c> (immutable copy for audit)
-    /// and removes the live blob so the next wipe request starts fresh.
+    /// and removes the live blob so the next action request starts fresh.
     /// Throws if no ledger exists.
     /// </summary>
     public async Task<(Entry archived, string archivePath)> ResetAsync(
@@ -396,7 +392,7 @@ public sealed class IdempotencyService
     /// <summary>
     /// Decides whether a previously-issued/failed ledger entry can be re-armed
     /// and why. Returns <see cref="RearmReason.None"/> when the rearm must be
-    /// blocked (in-flight wipe, no tracker info, grace period not elapsed, ...).
+    /// blocked (in-flight action, no tracker info, grace period not elapsed, ...).
     /// </summary>
     private async Task<(RearmReason reason, double? ageHours)> DecideRearmAsync(
         Entry existing, bool forceRearm, CancellationToken ct)
@@ -407,7 +403,7 @@ public sealed class IdempotencyService
             return (RearmReason.Forced, null);
         }
 
-        // Without the tracker we cannot prove the previous wipe finished —
+        // Without the tracker we cannot prove the previous action finished —
         // stay conservative and block.
         if (_tracker is null || !_tracker.IsEnabled)
         {

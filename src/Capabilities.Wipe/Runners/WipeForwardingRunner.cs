@@ -1,16 +1,18 @@
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
+using IntuneDeviceActions.Actions;
+using IntuneDeviceActions.Capabilities.Wipe.Senders;
 using IntuneDeviceActions.Services;
 using Microsoft.Extensions.Logging;
 
-namespace IntuneDeviceActions.Actions.Runners;
+namespace IntuneDeviceActions.Capabilities.Wipe.Runners;
 
 /// <summary>
-/// <see cref="IActionRunner"/> registered on the worker role for the
-/// <c>wipe</c> action type. Instead of executing the wipe in-process, it
-/// forwards the dispatch envelope to a dedicated per-capability Service Bus
-/// queue (<c>wipe-action</c>) which is consumed by a separate Function App
-/// (<see cref="IntuneDeviceActions.Functions.WipeActionConsumerFunction"/>).
+/// <see cref="IActionRunner"/> registered on the proc role for the <c>wipe</c>
+/// action type. Instead of executing the wipe in-process, it forwards the
+/// dispatch envelope to a dedicated per-capability Service Bus queue
+/// (<c>wipe-action</c>) which is consumed by a separate Function App (the wipe
+/// role's <c>WipeActionConsumerFunction</c>).
 /// </summary>
 /// <remarks>
 /// Architectural rationale:

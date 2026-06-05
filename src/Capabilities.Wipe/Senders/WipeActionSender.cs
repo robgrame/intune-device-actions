@@ -1,11 +1,11 @@
 using Azure.Messaging.ServiceBus;
 
-namespace IntuneDeviceActions.Actions;
+namespace IntuneDeviceActions.Capabilities.Wipe.Senders;
 
 /// <summary>
 /// Thin DI wrapper around a <see cref="ServiceBusSender"/> that targets the
 /// per-capability <c>wipe-action</c> Service Bus queue. This is the boundary
-/// between the generic action dispatcher (worker role) and the dedicated
+/// between the generic action dispatcher (proc role) and the dedicated
 /// wipe-runner Function App (wipe role), which consumes this queue
 /// exclusively via <c>ServiceBusTrigger</c>.
 /// </summary>

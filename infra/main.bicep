@@ -104,7 +104,7 @@ param actionStatusPollMaxAgeHours int = 24
 
 // ── Idempotency ledger ───────────────────────────────────────────────────────
 @description('Max wipes per device per 24h. Hard ceiling enforced by the ledger.')
-param idempotencyMaxWipesPerDay int = 5
+param idempotencyMaxActionsPerDay int = 5
 @description('Hours to wait before auto-rearming a ledger whose previous wipe ended in pollTimeout.')
 param idempotencyRearmGracePeriodHours int = 48
 @description('If true, the X-Force-Rearm HTTP header bypasses the tracker-based rearm gate. Keep false in prod.')
@@ -439,7 +439,7 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'Idempotency__BlobContainer',           value: ledgerContainerName }
         { name: 'Idempotency__AllowForceRearm',         value: string(idempotencyAllowForceRearm) }
         { name: 'Idempotency__AdminApiEnabled',         value: string(idempotencyAdminApiEnabled) }
-        { name: 'Idempotency__MaxWipesPerDevicePerDay', value: string(idempotencyMaxWipesPerDay) }
+        { name: 'Idempotency__MaxActionsPerDevicePerDay', value: string(idempotencyMaxActionsPerDay) }
         { name: 'Idempotency__RearmGracePeriodHours',   value: string(idempotencyRearmGracePeriodHours) }
         // GraphWipeService is pulled in transitively via the admin endpoint resolver.
         { name: 'Wipe__AllowedGroupId',     value: allowedGroupId }
@@ -546,7 +546,7 @@ resource funcProc 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'Idempotency__StorageAccount',          value: storageProc.name }
         { name: 'Idempotency__AllowForceRearm',         value: string(idempotencyAllowForceRearm) }
         { name: 'Idempotency__AdminApiEnabled',         value: string(idempotencyAdminApiEnabled) }
-        { name: 'Idempotency__MaxWipesPerDevicePerDay', value: string(idempotencyMaxWipesPerDay) }
+        { name: 'Idempotency__MaxActionsPerDevicePerDay', value: string(idempotencyMaxActionsPerDay) }
         { name: 'Idempotency__RearmGracePeriodHours',   value: string(idempotencyRearmGracePeriodHours) }
         // Audit (dual-write).
         { name: 'Audit__StorageAccount', value: storageProc.name }
@@ -643,7 +643,7 @@ resource funcWipe 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'Idempotency__StorageAccount',          value: storageProc.name }
         { name: 'Idempotency__AllowForceRearm',         value: string(idempotencyAllowForceRearm) }
         { name: 'Idempotency__AdminApiEnabled',         value: 'false' }
-        { name: 'Idempotency__MaxWipesPerDevicePerDay', value: string(idempotencyMaxWipesPerDay) }
+        { name: 'Idempotency__MaxActionsPerDevicePerDay', value: string(idempotencyMaxActionsPerDay) }
         { name: 'Idempotency__RearmGracePeriodHours',   value: string(idempotencyRearmGracePeriodHours) }
         // Audit + action status tables shared.
         { name: 'Audit__StorageAccount',   value: storageProc.name }

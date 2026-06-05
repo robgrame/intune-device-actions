@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/Capabilities.Wipe/">
+    <Project Path="Capabilities.Wipe/IntuneDeviceActions.Capabilities.Wipe.csproj" />
+  </Folder>
   <Folder Name="/Proc/">
     <Project Path="Proc/IntuneDeviceActions.Proc.csproj" />
   </Folder>

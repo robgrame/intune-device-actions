@@ -135,26 +135,34 @@ public static class HostBuilderExtensions
     }
 
     /// <summary>
-    /// Registers the Graph client + GraphWipeService. Only the Wipe and Proc
-    /// roles need this (web role does not call Graph for wipe execution; it
-    /// uses DeviceDirectoryResolver which is registered separately).
+    /// Registers a bare <see cref="GraphServiceClient"/> singleton authenticated
+    /// via the host's <see cref="TokenCredential"/>. This is the action-agnostic
+    /// half of the previous <c>AddGraphWipe()</c> — capability-specific Graph
+    /// services (e.g. <c>GraphWipeService</c>) live in their own capability
+    /// project and call this from their own DI helper.
+    /// <para>
+    /// All roles that need Graph (Web for DeviceDirectoryResolver, Proc for the
+    /// wipe-status probe and any future generic Graph reads, Wipe for the
+    /// privileged executor) call this helper. The Graph identity granted to
+    /// each role is what restricts what those calls can actually do.
+    /// </para>
     /// </summary>
-    public static IServiceCollection AddGraphWipe(this IServiceCollection services)
+    public static IServiceCollection AddGraphClient(this IServiceCollection services)
     {
-        services.AddSingleton(sp =>
+        services.TryAddSingleton(sp =>
         {
             var cred = sp.GetRequiredService<TokenCredential>();
             return new GraphServiceClient(cred, new[] { "https://graph.microsoft.com/.default" });
         });
-        services.AddSingleton<GraphWipeService>();
         return services;
     }
 
     /// <summary>
-    /// Registers the idempotency-ledger blob container client and service.
-    /// Used by Web (admin reset), Proc (read-only inspection rarely), Wipe (reserve).
+    /// Registers the action-agnostic idempotency-ledger blob container client
+    /// and service. Used by Web (admin reset), Proc (read-only inspection
+    /// rarely), Wipe (reserve before issuing).
     /// </summary>
-    public static IServiceCollection AddIdempotency(this IServiceCollection services)
+    public static IServiceCollection AddActionIdempotency(this IServiceCollection services)
     {
         services.AddSingleton(sp =>
         {
@@ -176,13 +184,16 @@ public static class HostBuilderExtensions
             }
             return client;
         });
-        services.AddSingleton<IdempotencyService>();
+        services.AddSingleton<ActionIdempotencyService>();
         return services;
     }
 
     /// <summary>
-    /// Wipe status tracker (separate table from auditevents).
-    /// Required by Wipe (init state on issue) and Proc (poller updates).
+    /// Action-status tracker (separate table from auditevents). Required by
+    /// Wipe (init state on issue) and Proc (poller updates). The tracker is
+    /// capability-agnostic: per-capability <see cref="IActionStatusProbe"/>
+    /// implementations are resolved via DI and dispatched by the row's
+    /// <c>ActionType</c> column.
     /// </summary>
     public static IServiceCollection AddActionStatusTracker(this IServiceCollection services)
     {
@@ -194,6 +205,7 @@ public static class HostBuilderExtensions
                 ?? cfg["Idempotency:StorageAccount"]
                 ?? cfg["AzureWebJobsStorage__accountName"];
             var tableName = cfg["ActionStatus:TableName"] ?? "actionstatus";
+            var probes = sp.GetServices<IActionStatusProbe>();
             try
             {
                 TableClient client;
@@ -209,16 +221,14 @@ public static class HostBuilderExtensions
                         tableName, cred);
                 }
                 client.CreateIfNotExists();
-                return new ActionStatusTracker(client,
-                    sp.GetService<GraphWipeService>(),
+                return new ActionStatusTracker(client, probes,
                     sp.GetRequiredService<AuditService>(),
                     cfg,
                     sp.GetRequiredService<ILogger<ActionStatusTracker>>());
             }
             catch
             {
-                return new ActionStatusTracker(null,
-                    sp.GetService<GraphWipeService>(),
+                return new ActionStatusTracker(null, probes,
                     sp.GetRequiredService<AuditService>(),
                     cfg,
                     sp.GetRequiredService<ILogger<ActionStatusTracker>>());
@@ -234,7 +244,7 @@ public static class HostBuilderExtensions
     /// <c>idactions-sb-xxx.servicebus.windows.net</c>). Idempotent — safe to
     /// call from multiple <c>AddXxxSender</c> helpers; only the first wins.
     /// </summary>
-    private static IServiceCollection EnsureServiceBusClient(this IServiceCollection services)
+    internal static IServiceCollection EnsureServiceBusClient(this IServiceCollection services)
     {
         services.TryAddSingleton(sp =>
         {
@@ -282,24 +292,6 @@ public static class HostBuilderExtensions
             return new ActionDispatchSender(client.CreateSender(queueName));
         });
         services.AddSingleton<ActionDispatchEnqueuer>();
-        return services;
-    }
-
-    /// <summary>
-    /// Sender-side <c>wipe-action</c> Service Bus queue client (envelope to the
-    /// dedicated wipe-runner). Used by Proc (<c>WipeForwardingRunner</c>). The
-    /// Wipe app consumes via <c>ServiceBusTrigger</c> — no DI sender needed there.
-    /// </summary>
-    public static IServiceCollection AddWipeActionSender(this IServiceCollection services)
-    {
-        services.EnsureServiceBusClient();
-        services.AddSingleton(sp =>
-        {
-            var cfg = sp.GetRequiredService<IConfiguration>();
-            var client = sp.GetRequiredService<ServiceBusClient>();
-            var queueName = cfg["ServiceBus:WipeActionQueue"] ?? "wipe-action";
-            return new WipeActionSender(client.CreateSender(queueName));
-        });
         return services;
     }
 

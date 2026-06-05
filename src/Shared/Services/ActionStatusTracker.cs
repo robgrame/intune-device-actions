@@ -1,5 +1,6 @@
 using Azure;
 using Azure.Data.Tables;
+using IntuneDeviceActions.Actions;
 using IntuneDeviceActions.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -7,27 +8,30 @@ using Microsoft.Extensions.Logging;
 namespace IntuneDeviceActions.Services;
 
 /// <summary>
-/// Persists per-wipe status rows in a dedicated Azure Table (one row per
-/// correlationId) and runs the Graph poll that drives state transitions.
+/// Persists per-action status rows in a dedicated Azure Table (one row per
+/// correlationId) and drives the polling loop via per-capability
+/// <see cref="IActionStatusProbe"/> implementations.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The wipe is asynchronous on Intune's side: the moment <see cref="GraphWipeService.WipeAsync"/>
-/// returns we only know the action was *enqueued*; whether the device picked
-/// it up, executed it, failed, or wandered offline takes minutes to hours to
-/// observe. This tracker closes that loop:
+/// Actions are asynchronous on the back-end (Intune): the moment the runner
+/// issues the back-end call we only know the request was *enqueued*; whether
+/// the device picked it up, executed it, failed, or wandered offline takes
+/// minutes to hours to observe. This tracker closes that loop:
 /// </para>
 /// <list type="number">
 ///   <item><description>
-///     <see cref="InitializeAsync"/> is called right after a successful wipe
-///     issue → writes a row <c>{Terminal=false, LastState=pending, IssuedAt=now}</c>.
+///     <see cref="InitializeAsync"/> is called right after a successful action
+///     issue → writes a row <c>{Terminal=false, LastState=pending, IssuedAt=now,
+///     ActionType=actionType}</c>.
 ///   </description></item>
 ///   <item><description>
 ///     A timer trigger (<c>ActionStatusPollerFunction</c>) enumerates all
 ///     non-terminal rows whose age is &lt; <see cref="PollMaxAgeHours"/> and
-///     calls <see cref="PollOneAsync"/> for each. Graph returns the current
-///     <c>deviceActionResults[wipe].actionState</c>, transitions are recorded
-///     to App Insights + audit table.
+///     calls <see cref="PollOneAsync"/> for each. The tracker selects the
+///     matching <see cref="IActionStatusProbe"/> by row's <c>ActionType</c>
+///     column, gets the current state, and records transitions to App
+///     Insights + audit table.
 ///   </description></item>
 ///   <item><description>
 ///     On a terminal state (<c>done</c>, <c>failed</c>, <c>canceled</c>,
@@ -38,9 +42,9 @@ namespace IntuneDeviceActions.Services;
 ///   </description></item>
 /// </list>
 /// <para>
-/// Schema: PartitionKey = correlationId (so each row is independent and the
-/// table scales horizontally), RowKey = "status" (single canonical row per
-/// wipe — upsert semantics).
+/// Schema: PartitionKey = correlationId (each row is independent and the table
+/// scales horizontally), RowKey = "status" (single canonical row per action —
+/// upsert semantics).
 /// </para>
 /// </remarks>
 public sealed class ActionStatusTracker
@@ -60,16 +64,17 @@ public sealed class ActionStatusTracker
     };
 
     private readonly TableClient? _table;
-    private readonly GraphWipeService? _graph;
+    private readonly Dictionary<string, IActionStatusProbe> _probes;
     private readonly AuditService _audit;
     private readonly ILogger<ActionStatusTracker> _log;
     private readonly int _pollMaxAgeHours;
 
-    public ActionStatusTracker(TableClient? table, GraphWipeService? graph, AuditService audit,
-        IConfiguration cfg, ILogger<ActionStatusTracker> log)
+    public ActionStatusTracker(TableClient? table, IEnumerable<IActionStatusProbe> probes,
+        AuditService audit, IConfiguration cfg, ILogger<ActionStatusTracker> log)
     {
         _table = table;
-        _graph = graph;
+        _probes = (probes ?? Array.Empty<IActionStatusProbe>())
+            .ToDictionary(p => p.ActionType, p => p, StringComparer.OrdinalIgnoreCase);
         _audit = audit;
         _log = log;
         _pollMaxAgeHours = int.TryParse(cfg["ActionStatus:PollMaxAgeHours"], out var h) ? Math.Max(1, h) : 24;
@@ -80,7 +85,7 @@ public sealed class ActionStatusTracker
 
     /// <summary>
     /// Read the current status row for a correlationId. Returns null if no
-    /// tracking row exists (either the wipe was never issued, the row was
+    /// tracking row exists (either the action was never issued, the row was
     /// purged, or the storage backend is disabled).
     /// </summary>
     public async Task<ActionStatusSnapshot?> GetStatusAsync(string correlationId, CancellationToken ct)
@@ -111,17 +116,19 @@ public sealed class ActionStatusTracker
     }
 
     /// <summary>
-    /// Creates the initial status row right after a wipe was successfully issued.
-    /// Idempotent (uses upsert) — re-issuing for the same correlationId resets
-    /// the tracking row without throwing.
+    /// Creates the initial status row right after an action was successfully
+    /// issued. Idempotent (uses upsert) — re-issuing for the same
+    /// correlationId resets the tracking row without throwing.
     /// </summary>
-    public async Task InitializeAsync(ActionRequestMessage msg, string managedDeviceId, CancellationToken ct)
+    public async Task InitializeAsync(ActionRequestMessage msg, string actionType,
+        string managedDeviceId, CancellationToken ct)
     {
         if (_table is null) return;
 
         var now = DateTimeOffset.UtcNow;
         var entity = new TableEntity(SanitizeKey(msg.CorrelationId), RowKeyStatus)
         {
+            { "ActionType",      string.IsNullOrWhiteSpace(actionType) ? "wipe" : actionType.ToLowerInvariant() },
             { "ManagedDeviceId", managedDeviceId },
             { "DeviceName",      msg.DeviceName ?? string.Empty },
             { "EntraDeviceId",   msg.EntraDeviceId ?? string.Empty },
@@ -141,16 +148,16 @@ public sealed class ActionStatusTracker
         }
         catch (Exception ex)
         {
-            // Initialization failure is logged but not fatal — the wipe is
+            // Initialization failure is logged but not fatal — the action is
             // already issued, only the tracking is degraded.
             _log.LogWarning(ex, "ActionStatusTracker: failed to initialize row for {Corr}", msg.CorrelationId);
         }
     }
 
     /// <summary>
-    /// Enumerates all non-terminal status rows for the poller. Includes a
-    /// cap on PollMaxAgeHours so we don't poll forever — rows older than that
-    /// get flipped to Terminal=true with LastState=pollTimeout on the next pass.
+    /// Enumerates all non-terminal status rows for the poller. Includes a cap
+    /// on PollMaxAgeHours so we don't poll forever — rows older than that get
+    /// flipped to Terminal=true with LastState=pollTimeout on the next pass.
     /// </summary>
     public IAsyncEnumerable<TableEntity> EnumeratePendingAsync(CancellationToken ct)
     {
@@ -167,27 +174,37 @@ public sealed class ActionStatusTracker
     }
 
     /// <summary>
-    /// Polls Graph for one tracking row, updates state, and audits transitions.
+    /// Polls the back-end for one tracking row, updates state, and audits
+    /// transitions. Dispatches to the registered <see cref="IActionStatusProbe"/>
+    /// matching the row's <c>ActionType</c> column.
     /// </summary>
     public async Task PollOneAsync(TableEntity row, CancellationToken ct)
     {
         if (_table is null) return;
-        if (_graph is null)
-        {
-            // Defensive guard: PollOneAsync is only called by the Proc poller,
-            // which must register GraphWipeService. Web never calls this method
-            // (it only reads via GetStatusAsync) and therefore doesn't need Graph.
-            throw new InvalidOperationException(
-                "ActionStatusTracker.PollOneAsync requires GraphWipeService. " +
-                "Register it in the host via services.AddGraphWipe().");
-        }
 
         var correlationId    = row.PartitionKey;
+        var actionType       = (row.GetString("ActionType") ?? "wipe").ToLowerInvariant();
         var managedDeviceId  = row.GetString("ManagedDeviceId") ?? string.Empty;
         var deviceName       = row.GetString("DeviceName") ?? string.Empty;
         var issuedAt         = row.GetDateTimeOffset("IssuedAt") ?? DateTimeOffset.UtcNow;
         var previousState    = row.GetString("LastState") ?? "pending";
         var attempts         = row.GetInt32("PollAttempts") ?? 0;
+
+        if (!_probes.TryGetValue(actionType, out var probe))
+        {
+            // Capability is not registered on this host (e.g. status poller
+            // running on a role that doesn't have the wipe probe loaded).
+            // Bump attempts and skip — operator-visible via the audit event.
+            _audit.TrackEvent(AuditEvents.ActionPollError, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]   = correlationId,
+                [AuditEvents.Prop.ActionType]      = actionType,
+                [AuditEvents.Prop.DeviceName]      = deviceName,
+                [AuditEvents.Prop.ManagedDeviceId] = managedDeviceId,
+                [AuditEvents.Prop.Reason]          = "no-probe-registered",
+            }, Microsoft.Extensions.Logging.LogLevel.Warning);
+            return;
+        }
 
         // Time-based give-up: don't poll forever on a device that never reports.
         if (DateTimeOffset.UtcNow - issuedAt > TimeSpan.FromHours(_pollMaxAgeHours))
@@ -196,6 +213,7 @@ public sealed class ActionStatusTracker
             _audit.TrackEvent(AuditEvents.ActionPollTimeout, new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId]   = correlationId,
+                [AuditEvents.Prop.ActionType]      = actionType,
                 [AuditEvents.Prop.DeviceName]      = deviceName,
                 [AuditEvents.Prop.ManagedDeviceId] = managedDeviceId,
                 [AuditEvents.Prop.PreviousState]   = previousState,
@@ -205,17 +223,14 @@ public sealed class ActionStatusTracker
             return;
         }
 
-        ActionStatusTracker.WipeActionSnapshotShim snap;
+        ActionProbeSnapshot snap;
         try
         {
-            var s = await _graph.GetWipeActionStatusAsync(managedDeviceId, ct).ConfigureAwait(false);
-            snap = new ActionStatusTracker.WipeActionSnapshotShim(
-                s.State, s.ActionStartedAt, s.ActionLastUpdated,
-                s.DeviceLastSync, s.ComplianceState, s.OsVersion, s.OperatingSystem);
+            snap = await probe.ProbeAsync(managedDeviceId, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            // Transient Graph error — bump attempts and try again next tick.
+            // Transient back-end error — bump attempts and try again next tick.
             row["PollAttempts"] = attempts + 1;
             row["LastPolledAt"] = DateTimeOffset.UtcNow;
             try { await _table.UpdateEntityAsync(row, row.ETag, TableUpdateMode.Replace, ct).ConfigureAwait(false); }
@@ -224,6 +239,7 @@ public sealed class ActionStatusTracker
             _audit.TrackEvent(AuditEvents.ActionPollError, ex, new Dictionary<string, string>
             {
                 [AuditEvents.Prop.CorrelationId]   = correlationId,
+                [AuditEvents.Prop.ActionType]      = actionType,
                 [AuditEvents.Prop.DeviceName]      = deviceName,
                 [AuditEvents.Prop.ManagedDeviceId] = managedDeviceId,
                 [AuditEvents.Prop.PollAttempts]    = (attempts + 1).ToString(),
@@ -271,6 +287,7 @@ public sealed class ActionStatusTracker
         var ctxBase = new Dictionary<string, string>
         {
             [AuditEvents.Prop.CorrelationId]    = correlationId,
+            [AuditEvents.Prop.ActionType]       = actionType,
             [AuditEvents.Prop.DeviceName]       = deviceName,
             [AuditEvents.Prop.ManagedDeviceId]  = managedDeviceId,
             [AuditEvents.Prop.PreviousState]    = previousState,
@@ -293,8 +310,6 @@ public sealed class ActionStatusTracker
 
         // Heartbeat: emit on every poll so operators can confirm the poller
         // actually ran for this correlationId, even when state is unchanged.
-        // Information level — sampling may drop in high-volume tenants but the
-        // table row in wipestatus always has the authoritative LastPolledAt.
         _audit.TrackEvent(AuditEvents.ActionStateObserved, new Dictionary<string, string>(ctxBase),
             Microsoft.Extensions.Logging.LogLevel.Information);
 
@@ -317,20 +332,6 @@ public sealed class ActionStatusTracker
             _audit.TrackEvent(name, ctxTerminal, level);
         }
     }
-
-    /// <summary>
-    /// Internal shim so PollOneAsync can pass the Graph snapshot around without
-    /// taking a hard dependency on the GraphWipeService nested type at every
-    /// call site (also makes future test mocks easier).
-    /// </summary>
-    internal sealed record WipeActionSnapshotShim(
-        string State,
-        DateTimeOffset? ActionStartedAt,
-        DateTimeOffset? ActionLastUpdated,
-        DateTimeOffset? DeviceLastSync,
-        string? ComplianceState,
-        string? OsVersion,
-        string? OperatingSystem);
 
     private async Task MarkTerminalAsync(TableEntity row, string state, string previousState, CancellationToken ct)
     {

@@ -12,7 +12,7 @@ namespace IntuneDeviceActions.Functions;
 /// <summary>
 /// Operator-facing endpoints to inspect and manually reset the per-device
 /// idempotency ledger. Used by SecOps in the rare case the automatic re-arm
-/// logic in <see cref="IdempotencyService"/> intentionally blocks a re-wipe
+/// logic in <see cref="ActionIdempotencyService"/> intentionally blocks a re-issue
 /// (e.g. <c>keepEnrollmentData=true</c> with the previous wipe never observed
 /// terminal by the tracker) and the device must be unblocked immediately.
 /// <para>
@@ -34,13 +34,13 @@ namespace IntuneDeviceActions.Functions;
 /// </summary>
 public sealed class ActionLedgerAdminFunction
 {
-    private readonly IdempotencyService _ledger;
+    private readonly ActionIdempotencyService _ledger;
     private readonly ActionStatusTracker _tracker;
     private readonly AuditService _audit;
     private readonly IConfiguration _cfg;
     private readonly ILogger<ActionLedgerAdminFunction> _log;
 
-    public ActionLedgerAdminFunction(IdempotencyService ledger, ActionStatusTracker tracker,
+    public ActionLedgerAdminFunction(ActionIdempotencyService ledger, ActionStatusTracker tracker,
         AuditService audit, IConfiguration cfg, ILogger<ActionLedgerAdminFunction> log)
     {
         _ledger = ledger;
@@ -84,7 +84,7 @@ public sealed class ActionLedgerAdminFunction
             tracker = snap,
             config = new
             {
-                maxWipesPerDevicePerDay = _ledger.MaxWipesPerDay,
+                maxActionsPerDevicePerDay = _ledger.MaxActionsPerDevicePerDay,
                 rearmGracePeriodHours   = _ledger.RearmGracePeriodHours,
                 allowForceRearm         = _ledger.AllowForceRearm,
             }
@@ -126,7 +126,7 @@ public sealed class ActionLedgerAdminFunction
             {
                 [AuditEvents.Prop.IntuneDeviceId]     = intuneDeviceId,
                 [AuditEvents.Prop.CorrelationId]      = previous.CorrelationId,
-                [AuditEvents.Prop.WipeSequence]       = previous.WipeSequence.ToString(),
+                [AuditEvents.Prop.ActionSequence]     = previous.ActionSequence.ToString(),
                 [AuditEvents.Prop.AdminReason]        = body.Reason!,
                 [AuditEvents.Prop.Actor]              = body.Actor!,
                 [AuditEvents.Prop.AdminCallerIp]      = req.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "",
