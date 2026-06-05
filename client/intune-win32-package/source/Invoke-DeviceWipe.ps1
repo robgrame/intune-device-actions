@@ -8,7 +8,16 @@
     typed "WIPE" confirmation + checkbox), then calls the wipe API
     authenticating with the Intune-issued device certificate.
 .PARAMETER ApiUrl
-    Full URL to the wipe endpoint, e.g. https://func.example.net/api/wipe
+    Full URL to the canonical actions endpoint, e.g.
+    https://func.example.net/api/actions. The endpoint is action-agnostic:
+    the action discriminator is sent in the request body via -ActionType
+    below, so the same URL handles wipe, sync, and any future action types
+    enabled server-side via the Actions:AllowedTypes allowlist.
+.PARAMETER ActionType
+    Action discriminator stamped into the request body so the backend can
+    route to the right IActionRunner. Defaults to "wipe". To request a
+    different action (once a corresponding runner is enabled server-side)
+    pass e.g. -ActionType sync.
 .PARAMETER CertificateThumbprint
     Thumbprint of the client certificate in Cert:\LocalMachine\My (or CurrentUser\My).
 .PARAMETER CertificateSubjectLike
@@ -26,7 +35,7 @@
       X-Request-Timestamp : current UTC time in ISO-8601 (server tolerates ±5 min by default)
       X-Request-Nonce     : a fresh GUID per request
 .EXAMPLE
-    .\Invoke-DeviceWipe.ps1 -ApiUrl https://func.example.net/api/wipe `
+    .\Invoke-DeviceWipe.ps1 -ApiUrl https://func.example.net/api/actions `
         -CertificateSubjectLike '*Intune MDM Device CA*' -FunctionKey '...'
 #>
 [CmdletBinding()]
@@ -36,6 +45,7 @@ param(
     [string] $CertificateSubjectLike,
     [string] $CertificateIssuerLike,
     [Parameter(Mandatory = $false)] [string] $FunctionKey,
+    [Parameter(Mandatory = $false)] [string] $ActionType = 'wipe',
     [switch] $Silent,
     [switch] $DryRun
 )
@@ -102,6 +112,7 @@ $cert = Get-ClientCertificate -Thumb $CertificateThumbprint -SubjectLike $Certif
 Write-Host ("Using cert: {0} (thumb {1})" -f $cert.Subject, $cert.Thumbprint) -ForegroundColor Cyan
 
 $body = @{
+    actionType     = $ActionType
     deviceName     = $deviceName
     entraDeviceId  = $entraId
     intuneDeviceId = $enrollmentId   # legacy field name; backend uses it only for audit, resolves real id via EntraDeviceId
