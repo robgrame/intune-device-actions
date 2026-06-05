@@ -17,3 +17,8 @@ src/package.zip
 
 artifact.zip
 .webhook-uri.txt
+
+# Smoke-test PKI (private keys, leaf PFX) — public root is committed into
+# infra/main.parameters.json so the deployed Function Apps trust it, but
+# the .key/.pfx files generated locally MUST never enter source control.
+client/tests/smoke-pki/
