@@ -82,39 +82,73 @@ né toccano il ledger di idempotenza: si limitano a instradare. La logica
 distruttiva e l'identità Graph privilegiata vivono **solo** sulla `Wipe`
 Function App, dietro la coda per-capability `wipe-action`.
 
-Le risorse **CORE** (HTTP function, code Service Bus, `RequestIntake`,
-`ActionDispatch`, `WipeAction`) non vanno mai modificate per aggiungere una
-nuova capability: il contratto è la busta `ActionDispatchMessage` e
-l'interfaccia `IActionRunner`.
+Le risorse **CORE** (`Shared`, `Web`, `Proc/RequestIntake`, `Proc/ActionDispatch`,
+HTTP function, code `action-requests` / `action-dispatch`, modello di busta
+`ActionRequest` / `ActionDispatchMessage` / `IActionRunner`) sono **immutabili
+rispetto alle capability**: aggiungerne una nuova non deve modificare nessun
+file in `Shared/` né in `Web/`, né cambiare lo schema delle queue, della
+tabella `actionstatus`, del blob `action-ledger` o del Bicep core.
+
+Il contratto è la coppia `ActionDispatchMessage` (busta opaca con `ActionType`
+discriminatore + `Payload JsonElement`) + `IActionRunner` (risolto per
+`ActionType` da `ActionRunnerRegistry`). Le proprietà capability-specific che
+arrivano in `ActionRequest` viaggiano nell'`[JsonExtensionData] Extras` senza
+toccare il core (vedi `.github/copilot-instructions.md`).
 
 #### Aggiungere un nuovo action runner
 
-1. Crea una classe in `src/Shared/Actions/Runners/` che implementa `IActionRunner`:
+Esempio: una capability `lock`.
+
+1. Crea il progetto `src/Capabilities.Lock/IntuneDeviceActions.Capabilities.Lock.csproj`
+   (referenzia `Shared`). Layout consigliato (specchio di `Capabilities.Autopilot`):
+   ```text
+   src/Capabilities.Lock/
+   ├── Models/LockPayload.cs             # payload tipato + ExtrasKey = "lock"
+   ├── Runners/LockForwardingRunner.cs   # Proc: enqueue su lock-action (Type = "lock")
+   ├── Runners/LockActionRunner.cs       # host privilegiato: chiama Graph (Type = "lock")
+   ├── Runners/LockPayloadExtractor.cs   # internal helper Extras → LockPayload
+   ├── Services/GraphLockService.cs
+   └── ServiceCollectionExtensions.cs    # AddLockForwarding() / AddLockExecutor() / AddLockProbe()
+   ```
+   Il runner implementa `IActionRunner`:
    ```csharp
    public sealed class LockActionRunner : IActionRunner
    {
        public string Type => "lock";
        public async Task RunAsync(ActionDispatchMessage env, CancellationToken ct)
        {
-           var payload = env.Payload.Deserialize<LockPayload>();
-           // ... logica + audit + idempotency a piacere
+           var payload = LockPayloadExtractor.TryRead(env);
+           // ... logica + audit + idempotency
        }
    }
    ```
-2. Registralo nel `Program.cs` dell'app appropriata (`Proc` per un runner che gira
-   inline nel router, oppure su un'app dedicata sul modello `Wipe` se serve un
-   privilege boundary):
-   ```csharp
-   services.AddSingleton<IActionRunner, LockActionRunner>();
-   ```
-3. Aggiungi un producer (nuovo endpoint HTTP o estensione di `ActionRequest`)
-   che enqueue una `ActionDispatchMessage{ActionType="lock", Payload=...}`.
+2. Registra la capability tramite l'extension method dedicato — **nessuna riga
+   da aggiungere in `Shared`**:
+   - `src/Proc/Program.cs` → `services.AddLockForwarding(); services.AddLockProbe();`
+   - se serve un privilege boundary (modello `Wipe`/`Autopilot`/`BitLocker`),
+     crea un nuovo host `src/Lock/` che chiama `services.AddLockExecutor();`
+     e la sua function `LockAction` (Service Bus trigger su `lock-action`)
+     risolve `LockActionRunner` come tipo concreto.
+3. Producer: i client esistenti chiamano già `POST /api/ActionRequest` con
+   `actionType: "lock"` e le proprietà capability-specifiche nel corpo —
+   l'`[JsonExtensionData] Extras` di `ActionRequest` le cattura senza modifiche
+   a `Web` né a `Shared`.
+4. Per esporre il nuovo tipo ai client, aggiungi `lock` alla CSV
+   `Actions:AllowedTypes` (App Configuration, hot-reload): **modifica di
+   configurazione, non di codice**.
+5. Per le risorse Azure capability-specifiche (queue `lock-action`, eventuale
+   Function App `lock`), aggiungi un modulo Bicep dedicato in
+   `infra/modules/lock.bicep` orchestrato da `main.bicep`. Le risorse core
+   (HTTP function, `action-requests`, `action-dispatch`, ledger, status table)
+   restano invariate.
+6. Crea il progetto test parallelo `src/Capabilities.Lock.Tests/` (xUnit +
+   FluentAssertions) con almeno: `LockPayloadExtractor` round-trip, `Type`
+   discriminatore, contratto JSON del payload. Vedi
+   `src/Capabilities.Autopilot.Tests/` come modello.
 
-Nessuna modifica a `ActionRequest`, `RequestIntake`, `ActionDispatch`, alle code
-Service Bus o al Bicep. Eventi audit dedicati: `action.dispatch.enqueued`,
-`action.dispatch.received`, `action.dispatch.completed`,
-`action.dispatch.runner-failed`, `action.dispatch.no-runner`,
-`action.dispatch.invalid-envelope`.
+Eventi audit dedicati: `action.dispatch.enqueued`, `action.dispatch.received`,
+`action.dispatch.completed`, `action.dispatch.runner-failed`,
+`action.dispatch.no-runner`, `action.dispatch.invalid-envelope`.
 
 ## Componenti
 
@@ -472,24 +506,31 @@ customEvents
 │   └── main.parameters.json
 ├── src/                                # .NET 10 isolated — soluzione multi-progetto
 │   ├── IntuneDeviceActions.slnx
-│   ├── Shared/                         # IntuneDeviceActions.Shared
+│   ├── Shared/                         # IntuneDeviceActions.Shared — CORE immutabile
 │   │   ├── HostBuilderExtensions.cs    # DI + App Configuration helpers
-│   │   ├── Actions/                    # modello plug-in: registry, envelope, runner
+│   │   ├── Actions/                    # contratti plug-in: registry, envelope, interfaccia
 │   │   │   ├── IActionRunner.cs
 │   │   │   ├── ActionRunnerRegistry.cs
-│   │   │   ├── ActionDispatch*.cs
-│   │   │   └── Runners/                # WipeActionRunner, *ForwardingRunner
-│   │   ├── Services/                   # ClientCertValidator, GraphWipeService,
+│   │   │   └── ActionDispatch*.cs      # ActionDispatchMessage, sender, enqueuer
+│   │   ├── Services/                   # ClientCertValidator, GraphErrorClassifier,
 │   │   │                               #   Idempotency, ReplayProtector, Audit*,
 │   │   │                               #   ActionStatusTracker, DeviceDirectoryResolver
-│   │   ├── Middleware/                 # AppConfigRefreshMiddleware
-│   │   └── Models/
+│   │   ├── Middleware/                 # AppConfigRefreshMiddleware, ServiceBusTraceContext
+│   │   └── Models/                     # ActionRequest, ActionRequestMessage
+│   │                                   #   (con [JsonExtensionData] Extras)
+│   ├── Shared.Tests/                   # xUnit + FluentAssertions sul core
+│   ├── Capabilities.Wipe/              # capability "wipe" (Models, Runners, Services)
+│   ├── Capabilities.BitLocker/         # capability "bitlocker-rotate"
+│   ├── Capabilities.Autopilot/         # capability "autopilot-register"
+│   ├── Capabilities.Autopilot.Tests/   # xUnit sulla capability Autopilot
 │   ├── Web/                            # IntuneDeviceActions.Web (EP1, mTLS)
 │   │   └── Functions/                  # ActionRequest, ActionStatus, ActionLedger_*
 │   ├── Proc/                           # IntuneDeviceActions.Proc (Flex)
 │   │   └── Functions/                  # RequestIntake, ActionDispatch, ActionStatusPoller
-│   └── Wipe/                           # IntuneDeviceActions.Wipe (Flex, privilegiata)
-│       └── Functions/                  # WipeAction (consumer wipe-action)
+│   ├── Wipe/                           # IntuneDeviceActions.Wipe (Flex, privilegiata)
+│   │   └── Functions/                  # WipeAction (consumer wipe-action)
+│   ├── BitLocker/                      # host privilegiato BitLocker (consumer bitlocker-action)
+│   └── Autopilot/                      # host privilegiato Autopilot (consumer autopilot-action)
 ├── tools/
 │   ├── Deploy-IntuneDeviceActions.ps1  # orchestrator end-to-end
 │   └── Grant-GraphPermissions.ps1      # grant idempotente dei ruoli Graph alle UAMI
