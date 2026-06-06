@@ -31,7 +31,17 @@
     is controlled by main.parameters.json (namePrefix parameter).
 
 .PARAMETER ParametersFile
-    Bicep parameters file. Default: infra\main.parameters.json.
+    Bicep parameters file. Default: infra\main.parameters.json (hardened)
+    or infra\main-public.parameters.json when -NetworkProfile public.
+
+.PARAMETER NetworkProfile
+    Selects the Bicep variant to deploy:
+      hardened (default) — infra\main.bicep with VNet, NAT Gateway, Private
+                            Endpoints, Private DNS zones, NSGs.
+      public             — infra\main-public.bicep without any network
+                            isolation (storage / Service Bus reachable on
+                            the public Internet, still RBAC-protected). Use
+                            for low-cost / quick-start deployments.
 
 .PARAMETER SkipPrereqInstall
     Don't try to install missing prereqs - error out instead.
@@ -70,6 +80,8 @@ param(
     [string]$SubscriptionId,
     [string]$NamePrefix      = 'idactions',
     [string]$ParametersFile,
+    [ValidateSet('hardened','public')]
+    [string]$NetworkProfile = 'hardened',
     [switch]$SkipPrereqInstall,
     [switch]$SkipPublish,
     [switch]$SkipInfra,
@@ -84,8 +96,13 @@ $ProgressPreference    = 'SilentlyContinue'
 # -- Paths -------------------------------------------------------------------
 $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $InfraDir   = Join-Path $RepoRoot 'infra'
-$BicepFile  = Join-Path $InfraDir 'main.bicep'
-$DefaultPF  = Join-Path $InfraDir 'main.parameters.json'
+if ($NetworkProfile -eq 'public') {
+    $BicepFile  = Join-Path $InfraDir 'main-public.bicep'
+    $DefaultPF  = Join-Path $InfraDir 'main-public.parameters.json'
+} else {
+    $BicepFile  = Join-Path $InfraDir 'main.bicep'
+    $DefaultPF  = Join-Path $InfraDir 'main.parameters.json'
+}
 $PublishDir = Join-Path $RepoRoot 'publish'
 
 if (-not $ParametersFile) { $ParametersFile = $DefaultPF }

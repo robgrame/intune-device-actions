@@ -305,6 +305,22 @@ Lo script:
 
 Flag di skip per re-run incrementali: `-SkipPrereqInstall -SkipPublish -SkipInfra -SkipDeploy -SkipGraphConsent -NoSmokeTest`.
 
+### Variante di rete: `hardened` (default) vs `public`
+
+Lo script accetta `-NetworkProfile {hardened|public}`:
+
+| Profilo    | Bicep file                       | Network isolation                                                                                                                                                                                                       | Quando usarlo                                                                                                                                                                |
+| ---------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hardened` | `infra/main.bicep`               | VNet `/24` + 4 subnet, 2 NSG, NAT Gateway con 1 Standard Public IP (SNAT stabile su Graph), 4 Private DNS zone (blob/file/queue/table), Private Endpoint su `storageWeb`/`storageProc`/`storageWipe`, Flex VNet-integrated. | Produzione, hardening, requisiti di compliance, IP egress stabile (whitelisting Graph / SOC). Costo aggiuntivo: ~25–40 €/mese (NAT GW + PIP + PE).                            |
+| `public`   | `infra/main-public.bicep`        | Nessuna risorsa di rete. Storage `publicNetworkAccess=Enabled` con `networkAcls.defaultAction=Allow`. Funzioni senza VNet integration. Service Bus / App Config raggiungibili dall'Internet pubblico.                   | PoC, demo, ambienti di sviluppo, clienti che non possono / non vogliono gestire un Private DNS hub. Sicurezza ancora garantita da Entra ID + RBAC + UAMI + mTLS sul Web.    |
+
+```pwsh
+# variante public
+.\tools\Deploy-IntuneDeviceActions.ps1 -ResourceGroup rg-idactions-dev -NetworkProfile public
+```
+
+I nomi delle risorse sono identici tra le due varianti, quindi si può migrare un ambiente esistente da `public` → `hardened` (o viceversa) riapplicando l'altro Bicep — attenzione che `what-if` mostrerà molte cancellazioni/aggiunte. Il payload mTLS, le UAMI, i Graph role assignments, il modello di plug-in/runner e i runbook di Automation sono invariati tra le due varianti.
+
 ### Deploy manuale (alternativa)
 
 ```pwsh
@@ -544,10 +560,15 @@ customEvents
 ```
 .
 ├── infra/
-│   ├── main.bicep                      # 3 Function App + plan (1 EP1 + 2 FC1), 3 storage,
-│   │                                   #   3 UAMI, Service Bus + queue, App Configuration,
-│   │                                   #   App Insights, RBAC, runbook Automation
-│   └── main.parameters.json
+│   ├── main.bicep                      # Variante HARDENED: Function App + plan (1 EP1 + 4 FC1),
+│   │                                   #   5 storage, 5 UAMI, Service Bus + queue, App Configuration,
+│   │                                   #   App Insights, RBAC, VNet + NAT GW + Private Endpoint,
+│   │                                   #   Automation Account + runbook (opt-in)
+│   ├── main.parameters.json
+│   ├── main-public.bicep               # Variante PUBLIC: stesso scope ma senza VNet/NAT GW/PE/
+│   │                                   #   Private DNS/NSG. Storage con publicNetworkAccess=Enabled
+│   │                                   #   e networkAcls.defaultAction=Allow.
+│   └── main-public.parameters.json
 ├── src/                                # .NET 10 isolated — soluzione multi-progetto
 │   ├── IntuneDeviceActions.slnx
 │   ├── Shared/                         # IntuneDeviceActions.Shared — CORE immutabile
