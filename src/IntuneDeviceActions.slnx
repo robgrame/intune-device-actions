@@ -2,6 +2,9 @@
   <Folder Name="/Capabilities.Autopilot/">
     <Project Path="Capabilities.Autopilot/IntuneDeviceActions.Capabilities.Autopilot.csproj" />
   </Folder>
+  <Folder Name="/Capabilities.Autopilot.Tests/">
+    <Project Path="Capabilities.Autopilot.Tests/IntuneDeviceActions.Capabilities.Autopilot.Tests.csproj" />
+  </Folder>
   <Folder Name="/Capabilities.BitLocker/">
     <Project Path="Capabilities.BitLocker/IntuneDeviceActions.Capabilities.BitLocker.csproj" />
   </Folder>
@@ -19,6 +22,9 @@
   </Folder>
   <Folder Name="/Shared/">
     <Project Path="Shared/IntuneDeviceActions.Shared.csproj" />
+  </Folder>
+  <Folder Name="/Shared.Tests/">
+    <Project Path="Shared.Tests/IntuneDeviceActions.Shared.Tests.csproj" />
   </Folder>
   <Folder Name="/Web/">
     <Project Path="Web/IntuneDeviceActions.Web.csproj" />

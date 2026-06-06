@@ -110,7 +110,12 @@ real downstream clients exist) is much higher than now.
 ## Testing
 
 - Build: `dotnet build src\IntuneDeviceActions.slnx -c Release`
-- Client tests: `powershell.exe -NoProfile -File .\client\tests\Invoke-Tests.ps1`
+- Server unit tests (xUnit + FluentAssertions): `dotnet test src\IntuneDeviceActions.slnx -c Release`
+- Client tests (Pester): `powershell.exe -NoProfile -File .\client\tests\Invoke-Tests.ps1`
 
-Both must pass before merging changes that touch Shared, Web, Proc, or any
-capability project.
+All three must pass before merging changes that touch Shared, Web, Proc, or any
+capability project. When adding a new capability `Foo`, also create
+`src/Capabilities.Foo.Tests/` mirroring the pattern in
+`src/Capabilities.Autopilot.Tests/` (own csproj, references the capability and
+Shared, uses `InternalsVisibleTo` if you need to reach internal helpers like
+the payload extractor).

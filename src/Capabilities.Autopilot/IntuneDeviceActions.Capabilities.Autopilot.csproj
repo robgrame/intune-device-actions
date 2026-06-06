@@ -10,4 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Shared\IntuneDeviceActions.Shared.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="IntuneDeviceActions.Capabilities.Autopilot.Tests" />
+  </ItemGroup>
 </Project>
