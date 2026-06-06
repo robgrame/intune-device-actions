@@ -109,6 +109,7 @@ param(
     # WARNING: empty or short suffixes risk collision on globally-unique
     # names (Storage Account, App Configuration, Service Bus, FQDN, KV).
     [AllowNull()][AllowEmptyString()]
+    [ValidatePattern('^[a-z0-9]*$')]
     [string]$NameSuffix      = $null,
     # Hashtable of tags applied to every taggable Azure resource.
     # Example: -Tags @{ env='prod'; owner='ITOps'; costCenter='CC123' }
@@ -391,13 +392,29 @@ function Invoke-InfraDeploy {
         Write-Host "    nameSuffix override: '$NameSuffix'"
         $azArgs += @('-p', "nameSuffix=$NameSuffix")
     }
+    $tagsParamFile = $null
     if ($Tags -and $Tags.Count -gt 0) {
-        # Forward as JSON object literal: -p tags={"env":"prod","owner":"ITOps"}
-        $tagsJson = $Tags | ConvertTo-Json -Compress
-        Write-Host "    tags override: $tagsJson"
-        $azArgs += @('-p', "tags=$tagsJson")
+        # Robust quoting: write a real ARM parameters file rather than
+        # passing JSON inline. On Windows, `az.cmd` strips embedded quotes
+        # from `-p tags={"k":"v"}`, mangling the JSON. A file `@<path>`
+        # avoids the cmd.exe quote-stripping entirely.
+        $tagsParamFile = Join-Path $env:TEMP "idactions-tags-$([guid]::NewGuid().ToString('N').Substring(0,8)).json"
+        $paramDoc = [ordered]@{
+            '$schema'      = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+            contentVersion = '1.0.0.0'
+            parameters     = @{ tags = @{ value = $Tags } }
+        }
+        ($paramDoc | ConvertTo-Json -Depth 10) | Set-Content -Path $tagsParamFile -Encoding utf8
+        Write-Host "    tags override: $($Tags.Count) key(s) via $tagsParamFile"
+        $azArgs += @('-p', "@$tagsParamFile")
     }
-    $state = & az @azArgs
+    try {
+        $state = & az @azArgs
+    } finally {
+        if ($tagsParamFile -and (Test-Path $tagsParamFile)) {
+            Remove-Item $tagsParamFile -Force -ErrorAction SilentlyContinue
+        }
+    }
     if ($LASTEXITCODE -ne 0 -or $state -ne 'Succeeded') {
         throw "Bicep deployment failed (state: $state). Run: az deployment group show -g $ResourceGroup -n $deployName"
     }

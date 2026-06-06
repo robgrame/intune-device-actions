@@ -420,6 +420,10 @@ function Get-RbcBlob {
     )
     $uri = "https://$StorageAccount.blob.core.windows.net/$Container/$([uri]::EscapeDataString($BlobName))"
     $headers = New-RbcBlobHeaders
+    # NOTE: returns @{Found=$true; Content; ETag} on 200, @{Found=$false} on 404,
+    # @{Found=$null; Status; Error} for any other failure (caller MUST treat as
+    # transient — fail-closed). Returning $null was an earlier bug that
+    # conflated 404 with read errors and led to fail-open in Reserve-RbcLedger.
     try {
         $r = Invoke-RbcRest -Method GET -Uri $uri -Headers $headers
         if ($r.StatusCode -eq 200) {
@@ -429,8 +433,10 @@ function Get-RbcBlob {
             return @{ Found = $true; Content = $content; ETag = $etag }
         }
         if ($r.StatusCode -eq 404) { return @{ Found = $false } }
-        return $null
-    } catch { return $null }
+        return @{ Found = $null; Status = [int]$r.StatusCode; Error = "HTTP $($r.StatusCode)" }
+    } catch {
+        return @{ Found = $null; Status = 0; Error = $_.Exception.Message }
+    }
 }
 
 function Set-RbcBlob {
@@ -672,19 +678,41 @@ function Reserve-RbcLedger {
     if ($put.Success) {
         return @{ State='New'; Entry=$fresh; Rearmed='None'; RecentActionsInWindow=0; MaxActionsPerDevicePerDay=$maxCap }
     }
-    if ($put.Status -notin @(409, 412, 0)) {
+    # FAIL-CLOSED: Status=0 means an exception (network/auth) — must NOT proceed
+    # as if the blob "might exist"; treat as transient and let Automation retry.
+    if ($put.Status -eq 0) {
+        throw [RbcGraphError]::new("Ledger initial PUT failed (transient, no HTTP response): $($put.Error)",
+            0, 'Transient', 'PUT', $blobName, '')
+    }
+    # 409/412 = blob exists -> proceed to rearm path. Anything else is unexpected.
+    if ($put.Status -notin @(409, 412)) {
         throw [RbcGraphError]::new("Ledger initial PUT failed (HTTP $($put.Status))", $put.Status,
             (ConvertTo-RbcErrorKind -StatusCode $put.Status), 'PUT', $blobName, '')
     }
 
     for ($i = 0; $i -lt $script:RbcLedgerMaxRearmAttempts; $i++) {
         $r = Get-RbcBlob -StorageAccount $sa -Container $cont -BlobName $blobName
-        if (-not $r -or -not $r.Found) {
+        # FAIL-CLOSED: $null is impossible (Get-RbcBlob now always returns a
+        # hashtable); Found=$null means read failure -> transient.
+        if (-not $r) {
+            throw [RbcGraphError]::new("Ledger GET returned unexpected null", 0, 'Transient', 'GET', $blobName, '')
+        }
+        if ($null -eq $r.Found) {
+            throw [RbcGraphError]::new("Ledger GET failed (HTTP $($r.Status)): $($r.Error)",
+                [int]$r.Status, 'Transient', 'GET', $blobName, '')
+        }
+        if (-not $r.Found) {
+            # Blob was deleted between initial 409/412 and our GET — recreate.
             $put2 = Set-RbcBlob -StorageAccount $sa -Container $cont -BlobName $blobName `
                                 -Content ($fresh | ConvertTo-Json -Depth 8 -Compress) -IfNoneMatchAll
             if ($put2.Success) {
                 return @{ State='New'; Entry=$fresh; Rearmed='None'; RecentActionsInWindow=0; MaxActionsPerDevicePerDay=$maxCap }
             }
+            if ($put2.Status -eq 0) {
+                throw [RbcGraphError]::new("Ledger recreate PUT failed (transient): $($put2.Error)",
+                    0, 'Transient', 'PUT', $blobName, '')
+            }
+            # 409/412 = race with another writer, loop and re-read.
             continue
         }
         $existing = ConvertFrom-RbcLedger -Json $r.Content
@@ -774,17 +802,20 @@ function Reserve-RbcLedger {
                       AgeSinceTerminalHours=$ageHours }
         }
         if ($put3.Status -eq 412) { continue }
+        if ($put3.Status -eq 0) {
+            throw [RbcGraphError]::new("Ledger rearm PUT failed (transient): $($put3.Error)",
+                0, 'Transient', 'PUT', $blobName, '')
+        }
         throw [RbcGraphError]::new("Ledger rearm PUT failed (HTTP $($put3.Status))", $put3.Status,
             (ConvertTo-RbcErrorKind -StatusCode $put3.Status), 'PUT', $blobName, '')
     }
 
-    $final = Get-RbcBlob -StorageAccount $sa -Container $cont -BlobName $blobName
-    if ($final -and $final.Found) {
-        $finalE = ConvertFrom-RbcLedger -Json $final.Content
-        return @{ State=[string]$finalE.State; Entry=$finalE; Rearmed='None';
-                  RecentActionsInWindow=0; MaxActionsPerDevicePerDay=$maxCap }
-    }
-    return @{ State='Reserved'; Entry=$fresh; Rearmed='None'; RecentActionsInWindow=0; MaxActionsPerDevicePerDay=$maxCap }
+    # FAIL-CLOSED: exhausted retries. Do NOT return a synthetic Reserved entry
+    # (that would allow Graph action to execute without a real lock). Throw
+    # transient and let Automation retry the entire job.
+    throw [RbcGraphError]::new(
+        "Ledger reservation exhausted $script:RbcLedgerMaxRearmAttempts retries due to ETag conflicts; refusing to fail open.",
+        0, 'Transient', 'PUT', $blobName, '')
 }
 
 function Set-RbcLedgerOutcome {
@@ -801,8 +832,37 @@ function Set-RbcLedgerOutcome {
 
     for ($i = 0; $i -lt 3; $i++) {
         $r = Get-RbcBlob -StorageAccount $sa -Container $cont -BlobName $blobName
-        $current = if ($r -and $r.Found) { ConvertFrom-RbcLedger -Json $r.Content }
+        # FAIL-CLOSED on transient read failure (don't proceed to mutate or
+        # recreate the ledger blob blindly).
+        if (-not $r -or $null -eq $r.Found) {
+            Write-RbcWarn "Ledger $Outcome update: transient read failure (HTTP $($r.Status)): $($r.Error). Retrying." `
+                @{ device=$IntuneDeviceId; correlationId=$CorrelationId }
+            Start-Sleep -Milliseconds 500
+            continue
+        }
+        $blobMissing = -not $r.Found
+        $current = if (-not $blobMissing) { ConvertFrom-RbcLedger -Json $r.Content }
                    else { New-RbcLedgerEntry -IntuneDeviceId $IntuneDeviceId -CorrelationId $CorrelationId }
+
+        # CORRELATION GUARD: only stamp our own reservation. If the ledger
+        # was rearmed by another correlation between Reserve and SetOutcome
+        # (slow job, operator reset, etc.), DO NOT overwrite — that would
+        # corrupt idempotency state for the new reservation.
+        $currentCorr = [string]$current['CorrelationId']
+        if (-not $blobMissing -and $currentCorr -ne $CorrelationId) {
+            Write-RbcWarn "Ledger $Outcome SKIPPED: blob CorrelationId mismatch (ours='$CorrelationId', current='$currentCorr'). Likely a rearm or reset happened concurrently." `
+                @{ device=$IntuneDeviceId; correlationId=$CorrelationId; currentCorrelationId=$currentCorr; currentState=[string]$current['State'] }
+            return $false
+        }
+        # Also refuse to "recreate from scratch" on a missing blob: that's a
+        # ghost write that pre-populates a ledger for a device that's never
+        # been reserved on this run. The caller should treat this as failure.
+        if ($blobMissing) {
+            Write-RbcWarn "Ledger $Outcome SKIPPED: blob disappeared between Reserve and SetOutcome (deleted externally?)." `
+                @{ device=$IntuneDeviceId; correlationId=$CorrelationId }
+            return $false
+        }
+
         $current['Attempts'] = [int]$current['Attempts'] + 1
         $now = [DateTimeOffset]::UtcNow
         if ($Outcome -eq 'Issued') {
@@ -825,15 +885,17 @@ function Set-RbcLedgerOutcome {
             $current['FailureReason'] = $FailureReason
         }
         $body = $current | ConvertTo-Json -Depth 8 -Compress
-        $etag = if ($r -and $r.Found) { $r.ETag } else { $null }
-        $put = if ($etag) {
-            Set-RbcBlob -StorageAccount $sa -Container $cont -BlobName $blobName -Content $body -IfMatch $etag
-        } else {
-            Set-RbcBlob -StorageAccount $sa -Container $cont -BlobName $blobName -Content $body
-        }
+        $etag = $r.ETag
+        $put  = Set-RbcBlob -StorageAccount $sa -Container $cont -BlobName $blobName -Content $body -IfMatch $etag
         if ($put.Success) { return $true }
         if ($put.Status -eq 412) { Start-Sleep -Milliseconds 250; continue }
-        Write-RbcWarn "Ledger $Outcome update failed (HTTP $($put.Status))" @{ device=$IntuneDeviceId }
+        if ($put.Status -eq 0)   {
+            Write-RbcWarn "Ledger $Outcome PUT transient failure: $($put.Error). Retrying." `
+                @{ device=$IntuneDeviceId; correlationId=$CorrelationId }
+            Start-Sleep -Milliseconds 500
+            continue
+        }
+        Write-RbcWarn "Ledger $Outcome update failed (HTTP $($put.Status))" @{ device=$IntuneDeviceId; correlationId=$CorrelationId }
         return $false
     }
     return $false
