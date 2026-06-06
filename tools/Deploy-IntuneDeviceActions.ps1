@@ -193,6 +193,58 @@ function Confirm-AzLogin {
     Write-Ok "Signed-in as: $($acc.user.name)"
 }
 
+# -- Resource providers ----------------------------------------------------
+# Tutti i namespace usati (esplicitamente nei Bicep o implicitamente da
+# servizi derivati come App Insights → AlertsManagement). Vanno registrati
+# UNA TANTUM a livello subscription; se non sono "Registered" il deploy
+# Bicep fallisce con messaggi tipo:
+#   "The subscription is not registered to use namespace 'Microsoft.X'"
+$Script:RequiredResourceProviders = @(
+    'Microsoft.Resources',
+    'Microsoft.Authorization',
+    'Microsoft.ManagedIdentity',
+    'Microsoft.Storage',
+    'Microsoft.Network',
+    'Microsoft.Web',              # Function Apps + serverfarms (incl. Flex Consumption FC1)
+    'Microsoft.App',              # Richiesto da Flex Consumption per VNet integration
+    'Microsoft.ServiceBus',
+    'Microsoft.OperationalInsights',
+    'Microsoft.Insights',         # Application Insights (component v2 + classic)
+    'Microsoft.AlertsManagement', # Smart Detector alert rules creati implicitamente da App Insights
+    'Microsoft.AppConfiguration',
+    'Microsoft.Automation'        # Runbook variant (enableRunbookVariant=true)
+)
+
+function Register-ResourceProviders {
+    Write-Step "Registering required Azure resource providers ($($Script:RequiredResourceProviders.Count) namespaces)"
+    $pending = @()
+    foreach ($ns in $Script:RequiredResourceProviders) {
+        $state = (& az provider show --namespace $ns --query registrationState -o tsv 2>$null)
+        if ($state -eq 'Registered') {
+            Write-Ok "$ns  (already Registered)"
+        } else {
+            Write-Host "    -> registering $ns (current state: $state)" -ForegroundColor Gray
+            & az provider register --namespace $ns --only-show-errors | Out-Null
+            $pending += $ns
+        }
+    }
+    if ($pending.Count -gt 0) {
+        Write-Host "    waiting for $($pending.Count) provider(s) to reach 'Registered' (up to 5 min)..." -ForegroundColor Gray
+        $deadline = (Get-Date).AddMinutes(5)
+        while ((Get-Date) -lt $deadline -and $pending.Count -gt 0) {
+            Start-Sleep -Seconds 10
+            $pending = @($pending | Where-Object {
+                (& az provider show --namespace $_ --query registrationState -o tsv 2>$null) -ne 'Registered'
+            })
+        }
+        if ($pending.Count -gt 0) {
+            throw "Timed out waiting for resource providers: $($pending -join ', '). Re-run after they finish registering."
+        }
+        Write-Ok 'All required providers Registered.'
+    }
+}
+
+
 # -- Interactive inputs -----------------------------------------------------
 function Resolve-Inputs {
     Write-Step 'Resolving deployment parameters'
@@ -413,6 +465,7 @@ try {
         Confirm-Bicep
     }
     Confirm-AzLogin
+    Register-ResourceProviders
     Resolve-Inputs
     Invoke-Publish
     Invoke-InfraDeploy

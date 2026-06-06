@@ -250,6 +250,39 @@ end-to-end (disabilita con `-SkipGraphConsent` se non hai i diritti).
 - Per la grant dei ruoli Graph: **Global Administrator** / **Privileged Role Administrator** / **Cloud Application Administrator**
 - Un gruppo di sicurezza Entra ID che conterrà i device autorizzati al self-wipe
 - `dotnet` SDK 10, `az` CLI ≥ 2.60, Bicep CLI (lo script verifica/installa)
+- **Resource provider registrati a livello subscription** (vedi sotto). `tools/Deploy-IntuneDeviceActions.ps1` li registra automaticamente prima del deploy; se deploi manualmente con `az deployment group create` devi farlo a mano.
+
+#### Resource provider richiesti
+
+Il Bicep usa risorse di 13 namespace. Senza registrazione il deploy fallisce con `The subscription is not registered to use namespace 'Microsoft.X'`. Sono già registrati di default sulle subscription nuove ad eccezione di `Microsoft.App` (richiesto da Flex Consumption per VNet integration anche se gli host sono `Microsoft.Web/sites`) e `Microsoft.AlertsManagement` (creato implicitamente da Application Insights per gli Smart Detector alert rule).
+
+| Namespace | Uso |
+|-----------|-----|
+| `Microsoft.Resources` | Resource group + sub-resources base |
+| `Microsoft.Authorization` | Role assignments (RBAC) |
+| `Microsoft.ManagedIdentity` | User-Assigned Managed Identities (5: web/proc/wipe/autopilot/bitlocker) |
+| `Microsoft.Storage` | Storage account (web, proc, wipe, autopilot, bitlocker) — blob/table/queue/file |
+| `Microsoft.Network` | VNet, subnet, NSG, NAT Gateway, Private DNS Zones, Private Endpoints |
+| `Microsoft.Web` | Function Apps + serverfarms (EP1 per Web, Flex Consumption FC1 per gli altri) |
+| `Microsoft.App` | **Necessario per Flex Consumption + VNet integration** anche se gli host sono `Microsoft.Web/sites` |
+| `Microsoft.ServiceBus` | Namespace + 5 code (`action-requests`, `action-dispatch`, `wipe-action`, `autopilot-action`, `bitlocker-action`) |
+| `Microsoft.OperationalInsights` | Log Analytics workspace |
+| `Microsoft.Insights` | Application Insights (component v2 + classic) |
+| `Microsoft.AlertsManagement` | Smart Detector alert rules creati implicitamente da App Insights |
+| `Microsoft.AppConfiguration` | App Configuration store (override runtime) |
+| `Microsoft.Automation` | Runbook variant (solo se `enableRunbookVariant=true`) |
+
+Registrazione manuale (one-shot per subscription):
+
+```pwsh
+$providers = @(
+  'Microsoft.Resources','Microsoft.Authorization','Microsoft.ManagedIdentity',
+  'Microsoft.Storage','Microsoft.Network','Microsoft.Web','Microsoft.App',
+  'Microsoft.ServiceBus','Microsoft.OperationalInsights','Microsoft.Insights',
+  'Microsoft.AlertsManagement','Microsoft.AppConfiguration','Microsoft.Automation'
+)
+foreach ($ns in $providers) { az provider register --namespace $ns }
+```
 
 ### Deploy end-to-end (consigliato)
 
