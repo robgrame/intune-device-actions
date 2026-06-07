@@ -124,7 +124,15 @@ if ($state -eq 'Reserved' -and [string]$entry.CorrelationId -ne $ctx.Correlation
 # ─── 2) LOOKUP — customer CMDB returns the canonical new name ───────────────
 $endpointTpl = Get-AutomationVariable -Name 'Rename:Endpoint' -ErrorAction SilentlyContinue
 if ([string]::IsNullOrWhiteSpace($endpointTpl)) {
-    throw "Automation variable 'Rename:Endpoint' is not configured."
+    # Configuration error → permanent. Don't throw to the host (which would
+    # retry forever); mark the ledger failed and emit a terminal status so
+    # the rate-limiter doesn't keep eating attempts.
+    Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "config-error:missing-Rename:Endpoint" | Out-Null
+    Write-RbcAudit -EventName $script:RbcAudit.RenameLookupFailedPermanent -Context $ctx -Level 'Error' -Props @{
+        serial = $serial; reason = 'config-error'; missingVariable = 'Rename:Endpoint'
+    }
+    Write-RbcTerminalStatus -Context $ctx -State 'failed:config-error' -ManagedDeviceId $ctx.IntuneDeviceId
+    return
 }
 $authHeaderName  = (Get-AutomationVariable -Name 'Rename:AuthHeaderName'  -ErrorAction SilentlyContinue) ?? 'X-Api-Key'
 $authHeaderValue =  Get-AutomationVariable -Name 'Rename:AuthHeaderValue' -ErrorAction SilentlyContinue
@@ -151,24 +159,35 @@ try {
     $resp = Invoke-RbcRest -Method 'GET' -Uri $lookupUri -Headers $lookupHeaders -TimeoutSec 30
     $status = [int]$resp.StatusCode
     if ($status -ge 200 -and $status -lt 300) {
-        $obj = $resp.Content
-        # PS converts JSON to PSCustomObject; tolerate hashtable too.
-        if ($obj -is [System.Collections.IDictionary]) {
-            foreach ($k in $obj.Keys) {
-                if ([string]::Equals([string]$k, $nameJsonPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-                    $newName = [string]$obj[$k]; break
+        # JSON parsing / property extraction failures are PERMANENT (malformed
+        # CMDB response — retrying won't fix it). Isolate them from the outer
+        # catch so a bad payload doesn't get retried forever.
+        try {
+            $obj = $resp.Content
+            if ($obj -is [System.Collections.IDictionary]) {
+                foreach ($k in $obj.Keys) {
+                    if ([string]::Equals([string]$k, $nameJsonPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $newName = [string]$obj[$k]; break
+                    }
                 }
+            } elseif ($obj) {
+                $p = $obj.PSObject.Properties | Where-Object { $_.Name -ieq $nameJsonPath } | Select-Object -First 1
+                if ($p) { $newName = [string]$p.Value }
             }
-        } elseif ($obj) {
-            $p = $obj.PSObject.Properties | Where-Object { $_.Name -ieq $nameJsonPath } | Select-Object -First 1
-            if ($p) { $newName = [string]$p.Value }
+        } catch {
+            Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "malformed-response:$($_.Exception.Message)" | Out-Null
+            Write-RbcAudit -EventName $script:RbcAudit.RenameLookupFailedPermanent -Context $ctx -Level 'Error' -Exception $_.Exception -Props @{
+                serial = $serial; httpStatus = $status; reason = 'malformed-response'
+            }
+            Write-RbcTerminalStatus -Context $ctx -State 'failed:lookup-permanent' -ManagedDeviceId $ctx.IntuneDeviceId
+            return
         }
         if ([string]::IsNullOrWhiteSpace($newName)) {
             Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "missing-or-empty-property:$nameJsonPath" | Out-Null
             Write-RbcAudit -EventName $script:RbcAudit.RenameLookupFailedPermanent -Context $ctx -Level 'Error' -Props @{
                 serial = $serial; httpStatus = $status; reason = "missing-or-empty-property:$nameJsonPath"
             }
-            Write-RbcTerminalStatus -Context $ctx -State 'failed:lookup-permanent' -ManagedDeviceId $serial
+            Write-RbcTerminalStatus -Context $ctx -State 'failed:lookup-permanent' -ManagedDeviceId $ctx.IntuneDeviceId
             return
         }
         $newName = $newName.Trim()
@@ -180,7 +199,7 @@ try {
         Write-RbcAudit -EventName $script:RbcAudit.RenameLookupNotFound -Context $ctx -Level 'Warning' -Props @{
             serial = $serial; httpStatus = $status
         }
-        Write-RbcTerminalStatus -Context $ctx -State 'failed:lookup-not-found' -ManagedDeviceId $serial
+        Write-RbcTerminalStatus -Context $ctx -State 'failed:lookup-not-found' -ManagedDeviceId $ctx.IntuneDeviceId
         return
     } else {
         $kind = ConvertTo-RbcErrorKind -StatusCode $status
@@ -189,7 +208,7 @@ try {
             Write-RbcAudit -EventName $script:RbcAudit.RenameLookupFailedPermanent -Context $ctx -Level 'Error' -Props @{
                 serial = $serial; httpStatus = $status
             }
-            Write-RbcTerminalStatus -Context $ctx -State 'failed:lookup-permanent' -ManagedDeviceId $serial
+            Write-RbcTerminalStatus -Context $ctx -State 'failed:lookup-permanent' -ManagedDeviceId $ctx.IntuneDeviceId
             return
         }
         Write-RbcAudit -EventName $script:RbcAudit.RenameLookupTransientError -Context $ctx -Level 'Warning' -Props @{
@@ -208,54 +227,78 @@ try {
     }
 }
 
-# ─── 3) Collision check — Entra displayName uniqueness ──────────────────────
-$sameAsCurrent = (-not [string]::IsNullOrEmpty($ctx.DeviceName)) -and
-                 ([string]::Equals($ctx.DeviceName, $newName, [System.StringComparison]::OrdinalIgnoreCase))
+# ─── 3) Collision check — Entra + Intune ────────────────────────────────────
+# Entra does NOT enforce uniqueness on device displayName (unlike on-prem AD).
+# Probe BOTH directories — Entra (devices?$filter=displayName eq ...) AND
+# Intune (managedDevices?$filter=deviceName eq ...) — because in-flight renames
+# applied via another channel (manual portal action, a parallel runner instance
+# that already issued setDeviceName, an Autopilot deployment profile rename)
+# may live on the Intune side before propagating up to Entra at the next MDM sync.
+$escaped       = $newName.Replace("'", "''")
+$entraFilter   = [System.Uri]::EscapeDataString("displayName eq '$escaped'")
+$entraSelect   = [System.Uri]::EscapeDataString('id,deviceId,displayName,accountEnabled')
+$entraColUri   = "https://graph.microsoft.com/v1.0/devices?`$filter=$entraFilter&`$select=$entraSelect&`$top=25"
+$intuneFilter  = [System.Uri]::EscapeDataString("deviceName eq '$escaped'")
+$intuneSelect  = [System.Uri]::EscapeDataString('id,azureADDeviceId,deviceName')
+$intuneColUri  = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices?`$filter=$intuneFilter&`$select=$intuneSelect&`$top=25"
 
-if (-not $sameAsCurrent) {
-    $escaped = $newName.Replace("'", "''")
-    $filter  = [System.Uri]::EscapeDataString("displayName eq '$escaped'")
-    $select  = [System.Uri]::EscapeDataString('id,deviceId,displayName,accountEnabled')
-    $collisionUri = "https://graph.microsoft.com/v1.0/devices?`$filter=$filter&`$select=$select&`$top=25"
-    $collisions = @()
-    try {
-        $page = Invoke-RbcGraphApi -Method GET -Uri $collisionUri
-        foreach ($d in @($page.value)) {
-            if ($ctx.EntraDeviceId -and $d.deviceId -and ([string]::Equals([string]$d.deviceId, [string]$ctx.EntraDeviceId, [System.StringComparison]::OrdinalIgnoreCase))) {
-                continue
-            }
-            $collisions += $d
+$collisions = @()
+try {
+    $entraPage = Invoke-RbcGraphApi -Method GET -Uri $entraColUri
+    foreach ($d in @($entraPage.value)) {
+        if ($ctx.EntraDeviceId -and $d.deviceId -and ([string]::Equals([string]$d.deviceId, [string]$ctx.EntraDeviceId, [System.StringComparison]::OrdinalIgnoreCase))) {
+            continue
         }
-    } catch [RbcGraphError] {
-        $err = $_.Exception
-        Write-RbcAudit -EventName $script:RbcAudit.RenameCollisionCheckFailed -Context $ctx -Level 'Warning' -Exception $err -Props @{ newName = $newName }
-        if ($err.Kind -eq 'Transient') { throw }
-        Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "collision-check-failed:$($err.Message)" | Out-Null
-        Write-RbcTerminalStatus -Context $ctx -State 'failed:collision-check' -ManagedDeviceId $newName
+        $collisions += [pscustomobject]@{
+            source         = 'entra'
+            displayName    = $d.displayName
+            id             = $d.deviceId
+            accountEnabled = $d.accountEnabled
+        }
+    }
+    $intunePage = Invoke-RbcGraphApi -Method GET -Uri $intuneColUri
+    foreach ($d in @($intunePage.value)) {
+        if ($ctx.IntuneDeviceId -and $d.id -and ([string]::Equals([string]$d.id, [string]$ctx.IntuneDeviceId, [System.StringComparison]::OrdinalIgnoreCase))) {
+            continue
+        }
+        $collisions += [pscustomobject]@{
+            source         = 'intune'
+            displayName    = $d.deviceName
+            id             = $d.azureADDeviceId
+            accountEnabled = $null
+        }
+    }
+} catch [RbcGraphError] {
+    $err = $_.Exception
+    Write-RbcAudit -EventName $script:RbcAudit.RenameCollisionCheckFailed -Context $ctx -Level 'Warning' -Exception $err -Props @{ newName = $newName }
+    if ($err.Kind -eq 'Transient') { throw }
+    Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "collision-check-failed:$($err.Message)" | Out-Null
+    Write-RbcTerminalStatus -Context $ctx -State 'failed:collision-check' -ManagedDeviceId $ctx.IntuneDeviceId
+    return
+}
+
+if ($collisions.Count -gt 0) {
+    $detail = (($collisions | ForEach-Object {
+        $suffix = if ($_.accountEnabled -eq $false) { '(disabled)' } else { '' }
+        "$($_.source):$($_.displayName)@$($_.id)$suffix"
+    }) -join ',')
+    Write-RbcAudit -EventName $script:RbcAudit.RenameCollisionDetected -Context $ctx -Level 'Warning' -Props @{
+        newName          = $newName
+        collisions       = $detail
+        collisionCount   = $collisions.Count
+        entraCollisions  = (@($collisions | Where-Object { $_.source -eq 'entra'  }).Count)
+        intuneCollisions = (@($collisions | Where-Object { $_.source -eq 'intune' }).Count)
+        policy           = $onCollision
+    }
+    if ($onCollision -eq 'block') {
+        Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "name-collision:$($collisions.Count)" | Out-Null
+        Write-RbcAudit -EventName $script:RbcAudit.RenameCollisionBlocked -Context $ctx -Level 'Error' -Props @{
+            newName = $newName; collisions = $detail
+        }
+        Write-RbcTerminalStatus -Context $ctx -State 'denied:name-collision' -ManagedDeviceId $ctx.IntuneDeviceId
         return
     }
-
-    if ($collisions.Count -gt 0) {
-        $detail = (($collisions | ForEach-Object {
-            $suffix = if ($_.PSObject.Properties['accountEnabled'] -and ($_.accountEnabled -eq $false)) { '(disabled)' } else { '' }
-            "$($_.displayName)@$($_.deviceId)$suffix"
-        }) -join ',')
-        Write-RbcAudit -EventName $script:RbcAudit.RenameCollisionDetected -Context $ctx -Level 'Warning' -Props @{
-            newName        = $newName
-            collisions     = $detail
-            collisionCount = $collisions.Count
-            policy         = $onCollision
-        }
-        if ($onCollision -eq 'block') {
-            Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "name-collision:$($collisions.Count)" | Out-Null
-            Write-RbcAudit -EventName $script:RbcAudit.RenameCollisionBlocked -Context $ctx -Level 'Error' -Props @{
-                newName = $newName; collisions = $detail
-            }
-            Write-RbcTerminalStatus -Context $ctx -State 'denied:name-collision' -ManagedDeviceId $newName
-            return
-        }
-        # policy=warn → proceed
-    }
+    # policy=warn → proceed
 }
 
 # ─── 4) Graph setDeviceName ─────────────────────────────────────────────────
@@ -265,11 +308,14 @@ try {
     [void](Invoke-RbcGraphApi -Method POST -Uri $setUri -Body $setBody)
     [void](Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Issued')
     Write-RbcAudit -EventName $script:RbcAudit.RenameSetNameIssued -Context $ctx -Props @{
-        serial        = $serial
-        newName       = $newName
-        sameAsCurrent = $sameAsCurrent
+        serial  = $serial
+        newName = $newName
     }
-    Initialize-RbcActionStatus -Context $ctx -ManagedDeviceId $newName
+    # No probe is registered for "device-rename" in src/Proc/Program.cs; mark
+    # the row terminal-issued now rather than leaving a pending row that will
+    # never resolve (Intune queues the rename for the next MDM sync, and there
+    # is no first-party probe for setDeviceName completion).
+    Write-RbcTerminalStatus -Context $ctx -State 'issued' -ManagedDeviceId $ctx.IntuneDeviceId
 
     Write-Output (([ordered]@{
         correlationId = $ctx.CorrelationId
@@ -288,7 +334,7 @@ catch [RbcGraphError] {
         Write-RbcAudit -EventName $script:RbcAudit.RenameSetNameFailedPermanent -Context $ctx -Level 'Error' -Exception $err -Props @{
             serial = $serial; newName = $newName
         }
-        Write-RbcTerminalStatus -Context $ctx -State 'failed:permanent' -ManagedDeviceId $newName
+        Write-RbcTerminalStatus -Context $ctx -State 'failed:permanent' -ManagedDeviceId $ctx.IntuneDeviceId
         return
     }
     Write-RbcAudit -EventName $script:RbcAudit.RenameSetNameTransientError -Context $ctx -Level 'Warning' -Exception $err -Props @{

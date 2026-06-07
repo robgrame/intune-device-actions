@@ -178,6 +178,22 @@ public sealed class RenameActionRunner : IActionRunner
         {
             lookup = await _customer.ResolveNewNameAsync(serial, msg.CorrelationId, ct);
         }
+        catch (InvalidOperationException ex)
+        {
+            // Configuration error (e.g. missing Rename:Endpoint) — permanent.
+            // Mark the ledger failed so the rate-limiter doesn't keep eating
+            // attempts and surface a terminal status the caller can read.
+            await _ledger.MarkFailedAsync(msg.IntuneDeviceId, msg.CorrelationId, $"config-error:{ex.Message}", ct);
+            _audit.TrackEvent(RenameAuditEvents.LookupFailedPermanent, ex, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+                [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+                ["serial"]                        = serial,
+                ["reason"]                        = "config-error",
+            }, LogLevel.Error);
+            await _statusTracker.RecordTerminalAsync(msg, Type, "failed:config-error", ct, msg.IntuneDeviceId);
+            return;
+        }
         catch (Exception ex)
         {
             _audit.TrackEvent(RenameAuditEvents.LookupTransientError, ex, new Dictionary<string, string>
@@ -199,7 +215,7 @@ public sealed class RenameActionRunner : IActionRunner
                 ["serial"]                        = serial,
                 ["httpStatus"]                    = lookup.StatusCode.ToString(),
             }, LogLevel.Warning);
-            await _statusTracker.RecordTerminalAsync(msg, Type, "failed:lookup-not-found", ct, serial);
+            await _statusTracker.RecordTerminalAsync(msg, Type, "failed:lookup-not-found", ct, msg.IntuneDeviceId);
             return;
         }
         if (lookup.OutcomeKind == RenameLookupOutcome.Kind.Permanent)
@@ -213,7 +229,7 @@ public sealed class RenameActionRunner : IActionRunner
                 ["httpStatus"]                    = lookup.StatusCode.ToString(),
                 ["reason"]                        = lookup.Reason,
             }, LogLevel.Error);
-            await _statusTracker.RecordTerminalAsync(msg, Type, "failed:lookup-permanent", ct, serial);
+            await _statusTracker.RecordTerminalAsync(msg, Type, "failed:lookup-permanent", ct, msg.IntuneDeviceId);
             return;
         }
         if (lookup.OutcomeKind == RenameLookupOutcome.Kind.Transient)
@@ -240,71 +256,83 @@ public sealed class RenameActionRunner : IActionRunner
         });
 
         // 3) Collision check — Entra does NOT enforce uniqueness on device
-        //    displayName (unlike on-prem AD). Skip when the resolved name
-        //    matches the device's current name (renaming to self is a no-op).
-        var sameAsCurrent = !string.IsNullOrEmpty(msg.DeviceName)
-            && string.Equals(msg.DeviceName, newName, StringComparison.OrdinalIgnoreCase);
-        if (!sameAsCurrent)
+        //    displayName (unlike on-prem AD). We probe BOTH Entra
+        //    (devices?$filter=displayName eq ...) AND Intune
+        //    (managedDevices?$filter=deviceName eq ...) because in-flight
+        //    renames applied through another channel (manual portal action,
+        //    a parallel runner instance that already issued setDeviceName,
+        //    an Autopilot deployment profile rename) may live on the Intune
+        //    side before propagating up to Entra at the next MDM sync.
+        //    NOTE: this still leaves a narrow time window where two parallel
+        //    rename runners targeting DIFFERENT source devices but the SAME
+        //    resolved newName may both pass the check and both call
+        //    setDeviceName. The customer CMDB should not return the same
+        //    newName for two different serials; if that's a real risk,
+        //    add a per-newName lease (out-of-scope here).
+        IReadOnlyList<DeviceCollision>? entraCollisions = null;
+        IReadOnlyList<DeviceCollision>? intuneCollisions = null;
+        try
         {
-            IReadOnlyList<DeviceCollision>? collisions = null;
-            try
+            entraCollisions  = await _graph.FindDisplayNameCollisionsAsync(newName, msg.EntraDeviceId, ct);
+            intuneCollisions = await _graph.FindManagedDeviceNameCollisionsAsync(newName, msg.IntuneDeviceId, ct);
+        }
+        catch (Exception ex)
+        {
+            _audit.TrackEvent(RenameAuditEvents.CollisionCheckFailed, ex, new Dictionary<string, string>
             {
-                collisions = await _graph.FindDisplayNameCollisionsAsync(newName, msg.EntraDeviceId, ct);
-            }
-            catch (Exception ex)
-            {
-                // Don't fail closed on Graph hiccups during the pre-check —
-                // log + transient-throw so the SB queue retries the whole
-                // message (idempotency ledger will short-circuit if we got
-                // through to setDeviceName on a previous try).
-                _audit.TrackEvent(RenameAuditEvents.CollisionCheckFailed, ex, new Dictionary<string, string>
-                {
-                    [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
-                    [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
-                    ["newName"]                       = newName,
-                }, LogLevel.Warning);
-                if (GraphRenameService.Classify(ex) == GraphErrorClassifier.GraphErrorKind.Transient) throw;
-                // Permanent — surface as a permanent failure rather than silently
-                // skipping the check (collision detection is a safety guardrail).
-                await _ledger.MarkFailedAsync(msg.IntuneDeviceId, msg.CorrelationId, $"collision-check-failed:{ex.Message}", ct);
-                await _statusTracker.RecordTerminalAsync(msg, Type, "failed:collision-check", ct, newName);
-                return;
-            }
+                [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+                [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+                ["newName"]                       = newName,
+            }, LogLevel.Warning);
+            if (GraphRenameService.Classify(ex) == GraphErrorClassifier.GraphErrorKind.Transient) throw;
+            await _ledger.MarkFailedAsync(msg.IntuneDeviceId, msg.CorrelationId, $"collision-check-failed:{ex.Message}", ct);
+            await _statusTracker.RecordTerminalAsync(msg, Type, "failed:collision-check", ct, msg.IntuneDeviceId);
+            return;
+        }
 
-            if (collisions.Count > 0)
-            {
-                var onCollision = (_cfg["Rename:OnCollision"] ?? "block").Trim().ToLowerInvariant();
-                var detail = string.Join(",",
-                    collisions.Select(c => $"{c.DisplayName}@{c.EntraDeviceId}{(c.AccountEnabled == false ? "(disabled)" : string.Empty)}"));
+        var allCollisions = entraCollisions.Concat(intuneCollisions).ToList();
+        if (allCollisions.Count > 0)
+        {
+            var onCollision = (_cfg["Rename:OnCollision"] ?? "block").Trim().ToLowerInvariant();
+            var detail = string.Join(",",
+                allCollisions.Select(c => $"{c.DisplayName}@{c.EntraDeviceId}{(c.AccountEnabled == false ? "(disabled)" : string.Empty)}"));
 
-                _audit.TrackEvent(RenameAuditEvents.CollisionDetected, new Dictionary<string, string>
+            _audit.TrackEvent(RenameAuditEvents.CollisionDetected, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+                [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+                ["newName"]                       = newName,
+                ["collisions"]                    = detail,
+                ["collisionCount"]                = allCollisions.Count.ToString(),
+                ["entraCollisions"]               = entraCollisions.Count.ToString(),
+                ["intuneCollisions"]              = intuneCollisions.Count.ToString(),
+                ["policy"]                        = onCollision,
+            }, LogLevel.Warning);
+
+            if (onCollision == "block")
+            {
+                await _ledger.MarkFailedAsync(msg.IntuneDeviceId, msg.CorrelationId, $"name-collision:{allCollisions.Count}", ct);
+                _audit.TrackEvent(RenameAuditEvents.CollisionBlocked, new Dictionary<string, string>
                 {
                     [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
                     [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
                     ["newName"]                       = newName,
                     ["collisions"]                    = detail,
-                    ["collisionCount"]                = collisions.Count.ToString(),
-                    ["policy"]                        = onCollision,
-                }, LogLevel.Warning);
-
-                if (onCollision == "block")
-                {
-                    await _ledger.MarkFailedAsync(msg.IntuneDeviceId, msg.CorrelationId, $"name-collision:{collisions.Count}", ct);
-                    _audit.TrackEvent(RenameAuditEvents.CollisionBlocked, new Dictionary<string, string>
-                    {
-                        [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
-                        [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
-                        ["newName"]                       = newName,
-                        ["collisions"]                    = detail,
-                    }, LogLevel.Error);
-                    await _statusTracker.RecordTerminalAsync(msg, Type, "denied:name-collision", ct, newName);
-                    return;
-                }
-                // policy=warn → proceed; the warning is already in customEvents.
+                }, LogLevel.Error);
+                await _statusTracker.RecordTerminalAsync(msg, Type, "denied:name-collision", ct, msg.IntuneDeviceId);
+                return;
             }
+            // policy=warn → proceed; the warning is already in customEvents.
         }
 
         // 4) Graph setDeviceName — Intune queues the rename for the next MDM sync.
+        //    There is no first-party probe for setDeviceName completion (the
+        //    Intune managedDevice eventually shows the new deviceName, but the
+        //    timing depends on the MDM sync cycle + the OS reboot for Windows).
+        //    Record a terminal "issued" status here rather than initializing a
+        //    pending row (no probe is registered for "device-rename" anyway —
+        //    initializing pending would leave the row stuck until the rolling
+        //    24h window expires).
         try
         {
             await _graph.SetDeviceNameAsync(msg.IntuneDeviceId, newName, ct);
@@ -317,11 +345,8 @@ public sealed class RenameActionRunner : IActionRunner
                 [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
                 ["serial"]                        = serial,
                 ["newName"]                       = newName,
-                ["sameAsCurrent"]                 = sameAsCurrent.ToString(),
             });
-
-            try { await _statusTracker.InitializeAsync(msg, Type, newName, ct); }
-            catch (Exception ex) { _log.LogWarning(ex, "Status tracker initialization failed for {Corr}", msg.CorrelationId); }
+            await _statusTracker.RecordTerminalAsync(msg, Type, "issued", ct, msg.IntuneDeviceId);
         }
         catch (Exception ex)
         {
@@ -335,7 +360,7 @@ public sealed class RenameActionRunner : IActionRunner
                     ["serial"]                        = serial,
                     ["newName"]                       = newName,
                 }, LogLevel.Error);
-                await _statusTracker.RecordTerminalAsync(msg, Type, "failed:permanent", ct, newName);
+                await _statusTracker.RecordTerminalAsync(msg, Type, "failed:permanent", ct, msg.IntuneDeviceId);
                 return;
             }
             _audit.TrackEvent(RenameAuditEvents.GraphSetNameTransientError, ex, new Dictionary<string, string>

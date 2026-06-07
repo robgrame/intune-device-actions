@@ -72,6 +72,48 @@ public sealed class GraphRenameService
     }
 
     /// <summary>
+    /// Returns Intune <c>managedDevice</c> objects whose <c>deviceName</c>
+    /// already matches <paramref name="newName"/>. Complements
+    /// <see cref="FindDisplayNameCollisionsAsync"/> because the Intune side
+    /// may carry a rename that has not yet propagated back to Entra (Intune
+    /// queues the rename for the next MDM sync, then re-syncs the new name
+    /// up to Entra), so checking only Entra would miss in-flight renames
+    /// applied via another channel (manual portal action, another runner
+    /// instance that already issued setDeviceName, …).
+    /// The current device is filtered out via <paramref name="excludeManagedDeviceId"/>
+    /// (the managed-device id == <c>id</c> on the managedDevices entity).
+    /// </summary>
+    public async Task<IReadOnlyList<DeviceCollision>> FindManagedDeviceNameCollisionsAsync(
+        string newName, string excludeManagedDeviceId, CancellationToken ct)
+    {
+        var escaped = newName.Replace("'", "''");
+        var page = await _graph.DeviceManagement.ManagedDevices.GetAsync(rc =>
+        {
+            rc.QueryParameters.Filter = $"deviceName eq '{escaped}'";
+            rc.QueryParameters.Select = new[] { "id", "azureADDeviceId", "deviceName" };
+            rc.QueryParameters.Top    = 25;
+        }, ct);
+
+        var list = page?.Value ?? new List<Microsoft.Graph.Models.ManagedDevice>();
+        var results = new List<DeviceCollision>(list.Count);
+        foreach (var d in list)
+        {
+            if (!string.IsNullOrEmpty(excludeManagedDeviceId)
+                && !string.IsNullOrEmpty(d.Id)
+                && string.Equals(d.Id, excludeManagedDeviceId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            results.Add(new DeviceCollision(
+                EntraObjectId:  string.Empty,
+                EntraDeviceId:  d.AzureADDeviceId ?? string.Empty,
+                DisplayName:    d.DeviceName ?? string.Empty,
+                AccountEnabled: null));
+        }
+        return results;
+    }
+
+    /// <summary>
     /// Invokes the Intune Graph <c>POST /deviceManagement/managedDevices/{id}/setDeviceName</c>
     /// action. Intune queues the rename and applies it on the next MDM sync;
     /// Windows requires a reboot to complete the change.
@@ -80,8 +122,9 @@ public sealed class GraphRenameService
     /// The Graph .NET SDK v6 does not generate a strongly-typed
     /// <c>SetDeviceName</c> request builder for this action, so we use the
     /// underlying Kiota <c>RequestAdapter</c> directly. Errors are surfaced
-    /// as <see cref="ODataError"/> (mapped via the standard error code map)
-    /// so <see cref="GraphErrorClassifier"/> can classify them uniformly.
+    /// as <see cref="ODataError"/> (via the standard error code map, mirroring
+    /// BitLocker's <c>4XX</c>/<c>5XX</c>/<c>XXX</c> triple) so
+    /// <see cref="GraphErrorClassifier"/> can classify them uniformly.
     /// </remarks>
     public async Task SetDeviceNameAsync(string managedDeviceId, string newName, CancellationToken ct)
     {
@@ -97,6 +140,8 @@ public sealed class GraphRenameService
 
         var errorMapping = new Dictionary<string, ParsableFactory<IParsable>>
         {
+            { "4XX", ODataError.CreateFromDiscriminatorValue },
+            { "5XX", ODataError.CreateFromDiscriminatorValue },
             { "XXX", ODataError.CreateFromDiscriminatorValue },
         };
         await _graph.RequestAdapter.SendNoContentAsync(ri, errorMapping, ct);

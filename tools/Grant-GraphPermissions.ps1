@@ -133,6 +133,10 @@ $totalSkipped = 0
 $totalFailed  = 0
 
 foreach ($logical in $assignments.Keys) {
+    if (-not $uamiByLogical.ContainsKey($logical)) {
+        Write-Warn2 "Skipping '$logical' — UAMI not present in $ResourceGroup (deploy bicep first if you need this capability)."
+        continue
+    }
     $uami = $uamiByLogical[$logical]
     $principalId = $uami.principalId
     Write-Step "Granting roles to $logical ($($uami.name))"

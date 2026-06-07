@@ -1,0 +1,235 @@
+From: Roberto Gramellini <robertogramellini@hotmail.com>
+To: <destinatario@example.com>
+Subject: Soluzione "BitLocker Key Monitor" - architettura e funzionamento
+Date: Fri, 5 Jun 2026 18:08:00 +0200
+Message-ID: <bitlocker-keymonitor-overview-20260605@bkm.local>
+X-Unsent: 1
+X-Mailer: Microsoft Outlook
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============9421007835061224401=="
+
+--===============9421007835061224401==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Buongiorno,
+
+di seguito una sintesi della soluzione "BitLocker Key Monitor" (BKM)
+che abbiamo progettato, sviluppato e gia' in esercizio nell'ambiente
+di laboratorio, attualmente alla versione 1.5.4.
+
+OBIETTIVO
+Garantire che, per ogni PC aziendale protetto da BitLocker, le chiavi
+di ripristino siano sempre disponibili, allineate fra Active Directory
+ed Entra ID (Azure AD) e accessibili in modo controllato a chi opera
+sul supporto, riducendo il rischio di lock-out e fornendo evidenza
+auditabile di ogni accesso ai dati sensibili.
+
+ARCHITETTURA
+Soluzione on-premises a tre componenti disaccoppiati, basata sul pattern
+"scanner / store / portale":
+
+  AD/Entra ID  -->  Worker  -->  SQL Server  -->  Web (Blazor)  -->  =
+Operatore
+
+  - Il "Worker" e' un Windows Service che, su pianificazione (cron),
+    legge le chiavi di ripristino BitLocker da Active Directory (via
+    LDAP/LDAPS) e da Entra ID (via Microsoft Graph).
+  - I dati vengono consolidati in un database SQL Server centrale,
+    con storico, stato di vita del device e flag di soft-retirement.
+  - Il portale "Web" (Blazor Server) consente a operatori autenticati
+    di consultare device, confrontare AD vs Entra, esportare in CSV
+    e visualizzare la chiave di ripristino "on demand".
+  - L'identita' verso AD usa una gMSA (Group Managed Service Account),
+    verso Graph un certificato applicativo (no client secret).
+  - Tutte le operazioni sensibili producono un evento di audit
+    persistito in DB e mirrorato sui file di log.
+
+FUNZIONAMENTO
+1. Il Worker, a ogni esecuzione pianificata (default ogni 4 ore),
+   interroga AD e Entra ID, pagina i risultati e applica retry
+   automatici con backoff (Polly) in caso di throttling Graph.
+2. Le chiavi vengono normalizzate, confrontate fra le due sorgenti
+   e archiviate; i device non piu' visti vengono marcati come
+   "soft-retired" anziche' cancellati, mantenendo storico e audit.
+3. Un controllo di consistenza segnala device presenti solo in AD,
+   solo in Entra o con chiavi divergenti.
+4. L'operatore accede al portale con login integrato Windows,
+   filtra il device che gli serve e - solo dopo conferma esplicita -
+   visualizza la recovery key. L'evento viene registrato (utente,
+   timestamp, device, esito).
+5. Lo storico delle scansioni, gli eventi di audit, lo stato del
+   Worker (heartbeat) e i contatori giornalieri sono consultabili
+   dalla dashboard del portale.
+
+FUNZIONALITA' CHIAVE
+  - scansione doppia sorgente AD + Entra ID con consolidamento;
+  - confronto di consistenza e segnalazione divergenze;
+  - soft-retirement dei device dismessi (no perdita storico);
+  - audit log strutturato su DB + file (chi, cosa, quando, esito);
+  - heartbeat del Worker con badge di stato nel portale;
+  - configurazione runtime modificabile dal portale (cron, OU,
+    LDAPS, soglie) senza riavvii;
+  - export CSV cifrato con passphrase per condivisione sicura;
+  - on-demand scan invocabile da portale per esigenze immediate.
+
+SICUREZZA E COMPLIANCE
+  - autenticazione verso AD via gMSA (nessuna password in chiaro);
+  - autenticazione verso Graph via certificato (no client secret);
+  - le chiavi di ripristino non sono mai scritte nei file di log;
+  - audit immutabile su DB con timestamp, utente e origine evento;
+  - principio del minimo privilegio: i due servizi (Worker e Web)
+    hanno identita' e permessi distinti;
+  - in sviluppo (v1.6.0) la cifratura a riposo delle recovery key
+    nel DB tramite schema KEK/DEK con codice di recupero BIP39
+    (24 parole) per scenari di disaster recovery del segreto.
+
+BENEFICI
+  - operativi:  riduzione tempi helpdesk grazie a un unico portale
+                centralizzato per la consultazione delle chiavi;
+  - sicurezza: audit completo, accesso controllato, nessun segreto
+                statico nelle configurazioni;
+  - governance: evidenza oggettiva (per audit interni e ispezioni)
+                della disponibilita' e protezione delle chiavi di
+                ripristino su tutto il parco macchine.
+
+STATO E ROADMAP
+  - v1.5.4 in esercizio: scansione AD + Entra, audit DB, portale
+    operativo, export CSV cifrato, heartbeat, soft-retirement;
+  - v1.6.0 in sviluppo (Phase 1 completata): fondamenta cifratura
+    KEK/DEK e codice di recupero BIP39, test unitari (33/33 PASS);
+  - prossime fasi: integrazione cifratura nei flussi di scansione
+    e di reveal, wizard di setup/recovery a portale, dashboard
+    avanzata e opzione opzionale di Azure Key Vault per il KEK.
+
+Resto a disposizione per una call di approfondimento e per pianificare
+il passaggio in pre-produzione su un perimetro pilota.
+
+Cordiali saluti,
+Roberto Gramellini
+
+--===============9421007835061224401==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html><body style=3D"font-family:Segoe UI,Arial,sans-serif;font-size:14px;c=
+olor:#222;line-height:1.5;max-width:820px">
+
+<p>Buongiorno,</p>
+
+<p>di seguito una sintesi della soluzione <b>BitLocker Key Monitor</b> (BKM)
+che abbiamo progettato, sviluppato e gia' in esercizio nell'ambiente di
+laboratorio, attualmente alla versione <b>1.5.4</b>.</p>
+
+<h3 style=3D"color:#0b5394;margin-bottom:4px">Obiettivo</h3>
+<p>Garantire che, per ogni PC aziendale protetto da BitLocker, le chiavi
+di ripristino siano sempre <b>disponibili</b>, <b>allineate</b> fra Active
+Directory ed Entra ID e <b>accessibili in modo controllato</b> a chi opera
+sul supporto, riducendo il rischio di lock-out e fornendo evidenza
+auditabile di ogni accesso ai dati sensibili.</p>
+
+<h3 style=3D"color:#0b5394;margin-bottom:4px">Architettura</h3>
+<p>Soluzione on-premises a tre componenti disaccoppiati, basata sul pattern
+<i>scanner / store / portale</i>:</p>
+<p style=3D"font-family:Consolas,monospace;font-size:13px;background:#f6f8f=
+a;border:1px solid #e0e0e0;border-radius:6px;padding:10px 14px;margin:10px =
+0=
+">
+AD / Entra ID &nbsp;--&gt;&nbsp; Worker &nbsp;--&gt;&nbsp; SQL Server
+&nbsp;--&gt;&nbsp; Web (Blazor) &nbsp;--&gt;&nbsp; Operatore
+</p>
+<ul>
+<li>Il <b>Worker</b> e' un Windows Service che, su pianificazione cron,
+legge le chiavi di ripristino BitLocker da Active Directory (LDAP/LDAPS)
+e da Entra ID (Microsoft Graph).</li>
+<li>I dati vengono consolidati in un <b>database SQL Server</b> centrale,
+con storico, stato di vita del device e flag di soft-retirement.</li>
+<li>Il <b>portale Web</b> (Blazor Server) consente a operatori autenticati
+di consultare device, confrontare AD vs Entra, esportare in CSV e
+visualizzare la chiave di ripristino "on demand".</li>
+<li>Identita' verso AD via <b>gMSA</b>, verso Graph via <b>certificato</b>
+applicativo (nessun client secret in configurazione).</li>
+<li>Tutte le operazioni sensibili producono un <b>evento di audit</b>
+persistito in DB e mirrorato sui file di log.</li>
+</ul>
+
+<h3 style=3D"color:#0b5394;margin-bottom:4px">Funzionamento</h3>
+<ol>
+<li>Il Worker, a ogni esecuzione pianificata (default <code>ogni 4 ore</cod=
+e>), interroga AD e Entra ID, pagina i risultati e applica <b>retry automat=
+ici con backoff</b> (Polly) in caso di throttling Graph.</li>
+<li>Le chiavi vengono normalizzate, confrontate fra le due sorgenti e
+archiviate; i device non piu' visti vengono marcati come
+<i>soft-retired</i> anziche' cancellati, mantenendo storico e audit.</li>
+<li>Un <b>controllo di consistenza</b> segnala device presenti solo in AD,
+solo in Entra o con chiavi divergenti.</li>
+<li>L'operatore accede al portale con login integrato Windows, filtra il
+device che gli serve e - solo dopo conferma esplicita - visualizza la
+<b>recovery key</b>. L'evento viene registrato (utente, timestamp,
+device, esito).</li>
+<li>Storico scansioni, eventi di audit, heartbeat del Worker e contatori
+giornalieri sono consultabili dalla <b>dashboard</b> del portale.</li>
+</ol>
+
+<h3 style=3D"color:#0b5394;margin-bottom:4px">Funzionalita' chiave</h3>
+<ul>
+<li>scansione doppia sorgente <b>AD + Entra ID</b> con consolidamento;</li>
+<li><b>confronto di consistenza</b> e segnalazione divergenze;</li>
+<li><b>soft-retirement</b> dei device dismessi (no perdita storico);</li>
+<li><b>audit log strutturato</b> su DB + file (chi, cosa, quando, esito);=
+</li>
+<li><b>heartbeat</b> del Worker con badge di stato nel portale;</li>
+<li><b>configurazione runtime</b> modificabile dal portale (cron, OU,
+LDAPS, soglie) senza riavvii dei servizi;</li>
+<li><b>export CSV cifrato</b> con passphrase per condivisione sicura;</li>
+<li><b>on-demand scan</b> invocabile da portale per esigenze immediate.</li>
+</ul>
+
+<h3 style=3D"color:#0b5394;margin-bottom:4px">Sicurezza e compliance</h3>
+<ul>
+<li>autenticazione verso AD via <b>gMSA</b> (nessuna password in chiaro);=
+</li>
+<li>autenticazione verso Graph via <b>certificato</b> (no client secret);=
+</li>
+<li>le chiavi di ripristino <b>non sono mai scritte nei file di log</b>;=
+</li>
+<li><b>audit immutabile</b> su DB con timestamp, utente e origine evento;=
+</li>
+<li><b>minimo privilegio</b>: Worker e Web hanno identita' e permessi
+distinti;</li>
+<li>in sviluppo (<b>v1.6.0</b>) la <b>cifratura a riposo</b> delle recovery
+key nel DB tramite schema <b>KEK/DEK</b> con codice di recupero
+<b>BIP39</b> (24 parole) per scenari di disaster recovery del segreto.</li>
+</ul>
+
+<h3 style=3D"color:#0b5394;margin-bottom:4px">Benefici</h3>
+<ul>
+<li><b>Operativi</b>: riduzione tempi helpdesk grazie a un unico portale
+centralizzato per la consultazione delle chiavi.</li>
+<li><b>Sicurezza</b>: audit completo, accesso controllato, nessun segreto
+statico nelle configurazioni.</li>
+<li><b>Governance</b>: evidenza oggettiva, per audit interni e ispezioni,
+della disponibilita' e protezione delle chiavi di ripristino su tutto
+il parco macchine.</li>
+</ul>
+
+<h3 style=3D"color:#0b5394;margin-bottom:4px">Stato e roadmap</h3>
+<ul>
+<li><b>v1.5.4 in esercizio</b>: scansione AD + Entra, audit DB, portale
+operativo, export CSV cifrato, heartbeat, soft-retirement.</li>
+<li><b>v1.6.0 in sviluppo</b> (Phase 1 completata): fondamenta cifratura
+KEK/DEK e codice di recupero BIP39, test unitari <b>33/33 PASS</b>.</li>
+<li><b>Prossime fasi</b>: integrazione cifratura nei flussi di scansione
+e di <i>reveal</i>, wizard di setup/recovery a portale, dashboard
+avanzata e opzione di Azure Key Vault per il KEK.</li>
+</ul>
+
+<p>Resto a disposizione per una call di approfondimento e per pianificare
+il passaggio in pre-produzione su un perimetro pilota.</p>
+
+<p>Cordiali saluti,<br><b>Roberto Gramellini</b></p>
+
+</body></html>
+
+--===============9421007835061224401==--
