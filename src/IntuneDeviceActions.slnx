@@ -8,6 +8,9 @@
   <Folder Name="/Capabilities.BitLocker/">
     <Project Path="Capabilities.BitLocker/IntuneDeviceActions.Capabilities.BitLocker.csproj" />
   </Folder>
+  <Folder Name="/Capabilities.Rename/">
+    <Project Path="Capabilities.Rename/IntuneDeviceActions.Capabilities.Rename.csproj" />
+  </Folder>
   <Folder Name="/Capabilities.Wipe/">
     <Project Path="Capabilities.Wipe/IntuneDeviceActions.Capabilities.Wipe.csproj" />
   </Folder>
@@ -16,6 +19,9 @@
   </Folder>
   <Folder Name="/BitLocker/">
     <Project Path="BitLocker/IntuneDeviceActions.BitLocker.csproj" />
+  </Folder>
+  <Folder Name="/Rename/">
+    <Project Path="Rename/IntuneDeviceActions.Rename.csproj" />
   </Folder>
   <Folder Name="/Proc/">
     <Project Path="Proc/IntuneDeviceActions.Proc.csproj" />

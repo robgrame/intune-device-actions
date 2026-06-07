@@ -1,6 +1,7 @@
 using IntuneDeviceActions;
 using IntuneDeviceActions.Capabilities.Autopilot;
 using IntuneDeviceActions.Capabilities.BitLocker;
+using IntuneDeviceActions.Capabilities.Rename;
 using IntuneDeviceActions.Capabilities.Wipe;
 using IntuneDeviceActions.Middleware;
 using Microsoft.Extensions.DependencyInjection;
@@ -41,6 +42,12 @@ var host = new HostBuilder()
         //   AddAutopilotProbe:      AutopilotActionStatusProbe so the poller can probe "autopilot-register" rows.
         services.AddAutopilotForwarding();
         services.AddAutopilotProbe();
+
+        // Rename capability — proc role only forwards (does NOT execute).
+        //   AddRenameForwarding: RenameActionSender + RenameForwardingRunner (rename-action queue)
+        // No status probe: the rename runner records terminal status synchronously
+        // (customer REST is fire-and-forget for the poller).
+        services.AddRenameForwarding();
     })
     .Build();
 

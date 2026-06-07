@@ -140,7 +140,7 @@ volumi alti (Standard ha 12.5M ops/mese inclusi nel canone, oltre €0.05/M).
 
 | Scenario | Costo aggiuntivo / mese |
 |---|---|
-| AA esistente (già nel bicep), 0–500 min job/mese | **€0** (quota gratuita) |
+| Automation Account esistente (già nel bicep), 0–500 min job/mese | **€0** (quota gratuita) |
 | 1000 min job/mese (~ 8h, ~50 azioni/giorno con job ~15s) | **~€1** |
 | 10 000 min job/mese | **~€19** (€0.002/min oltre la quota) |
 

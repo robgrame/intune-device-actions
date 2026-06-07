@@ -446,3 +446,43 @@ capability.
   varianti per la stessa capability, segui [la guida runbook](./howto-new-capability-runbook.md)
   con `type=<newcap>-runbook` (NON `<newcap>`, per evitare doppia
   esecuzione — il ledger è single-writer per device).
+
+---
+
+## Variante: capability REST-only (non-Graph)
+
+Se la capability non chiama Microsoft Graph ma un endpoint **HTTP del
+cliente** (es. la capability `device-rename` esistente), il modello
+cambia in pochi punti:
+
+| Componente | Capability Graph | Capability REST-only |
+|---|---|---|
+| Client downstream | `GraphServiceClient` (`AddGraphClient()`) | `HttpClient` tipizzato (`AddHttpClient<I…, Http…>()`) |
+| UAMI app-role grant Graph | Necessario (`Grant-GraphPermissions.ps1`) | **Non necessario** |
+| Pre-checks (device-resolve / group / ownership) | Tipicamente tutti | Spesso omessi (li enforce il sistema cliente) |
+| Event naming | `{prefix}.graph.{verb}.{outcome}` | `{prefix}.rest.{verb}.{outcome}` |
+| Config richiesta | `Graph__ManagedIdentityClientId` | `<Capability>:Endpoint`, `<Capability>:AuthHeaderName`, `<Capability>:AuthHeaderValue` (KV ref consigliata) |
+| Status probe poller | Quasi sempre presente | Tipicamente omesso (terminale settato sincronicamente dal runner) |
+
+Esempio di riferimento: `src/Capabilities.Rename/` —
+- `Services/ICustomerRenameClient.cs` (+ `HttpCustomerRenameClient.cs`):
+  client tipizzato con classificazione 2xx=accepted, 4xx non-408/429=permanent,
+  5xx/408/429/timeout/network=transient.
+- `Runners/RenameActionRunner.cs`: pipeline ridotta a payload-validation →
+  idempotency reservation → REST call → mark issued/failed → status init.
+- Bicep: stesso pattern di `funcBitLocker` ma senza `Graph__*` env var e
+  senza role-assignment Graph per la UAMI.
+
+Le entry App Configuration per attivare la capability sono uguali — basta
+sostituire il valore di `Forwarders:<newcap>:Queue` e aggiungere il nome
+del tipo alla `Actions:AllowedTypes`. Il client cliente conserva un
+`AuthHeaderValue` come **Key Vault reference**:
+
+```pwsh
+az appconfig kv set --name <appCfgName> --key 'Rename:Endpoint' `
+    --value 'https://customer-internal.example.com/api/devices/rename'
+
+az appconfig kv set --name <appCfgName> --key 'Rename:AuthHeaderValue' `
+    --content-type 'application/vnd.microsoft.appconfig.keyvaultref+json;charset=utf-8' `
+    --value '{"uri":"https://<kv>.vault.azure.net/secrets/RenameCustomerApiKey"}'
+```

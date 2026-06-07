@@ -126,6 +126,14 @@ param autopilotActionQueueName string = 'autopilot-action'
 @description('Service Bus queue name for the dedicated bitlocker-runner Function App.')
 param bitlockerActionQueueName string = 'bitlocker-action'
 
+@description('Service Bus queue name for the dedicated rename-runner Function App.')
+param renameActionQueueName string = 'rename-action'
+
+@description('Customer-internal device-rename REST endpoint URL. Leave empty to configure via App Configuration post-deploy.')
+param renameEndpoint string = ''
+
+param renameAuthHeaderName string = 'X-Api-Key'
+
 // ── Storage (blob + tables) ──────────────────────────────────────────────────
 @description('Blob container name used as the idempotency ledger for action operations')
 param ledgerContainerName string = 'action-ledger'
@@ -183,12 +191,15 @@ var stAplRaw   = toLower('${namePrefix}stap${suffix}')
 var stAplName  = length(stAplRaw) > 24 ? substring(stAplRaw, 0, 24) : stAplRaw
 var stBlkRaw   = toLower('${namePrefix}stbl${suffix}')
 var stBlkName  = length(stBlkRaw) > 24 ? substring(stBlkRaw, 0, 24) : stBlkRaw
+var stRnRaw    = toLower('${namePrefix}strn${suffix}')
+var stRnName   = length(stRnRaw) > 24 ? substring(stRnRaw, 0, 24) : stRnRaw
 
 var webName  = toLower('${namePrefix}-web${sep}${suffix}')
 var procName = toLower('${namePrefix}-proc${sep}${suffix}')
 var wipeName = toLower('${namePrefix}-wipe${sep}${suffix}')
 var autopilotName = toLower('${namePrefix}-autopilot${sep}${suffix}')
 var bitlockerName = toLower('${namePrefix}-bitlocker${sep}${suffix}')
+var renameName = toLower('${namePrefix}-rename${sep}${suffix}')
 var aiName   = toLower('${namePrefix}-ai${sep}${suffix}')
 var lawName  = toLower('${namePrefix}-law${sep}${suffix}')
 
@@ -197,12 +208,14 @@ var uamiWebName  = toLower('${namePrefix}-uami-web${sep}${suffix}')   // public 
 var uamiWipeName = toLower('${namePrefix}-uami-wipe${sep}${suffix}')  // privileged Graph
 var uamiAutopilotName = toLower('${namePrefix}-uami-autopilot${sep}${suffix}')  // privileged Graph (Autopilot import)
 var uamiBitLockerName = toLower('${namePrefix}-uami-bitlocker${sep}${suffix}')  // privileged Graph (BitLocker rotate)
+var uamiRenameName = toLower('${namePrefix}-uami-rename${sep}${suffix}')
 
 var planWebName  = toLower('${namePrefix}-plan-web${sep}${suffix}')   // EP1
 var planProcName = toLower('${namePrefix}-plan-proc${sep}${suffix}')  // FC1
 var planWipeName = toLower('${namePrefix}-plan-wipe${sep}${suffix}')  // FC1
 var planAutopilotName = toLower('${namePrefix}-plan-autopilot${sep}${suffix}')  // FC1
 var planBitLockerName = toLower('${namePrefix}-plan-bitlocker${sep}${suffix}')  // FC1
+var planRenameName = toLower('${namePrefix}-plan-rename${sep}${suffix}')
 
 var sbNamespaceName = toLower('${namePrefix}-sb${sep}${suffix}')
 var appConfigName   = toLower('${namePrefix}-appcfg${sep}${suffix}')
@@ -212,6 +225,7 @@ var procDeployContainer = 'app-package-proc'
 var wipeDeployContainer = 'app-package-wipe'
 var autopilotDeployContainer = 'app-package-autopilot'
 var bitlockerDeployContainer = 'app-package-bitlocker'
+var renameDeployContainer = 'app-package-rename'
 
 // ── Observability ────────────────────────────────────────────────────────────
 resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
@@ -439,6 +453,19 @@ resource sbQueueBitLockerAction 'Microsoft.ServiceBus/namespaces/queues@2022-10-
     requiresDuplicateDetection: false
   }
 }
+resource sbQueueRenameAction 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = {
+  parent: sbNamespace
+  name: renameActionQueueName
+  properties: {
+    lockDuration: 'PT5M'
+    defaultMessageTimeToLive: 'P1D'
+    maxDeliveryCount: 5
+    deadLetteringOnMessageExpiration: true
+    enablePartitioning: false
+    requiresSession: false
+    requiresDuplicateDetection: false
+  }
+}
 
 // ── App Service Plans ────────────────────────────────────────────────────────
 // Web stays on Linux EP1 because: (a) mTLS + always-warm intake demand
@@ -632,6 +659,7 @@ resource funcProc 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'ServiceBus__WipeActionQueue',         value: wipeActionQueueName }
         { name: 'ServiceBus__AutopilotActionQueue',    value: autopilotActionQueueName }
         { name: 'ServiceBus__BitLockerActionQueue',    value: bitlockerActionQueueName }
+        { name: 'ServiceBus__RenameActionQueue',       value: renameActionQueueName }
         { name: 'ActionStatus__TableName',             value: actionStatusTableName }
         { name: 'ActionStatus__PollMaxAgeHours',       value: string(actionStatusPollMaxAgeHours) }
         { name: 'ActionStatusPoller__CronExpression',  value: actionStatusPollerCron }
@@ -1137,6 +1165,34 @@ resource bitlockerDeployBlobContainer 'Microsoft.Storage/storageAccounts/blobSer
   properties: { publicAccess: 'None' }
 }
 
+resource storageRename 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: stRnName
+  location: location
+  tags:     tags
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+    allowSharedKeyAccess: false
+    publicNetworkAccess: 'Enabled'
+    supportsHttpsTrafficOnly: true
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices, Logging, Metrics'
+    }
+  }
+}
+resource blobSvcRename 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: storageRename
+  name: 'default'
+}
+resource renameDeployBlobContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobSvcRename
+  name: renameDeployContainer
+  properties: { publicAccess: 'None' }
+}
+
 // ── Dedicated privileged UAMIs (isolated Graph consent per capability) ────────
 // uamiAutopilot Graph permissions: DeviceManagementServiceConfig.ReadWrite.All,
 //   DeviceManagementManagedDevices.Read.All, Device.Read.All, GroupMember.Read.All
@@ -1153,6 +1209,11 @@ resource uamiBitLocker 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01
   location: location
   tags:     tags
 }
+resource uamiRename 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: uamiRenameName
+  location: location
+  tags:     tags
+}
 
 // ── FC1 Flex plans ───────────────────────────────────────────────────────────
 resource planAutopilot 'Microsoft.Web/serverfarms@2023-12-01' = {
@@ -1165,6 +1226,14 @@ resource planAutopilot 'Microsoft.Web/serverfarms@2023-12-01' = {
 }
 resource planBitLocker 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: planBitLockerName
+  location: location
+  tags:     tags
+  sku: { tier: 'FlexConsumption', name: 'FC1' }
+  kind: 'functionapp'
+  properties: { reserved: true }
+}
+resource planRename 'Microsoft.Web/serverfarms@2023-12-01' = {
+  name: planRenameName
   location: location
   tags:     tags
   sku: { tier: 'FlexConsumption', name: 'FC1' }
@@ -1246,6 +1315,43 @@ resource raAppConfigBitLocker 'Microsoft.Authorization/roleAssignments@2022-04-0
   properties: { roleDefinitionId: appConfigDataReader, principalId: uamiBitLocker.properties.principalId, principalType: 'ServicePrincipal' }
 }
 
+// ── Role assignments: Rename app ─────────────────────────────────────────────
+resource raRenameBlob 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageRename.id, uamiRename.id, 'blob')
+  scope: storageRename
+  properties: { roleDefinitionId: blobDataOwner, principalId: uamiRename.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raRenameTable 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageRename.id, uamiRename.id, 'table')
+  scope: storageRename
+  properties: { roleDefinitionId: tableDataContributor, principalId: uamiRename.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raRenameLedger 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(ledgerContainer.id, uamiRename.id, 'blob-ledger')
+  scope: ledgerContainer
+  properties: { roleDefinitionId: blobDataContributor, principalId: uamiRename.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raRenameTableOnProc 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageProc.id, uamiRename.id, 'table-shared')
+  scope: storageProc
+  properties: { roleDefinitionId: tableDataContributor, principalId: uamiRename.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raRenameSbRecv 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(sbQueueRenameAction.id, uamiRename.id, 'sb-recv')
+  scope: sbQueueRenameAction
+  properties: { roleDefinitionId: sbDataReceiver, principalId: uamiRename.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raRenameDeploy 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(renameDeployBlobContainer.id, uamiRename.id, 'flex-deploy')
+  scope: renameDeployBlobContainer
+  properties: { roleDefinitionId: blobDataContributor, principalId: uamiRename.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raAppConfigRename 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(appConfig.id, uamiRename.id, 'appcfg-reader')
+  scope: appConfig
+  properties: { roleDefinitionId: appConfigDataReader, principalId: uamiRename.properties.principalId, principalType: 'ServicePrincipal' }
+}
+
 // ── Proc → Service Bus Sender on the new per-capability queues ────────────────
 resource raProcSbSendAutopilot 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(sbQueueAutopilotAction.id, uami.id, 'sb-send')
@@ -1255,6 +1361,11 @@ resource raProcSbSendAutopilot 'Microsoft.Authorization/roleAssignments@2022-04-
 resource raProcSbSendBitLocker 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(sbQueueBitLockerAction.id, uami.id, 'sb-send')
   scope: sbQueueBitLockerAction
+  properties: { roleDefinitionId: sbDataSender, principalId: uami.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raProcSbSendRename 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(sbQueueRenameAction.id, uami.id, 'sb-send')
+  scope: sbQueueRenameAction
   properties: { roleDefinitionId: sbDataSender, principalId: uami.properties.principalId, principalType: 'ServicePrincipal' }
 }
 
@@ -1409,6 +1520,82 @@ resource funcBitLocker 'Microsoft.Web/sites@2023-12-01' = {
   ]
 }
 
+// ── Rename Function App (customer-internal REST, no Graph, no VNet) ──────────
+resource funcRename 'Microsoft.Web/sites@2023-12-01' = {
+  name: renameName
+  location: location
+  tags:     tags
+  kind: 'functionapp,linux'
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${uamiRename.id}': {} }
+  }
+  properties: {
+    serverFarmId: planRename.id
+    httpsOnly: true
+    keyVaultReferenceIdentity: uamiRename.id
+    functionAppConfig: {
+      deployment: {
+        storage: {
+          type: 'blobContainer'
+          value: '${storageRename.properties.primaryEndpoints.blob}${renameDeployContainer}'
+          authentication: {
+            type: 'UserAssignedIdentity'
+            userAssignedIdentityResourceId: uamiRename.id
+          }
+        }
+      }
+      scaleAndConcurrency: {
+        maximumInstanceCount: 40
+        instanceMemoryMB: 2048
+      }
+      runtime: {
+        name: 'dotnet-isolated'
+        version: '10.0'
+      }
+    }
+    siteConfig: {
+      minTlsVersion: '1.2'
+      ftpsState: 'Disabled'
+      appSettings: [
+        { name: 'AzureWebJobsStorage__accountName', value: storageRename.name }
+        { name: 'AzureWebJobsStorage__credential',  value: 'managedidentity' }
+        { name: 'AzureWebJobsStorage__clientId',    value: uamiRename.properties.clientId }
+        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: ai.properties.ConnectionString }
+        { name: 'AZURE_CLIENT_ID', value: uamiRename.properties.clientId }
+        { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
+        { name: 'App__Role', value: 'rename' }
+        { name: 'ServiceBus__fullyQualifiedNamespace', value: '${sbNamespace.name}.servicebus.windows.net' }
+        { name: 'ServiceBus__credential',              value: 'managedidentity' }
+        { name: 'ServiceBus__clientId',                value: uamiRename.properties.clientId }
+        { name: 'ServiceBus__RenameActionQueue',       value: renameActionQueueName }
+        { name: 'Idempotency__BlobContainer',           value: ledgerContainerName }
+        { name: 'Idempotency__StorageAccount',          value: storageProc.name }
+        { name: 'Idempotency__AllowForceRearm',         value: string(idempotencyAllowForceRearm) }
+        { name: 'Idempotency__AdminApiEnabled',         value: 'false' }
+        { name: 'Idempotency__MaxActionsPerDevicePerDay', value: string(idempotencyMaxActionsPerDay) }
+        { name: 'Idempotency__RearmGracePeriodHours',   value: string(idempotencyRearmGracePeriodHours) }
+        { name: 'Audit__StorageAccount',   value: storageProc.name }
+        { name: 'Audit__TableName',        value: auditTableName }
+        { name: 'ActionStatus__TableName',   value: actionStatusTableName }
+        { name: 'ActionStatus__PollMaxAgeHours', value: string(actionStatusPollMaxAgeHours) }
+        { name: 'Rename__Endpoint',        value: renameEndpoint }
+        { name: 'Rename__AuthHeaderName',  value: renameAuthHeaderName }
+        { name: 'Rename__TimeoutSeconds',  value: '30' }
+      ]
+    }
+  }
+  dependsOn: [
+    raRenameBlob
+    raRenameTable
+    raRenameLedger
+    raRenameTableOnProc
+    raRenameSbRecv
+    raRenameDeploy
+    raAppConfigRename
+  ]
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Outputs
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1425,6 +1612,8 @@ output autopilotAppName     string = funcAutopilot.name
 output autopilotAppHostname string = funcAutopilot.properties.defaultHostName
 output bitlockerAppName     string = funcBitLocker.name
 output bitlockerAppHostname string = funcBitLocker.properties.defaultHostName
+output renameAppName        string = funcRename.name
+output renameAppHostname    string = funcRename.properties.defaultHostName
 
 output uamiWorkerClientId    string = uami.properties.clientId
 output uamiWorkerPrincipalId string = uami.properties.principalId
@@ -1436,12 +1625,15 @@ output uamiAutopilotClientId    string = uamiAutopilot.properties.clientId
 output uamiAutopilotPrincipalId string = uamiAutopilot.properties.principalId
 output uamiBitLockerClientId    string = uamiBitLocker.properties.clientId
 output uamiBitLockerPrincipalId string = uamiBitLocker.properties.principalId
+output uamiRenameClientId       string = uamiRename.properties.clientId
+output uamiRenamePrincipalId    string = uamiRename.properties.principalId
 
 output storageWebAccount  string = storageWeb.name
 output storageProcAccount string = storageProc.name
 output storageWipeAccount string = storageWipe.name
 output storageAutopilotAccount string = storageAutopilot.name
 output storageBitLockerAccount string = storageBitLocker.name
+output storageRenameAccount    string = storageRename.name
 
 output serviceBusNamespace   string = sbNamespace.name
 output serviceBusFqdn        string = '${sbNamespace.name}.servicebus.windows.net'
@@ -1450,6 +1642,7 @@ output actionDispatchQueueName string = actionDispatchQueueName
 output wipeActionQueueName     string = wipeActionQueueName
 output autopilotActionQueueName string = autopilotActionQueueName
 output bitlockerActionQueueName string = bitlockerActionQueueName
+output renameActionQueueName    string = renameActionQueueName
 
 output ledgerContainerName string = ledgerContainerName
 output procDeployContainer string = procDeployContainer

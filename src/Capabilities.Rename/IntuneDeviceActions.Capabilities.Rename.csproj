@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IntuneDeviceActions.Capabilities.Rename</RootNamespace>
+    <AssemblyName>IntuneDeviceActions.Capabilities.Rename</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Shared\IntuneDeviceActions.Shared.csproj" />
+  </ItemGroup>
+  <!--
+    Customer-REST capability. Unlike Wipe/Autopilot/BitLocker this does NOT
+    talk to Microsoft Graph: the runner POSTs to a customer-internal HTTP
+    endpoint with the device serial number. The UAMI bound to the Rename
+    Function App therefore needs NO Graph app-role grants.
+  -->
+</Project>

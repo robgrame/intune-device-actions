@@ -335,6 +335,7 @@ function Invoke-Publish {
         @{ Name='wipe'; Csproj='src\Wipe\IntuneDeviceActions.Wipe.csproj' }
         @{ Name='autopilot'; Csproj='src\Autopilot\IntuneDeviceActions.Autopilot.csproj' }
         @{ Name='bitlocker'; Csproj='src\BitLocker\IntuneDeviceActions.BitLocker.csproj' }
+        @{ Name='rename'; Csproj='src\Rename\IntuneDeviceActions.Rename.csproj' }
     )
     foreach ($p in $projects) {
         $csproj = Join-Path $RepoRoot $p.Csproj
@@ -438,13 +439,13 @@ function Get-FunctionAppByRole($role) {
 function Invoke-ZipDeploy {
     if ($SkipDeploy) { Write-Warn2 'Skipping zip deploy (-SkipDeploy).'; return }
     $apps = @{}
-    foreach ($role in 'web','proc','wipe','autopilot','bitlocker') {
+    foreach ($role in 'web','proc','wipe','autopilot','bitlocker','rename') {
         $a = Get-FunctionAppByRole $role
         if (-not $a) { throw "No Function App found with prefix '$NamePrefix-$role-' in $ResourceGroup." }
         $apps[$role] = $a
     }
     Write-Step 'Restarting Function Apps (RBAC propagation buffer)'
-    foreach ($role in 'web','proc','wipe','autopilot','bitlocker') {
+    foreach ($role in 'web','proc','wipe','autopilot','bitlocker','rename') {
         & az functionapp restart -g $ResourceGroup -n $apps[$role] --only-show-errors -o none
         Write-Ok "restarted $($apps[$role])"
     }
@@ -452,7 +453,7 @@ function Invoke-ZipDeploy {
     Start-Sleep 60
 
     Write-Step 'Deploying function zips'
-    foreach ($role in 'web','proc','wipe','autopilot','bitlocker') {
+    foreach ($role in 'web','proc','wipe','autopilot','bitlocker','rename') {
         $app = $apps[$role]
         $zip = Join-Path $PublishDir "$role.zip"
         if (-not (Test-Path $zip)) { throw "Missing zip: $zip (did you skip -SkipPublish?)" }
@@ -483,7 +484,7 @@ function Invoke-SmokeTest {
         if ($code -in 401, 403) { Write-Ok "mTLS enforced (HTTP $code without client cert)" }
         else { Write-Warn2 "Unexpected response: HTTP $code - verify manually." }
     }
-    foreach ($role in 'proc','wipe','autopilot','bitlocker') {
+    foreach ($role in 'proc','wipe','autopilot','bitlocker','rename') {
         $app = Get-FunctionAppByRole $role
         try {
             $r = Invoke-WebRequest "https://$app.azurewebsites.net/" `
