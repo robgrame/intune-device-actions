@@ -706,6 +706,10 @@ customEvents
 > (PCI-DSS v4.0, ISO 27001:2022, EBA/GL/2019/04, DORA, Banca d'Italia 285/13,
 > NIS2, GDPR) in
 > [`docs/security-compliance-banking.md`](docs/security-compliance-banking.md).
+>
+> **Roadmap di remediation** per chiudere i 10 gap banking-grade (sizing
+> effort + costi infra + decisioni cliente + phasing 3 sprint) in
+> [`docs/security-remediation-roadmap.md`](docs/security-remediation-roadmap.md).
 
 ## Licenza
 
