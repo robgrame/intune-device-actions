@@ -68,6 +68,52 @@ try {
     $entraId    = Get-EntraDeviceIdSafe
     $intuneId   = Get-IntuneManagedDeviceIdSafe
 
+    # ---------- Client-side schedule gate -----------------------------------
+    # Read %ProgramData%\IntuneWipeClient\schedule.json (refreshed by the
+    # Intune Proactive Remediation in client/intune-remediation-schedule/).
+    # If a future wave is assigned to this device, surface a friendly
+    # "scheduled for X" dialog and abort BEFORE prompting the user for a
+    # destructive confirmation that wouldn't fire anyway (the capability-side
+    # gate in WipeActionRunner Step 0 would defer it server-side).
+    #
+    # Fail-open semantics: missing / empty / malformed manifest → proceed
+    # normally. The server-side gate is the authoritative safety net; this
+    # client gate is purely UX defense-in-depth.
+    $scheduleManifestPath = Join-Path $DataDir 'schedule.json'
+    if (Test-Path -LiteralPath $scheduleManifestPath) {
+        try {
+            $rawManifest = Get-Content -LiteralPath $scheduleManifestPath -Raw -ErrorAction Stop
+            if (-not [string]::IsNullOrWhiteSpace($rawManifest)) {
+                $manifest = $rawManifest | ConvertFrom-Json -ErrorAction Stop
+                if (-not $manifest.empty -and $manifest.scheduledAtUtc) {
+                    $whenUtc = [DateTimeOffset]::Parse($manifest.scheduledAtUtc).ToUniversalTime()
+                    $deltaSec = ($whenUtc - [DateTimeOffset]::UtcNow).TotalSeconds
+                    if ($deltaSec -gt 0) {
+                        $whenLocal = $whenUtc.LocalDateTime
+                        $waveName  = if ($manifest.name) { $manifest.name } else { 'pianificata' }
+                        $body = "Il wipe di questo dispositivo è pianificato per:`r`n`r`n   $($whenLocal.ToString('dddd dd MMMM yyyy HH:mm')) (ora locale)`r`n`r`nWave: $waveName"
+                        if ($manifest.description) {
+                            $body += "`r`nDettagli: $($manifest.description)"
+                        }
+                        $body += "`r`n`r`nPer questo motivo l'azione di wipe non può essere avviata adesso. L'esecuzione partirà automaticamente all'orario indicato."
+                        Add-Type -AssemblyName System.Windows.Forms | Out-Null
+                        [System.Windows.Forms.MessageBox]::Show(
+                            $body, 'Wipe pianificato',
+                            [System.Windows.Forms.MessageBoxButtons]::OK,
+                            [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+                        Write-Host ("Wipe gated by client-side schedule: wave '{0}' fires at {1:o} ({2:N0}s)" -f `
+                            $waveName, $whenUtc, $deltaSec) -ForegroundColor Yellow
+                        exit 0
+                    }
+                }
+            }
+        } catch {
+            # Fail-open: log + proceed. The server-side gate still applies.
+            Write-Host "WARN: could not parse schedule.json ($($_.Exception.Message)); proceeding without client-side gate."
+        }
+    }
+    # ------------------------------------------------------------------------
+
     $confirmed = Show-WipeConfirmation -DeviceName $deviceName -EntraDeviceId $entraId -IntuneDeviceId $intuneId
     if (-not $confirmed) {
         Write-Host 'Operazione annullata dall''utente.' -ForegroundColor Yellow
