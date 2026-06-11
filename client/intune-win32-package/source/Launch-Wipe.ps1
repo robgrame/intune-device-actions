@@ -88,6 +88,7 @@ try {
 
     # Wait up to 2 minutes for the task to finish (state returns to 'Ready').
     $deadline = (Get-Date).AddMinutes(2)
+    $state = 'Unknown'
     do {
         Start-Sleep -Seconds 2
         $info = $null
@@ -97,8 +98,19 @@ try {
 
     # Read result file (written by Invoke-WipeFromTask.ps1).
     $result = $null
+    $resultParseError = $null
     if (Test-Path $ResultPath) {
-        try { $result = Get-Content -LiteralPath $ResultPath -Raw | ConvertFrom-Json } catch { }
+        try { $result = Get-Content -LiteralPath $ResultPath -Raw | ConvertFrom-Json } catch { $resultParseError = $_.Exception.Message }
+    }
+
+    # If the SYSTEM task is still running at deadline, prefer the in-progress
+    # dialog over the generic "Stato non disponibile" dialog: the user gets
+    # an actionable message explaining the wipe was accepted by Intune but the
+    # local task hasn't finished its bookkeeping yet. The user can re-run the
+    # launcher in a minute to pick up the final result.
+    if ($state -eq 'Running') {
+        Show-WipeUnknownDialog -ReasonHint 'StillRunning'
+        exit 2
     }
 
     if ($result -and $result.status -eq 'ok') {
@@ -122,7 +134,8 @@ try {
         exit 1
     }
     else {
-        Show-WipeUnknownDialog
+        $hint = if ($resultParseError) { 'BadJson' } else { 'NoResultFile' }
+        Show-WipeUnknownDialog -ReasonHint $hint
         exit 2
     }
 }

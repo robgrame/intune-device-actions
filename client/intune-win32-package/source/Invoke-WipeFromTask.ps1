@@ -31,9 +31,35 @@ $DataDir      = Join-Path $env:ProgramData  'IntuneWipeClient'
 $LogDir       = Join-Path $DataDir          'Logs'
 $ResultPath   = Join-Path $DataDir          'last-result.json'
 
+# Earliest possible breadcrumb: drop a "running" sentinel BEFORE attempting
+# Start-Transcript so that any subsequent crash (including transcript
+# initialization failures or hot-path early throws) still leaves the user-mode
+# launcher with an actionable result file instead of the generic
+# "Stato non disponibile" dialog. Any later Write-Result call overwrites this.
+try {
+    New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+    $earlySentinel = [ordered]@{
+        status        = 'error'
+        message       = 'Task wrapper started but did not reach the wipe step (early crash before Start-Transcript or in setup). Inspect the latest Task_*.log under C:\ProgramData\IntuneWipeClient\Logs.'
+        correlationId = $null
+        ts            = (Get-Date).ToUniversalTime().ToString('o')
+        kind          = 'task-wrapper-early-crash'
+    }
+    ([pscustomobject]$earlySentinel) | ConvertTo-Json -Depth 6 |
+        Set-Content -LiteralPath $ResultPath -Encoding utf8
+} catch {
+    # Best-effort only; if even this fails we cannot help the launcher.
+}
+
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $LogFile = Join-Path $LogDir ("Task_{0:yyyyMMdd_HHmmss}.log" -f (Get-Date))
-Start-Transcript -Path $LogFile -Force | Out-Null
+try {
+    Start-Transcript -Path $LogFile -Force | Out-Null
+} catch {
+    # Transcript is nice-to-have; do not abort the task if it fails (rare cases
+    # of locked log dir, AV holds, or a previous transcript not cleanly closed).
+    Write-Host ("WARN: Start-Transcript failed: {0}" -f $_.Exception.Message)
+}
 
 function Write-Result {
     param(

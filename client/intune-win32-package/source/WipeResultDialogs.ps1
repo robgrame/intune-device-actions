@@ -303,8 +303,20 @@ function Show-WipeUnknownDialog {
     .SYNOPSIS
         Friendly "we don't know yet" dialog used when the SYSTEM task did
         not finish in time or did not write a result file.
+    .PARAMETER ReasonHint
+        Why we are showing this dialog. Tailors the body text so the user
+        gets actionable guidance instead of a generic message:
+          - StillRunning : the SYSTEM task is still working past the
+                           launcher's 2-minute observation window.
+          - BadJson      : the result file exists but cannot be parsed.
+          - NoResultFile : the task finished but did not write a result.
+        Defaults to NoResultFile for backwards compatibility.
     #>
-    param([string] $LogPath = (Join-Path $env:ProgramData 'IntuneWipeClient\Logs'))
+    param(
+        [string] $LogPath = (Join-Path $env:ProgramData 'IntuneWipeClient\Logs'),
+        [ValidateSet('StillRunning','BadJson','NoResultFile')]
+        [string] $ReasonHint = 'NoResultFile'
+    )
 
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
@@ -313,9 +325,37 @@ function Show-WipeUnknownDialog {
     $e_grave = [char]0x00E8
     $a_grave = [char]0x00E0
 
+    switch ($ReasonHint) {
+        'StillRunning' {
+            $titleText = "Operazione ancora in corso"
+            $bodyText  = (
+                "La richiesta di reset $($e_grave) stata avviata ma il task locale non $($e_grave) ancora terminato la propria attivit$($a_grave) di notifica.`r`n`r`n" +
+                "Lo wipe potrebbe gi$($a_grave) essere stato accettato lato Intune. Riprova fra 1-2 minuti per visualizzare l'esito finale.`r`n`r`n" +
+                "Se il problema persiste, contatta l'IT helpdesk e fornisci il contenuto della cartella di log:`r`n$LogPath"
+            )
+            $headerColor = [System.Drawing.Color]::FromArgb(0, 99, 177)
+        }
+        'BadJson' {
+            $titleText = "Risultato non leggibile"
+            $bodyText  = (
+                "Il task SYSTEM ha scritto un file di risultato non valido.`r`n`r`n" +
+                "Contatta l'IT helpdesk e fornisci il contenuto della cartella di log e del file last-result.json:`r`n$LogPath"
+            )
+            $headerColor = [System.Drawing.Color]::FromArgb(176, 122, 0)
+        }
+        default {
+            $titleText = "Stato dell'operazione non disponibile"
+            $bodyText  = (
+                "La richiesta $($e_grave) stata avviata ma il risultato non $($e_grave) ancora disponibile.`r`n`r`n" +
+                "Riprova fra qualche minuto. Se il problema persiste, contatta l'IT helpdesk e fornisci il contenuto della cartella di log:`r`n$LogPath"
+            )
+            $headerColor = [System.Drawing.Color]::FromArgb(176, 122, 0)
+        }
+    }
+
     $form              = New-Object System.Windows.Forms.Form
     $form.Text         = 'Stato non disponibile'
-    $form.Size         = New-Object System.Drawing.Size(560, 260)
+    $form.Size         = New-Object System.Drawing.Size(560, 280)
     $form.StartPosition = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox  = $false
@@ -324,23 +364,18 @@ function Show-WipeUnknownDialog {
     $form.BackColor    = [System.Drawing.Color]::White
 
     $icon = New-Object System.Windows.Forms.PictureBox
-    $icon.Image    = [System.Drawing.SystemIcons]::Warning.ToBitmap()
+    $icon.Image    = if ($ReasonHint -eq 'StillRunning') { [System.Drawing.SystemIcons]::Information.ToBitmap() } else { [System.Drawing.SystemIcons]::Warning.ToBitmap() }
     $icon.SizeMode = 'CenterImage'
     $icon.Location = New-Object System.Drawing.Point(20, 20)
     $icon.Size     = New-Object System.Drawing.Size(48, 48)
     $form.Controls.Add($icon)
 
-    $title = _New-Label -Text "Stato dell'operazione non disponibile" -X 85 -Y 20 -W 440 -H 30 `
+    $title = _New-Label -Text $titleText -X 85 -Y 20 -W 440 -H 30 `
         -Font (New-Object System.Drawing.Font('Segoe UI', 13, [System.Drawing.FontStyle]::Bold)) `
-        -Color ([System.Drawing.Color]::FromArgb(176, 122, 0))
+        -Color $headerColor
     $form.Controls.Add($title)
 
-    $text = (
-        "La richiesta $($e_grave) stata avviata ma il risultato non $($e_grave) ancora disponibile.`r`n`r`n" +
-        "Riprova fra qualche minuto. Se il problema persiste, contatta l'IT helpdesk e fornisci il contenuto della cartella di log:`r`n" +
-        "$LogPath"
-    )
-    $body = _New-Label -Text $text -X 85 -Y 55 -W 440 -H 100 `
+    $body = _New-Label -Text $bodyText -X 85 -Y 55 -W 440 -H 140 `
         -Font (New-Object System.Drawing.Font('Segoe UI', 10))
     $form.Controls.Add($body)
 
@@ -348,7 +383,7 @@ function Show-WipeUnknownDialog {
     $ok.Text         = 'OK'
     $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $ok.Size         = New-Object System.Drawing.Size(110, 32)
-    $ok.Location     = New-Object System.Drawing.Point(420, 175)
+    $ok.Location     = New-Object System.Drawing.Point(420, 200)
     $ok.Font         = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
     $form.Controls.Add($ok)
     $form.AcceptButton = $ok
