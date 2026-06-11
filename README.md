@@ -510,15 +510,21 @@ Risposta 200:
 
 **Doppio gate temporale** (defense-in-depth):
 
-- **Client-side** — il client PowerShell chiama `/api/schedule/me`,
-  riceve `scheduledAtUtc`, e attende localmente prima di chiamare
-  `POST /api/actions`. Esperienza utente "il wipe partirà alle 18:00".
+- **Client-side** — un pacchetto Intune **Proactive Remediation**
+  in `client/intune-remediation-schedule/` polla periodicamente
+  `/api/schedule/me` (ogni 4h è il default raccomandato) e persiste lo
+  snapshot in `%ProgramData%\IntuneWipeClient\schedule.json`.
+  `Launch-Wipe.ps1` legge questo file prima di triggerare lo scheduled
+  task del wipe: se è presente una wave futura, mostra all'utente
+  "il wipe partirà alle 18:00" e non chiama l'API. Vedi il README
+  dedicato in `client/intune-remediation-schedule/README.md` per il
+  caricamento del pacchetto su Intune.
 - **Capability-side** — `WipeActionRunner.RunAsync` consulta lo store
   `WipeScheduleStore` **prima** di chiamare Graph wipe: se il device è
   in una wave la cui `ScheduledAtUtc` è ancora futura, l'azione viene
   *deferita* (no Graph call, no ledger reservation, no status row) e
   l'evento `action.schedule.gated` viene emesso. Garantisce che un client
-  manomesso non possa anticipare il wipe.
+  manomesso o non aggiornato non possa anticipare il wipe.
 
 #### Schema dello storage (contratto Portal ↔ Wipe capability)
 
