@@ -103,8 +103,12 @@ public sealed class WipeScheduleStore
 
     /// <summary>
     /// Deletes the wave row AND all its member rows. Best-effort: a partial
-    /// failure leaves orphan members which are filtered out by
-    /// <see cref="ListMembersAsync"/> via a wave-existence check.
+    /// failure leaves orphan members in the members table; they are
+    /// harmlessly skipped by <see cref="GetScheduleForDeviceAsync"/> (which
+    /// re-resolves the wave row and silently drops members pointing at a
+    /// missing wave). <see cref="ListMembersAsync"/> does NOT filter
+    /// orphans — but it's only called by the portal with a wave id that
+    /// must exist, so orphans cannot reach the UI.
     /// </summary>
     public async Task DeleteWaveAsync(Guid waveId, CancellationToken ct = default)
     {
@@ -225,8 +229,30 @@ public sealed class WipeScheduleStore
         }
         if (candidates.Count == 0) return null;
 
-        candidates.Sort((a, b) => a.ScheduledAtUtc.CompareTo(b.ScheduledAtUtc));
-        var next = candidates[0];
+        // Prioritise the next IMMINENT FUTURE wave over any past wave (a past
+        // wave with status still 'scheduled'/'executing' is almost always a
+        // stale row the operator forgot to mark completed/canceled — if a
+        // newer future wave exists for the same device, that's the operator's
+        // current intent and must take precedence). Only when no future wave
+        // exists do we fall back to the most-recent past wave (which the
+        // runner won't gate on, so the wipe proceeds anyway).
+        var now = DateTimeOffset.UtcNow;
+        var future = candidates.Where(c => c.ScheduledAtUtc > now).ToList();
+        WipeScheduleWave next;
+        if (future.Count > 0)
+        {
+            future.Sort((a, b) => a.ScheduledAtUtc.CompareTo(b.ScheduledAtUtc));
+            next = future[0];
+        }
+        else
+        {
+            // All candidates are in the past — pick the most recent so the
+            // client at least sees a snapshot, but isImmediate=true and the
+            // runner gate won't defer.
+            candidates.Sort((a, b) => b.ScheduledAtUtc.CompareTo(a.ScheduledAtUtc));
+            next = candidates[0];
+        }
+
         return new DeviceScheduleSnapshot
         {
             WaveId = next.RowKey,
@@ -234,9 +260,9 @@ public sealed class WipeScheduleStore
             ActionType = WipeScheduleWave.ActionTypeValue,
             ScheduledAtUtc = next.ScheduledAtUtc,
             Status = next.Status,
-            IsImmediate = next.ScheduledAtUtc <= DateTimeOffset.UtcNow,
+            IsImmediate = next.ScheduledAtUtc <= now,
             Description = next.Description,
-            GeneratedAtUtc = DateTimeOffset.UtcNow,
+            GeneratedAtUtc = now,
         };
     }
 

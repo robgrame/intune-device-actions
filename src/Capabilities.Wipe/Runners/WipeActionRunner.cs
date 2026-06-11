@@ -105,6 +105,19 @@ public sealed class WipeActionRunner : IActionRunner
                     // not a terminal denial. The Graph wipe simply hasn't
                     // happened yet and will be reissued when the wave fires
                     // (or when the client re-POSTs after the gate opens).
+                    //
+                    // KNOWN GAP (rubber-duck #3): the SB message that
+                    // delivered this envelope is consumed on `return` — if
+                    // the client never re-POSTs (uninstalled, network gone,
+                    // user logged out for good), this wave-membership is
+                    // silently lost. The mitigations today are:
+                    //   * the portal keeps the wave row visible to operators
+                    //     so they can re-issue manually, and
+                    //   * the client polls /api/schedule/me on every cycle
+                    //     and re-POSTs once the gate opens.
+                    // TODO: when we add the future scheduler (Step F in the
+                    // plan) it can re-enqueue gated waves automatically at
+                    // ScheduledAtUtc, removing the dependence on the client.
                     return;
                 }
             }
