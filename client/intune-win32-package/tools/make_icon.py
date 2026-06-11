@@ -62,6 +62,23 @@ SVG = """<?xml version='1.0' encoding='UTF-8'?>
       <stop offset='0%'  stop-color='#00A063'/>
       <stop offset='100%' stop-color='#006B41'/>
     </linearGradient>
+    <!--
+      Drop shadow on the white glyph.
+      Bearing 130 deg (SSE): dx = sin(130) ~= 0.766, dy = -cos(130) ~= 0.643.
+      Magnitude ~0.83 in 24-grid units (= ~25 canvas px after scale(30)):
+        dx = 0.64, dy = 0.54.
+      Large filter region so the Gaussian blur is NOT clipped (the previous
+      attempt used 120% and produced a hard dark rectangle).
+    -->
+    <filter id='arrowShadow' x='-30%' y='-30%' width='160%' height='160%'>
+      <feGaussianBlur in='SourceAlpha' stdDeviation='0.28'/>
+      <feOffset dx='0.64' dy='0.54'/>
+      <feComponentTransfer><feFuncA type='linear' slope='0.45'/></feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in='SourceGraphic'/>
+      </feMerge>
+    </filter>
   </defs>
 
   <!-- Plate -->
@@ -69,7 +86,8 @@ SVG = """<?xml version='1.0' encoding='UTF-8'?>
 
   <!-- Reset glyph: lucide rotate-ccw, translated+scaled (origin 152,152, scale 30) -->
   <g transform='translate(152 152) scale(30)' fill='none' stroke='#ffffff'
-     stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'>
+     stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'
+     filter='url(#arrowShadow)'>
     <!-- 3/4 arc + tail down to (3,8) -->
     <path d='M3 12a9 9 0 1 0 9 -9 9.75 9.75 0 0 0 -6.74 2.74L3 8'/>
     <!-- Arrowhead (corner of the tail) -->
