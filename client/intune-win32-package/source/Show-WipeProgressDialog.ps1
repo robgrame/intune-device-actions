@@ -12,7 +12,7 @@
       - Last server-known DeviceLastSync / ComplianceState / OsVersion.
       - Number of polling attempts and last update timestamp.
       - A timeline of state transitions seen so far.
-      - "Chiudi" button (the SYSTEM poller keeps running in background — the
+      - "Chiudi" button (the SYSTEM poller keeps running in background - the
         user just dismisses the UI). No msg.exe / Terminal-Services popups.
 
     Why polling a file (not the API directly): the device client cert lives

@@ -156,7 +156,7 @@ try {
             $msg = $_.Exception.Message
             Write-Host ("WARN attempt {0}: {1} (HTTP {2})" -f $attempt, $msg, $statusCode)
             Write-StatusFile -CorrelationId $CorrelationId -Snapshot $null -LocalState 'error' `
-                -Note ("attempt {0}: HTTP {1} — {2}" -f $attempt, $statusCode, $msg)
+                -Note ("attempt {0}: HTTP {1} - {2}" -f $attempt, $statusCode, $msg)
             Start-Sleep -Seconds $IntervalSeconds
             continue
         }

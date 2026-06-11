@@ -17,9 +17,36 @@
       3. Persists the outcome to %ProgramData%\IntuneWipeClient\last-result.json
          so the user-context launcher can show success/failure.
     Logs to %ProgramData%\IntuneWipeClient\Logs.
+.PARAMETER SelfTest
+    When set, the wrapper writes a self-test marker to
+    %ProgramData%\IntuneWipeClient\selftest.json and exits 0 without
+    contacting the API. Install.ps1 calls this right after registering the
+    scheduled task to verify that the SYSTEM-context invocation path works
+    end-to-end on the target device (AppLocker / WDAC / Constrained Language
+    mode would surface here, not at the user's first wipe attempt).
 #>
 [CmdletBinding()]
-param()
+param(
+    [switch] $SelfTest
+)
+
+# ABSOLUTE FIRST INSTRUCTION: drop a "wrapper-reached" marker via direct
+# .NET IO (bypasses the PS provider stack which WDAC in ConstrainedLanguage
+# mode can disable). If you ever see this file present but last-result.json
+# missing, you know the wrapper PROCESS started but failed before our
+# managed sentinel write.
+try {
+    $emergencyDir = Join-Path $env:ProgramData 'IntuneWipeClient'
+    if (-not [System.IO.Directory]::Exists($emergencyDir)) {
+        [void][System.IO.Directory]::CreateDirectory($emergencyDir)
+    }
+    $emergencyPath = Join-Path $emergencyDir 'wrapper-reached.txt'
+    $emergencyLine = ("{0} pid={1} selftest={2} user={3} psver={4} lang={5}" -f `
+        (Get-Date).ToUniversalTime().ToString('o'), $PID, [bool]$SelfTest, `
+        [System.Security.Principal.WindowsIdentity]::GetCurrent().Name, `
+        $PSVersionTable.PSVersion, $ExecutionContext.SessionState.LanguageMode)
+    [System.IO.File]::AppendAllText($emergencyPath, $emergencyLine + [Environment]::NewLine)
+} catch { }
 
 $ErrorActionPreference = 'Stop'
 
@@ -31,22 +58,60 @@ $DataDir      = Join-Path $env:ProgramData  'IntuneWipeClient'
 $LogDir       = Join-Path $DataDir          'Logs'
 $ResultPath   = Join-Path $DataDir          'last-result.json'
 
+# SelfTest fast-path: prove the SYSTEM-context invocation works on this
+# device without touching the API or the device certificate. Install.ps1
+# calls this right after registering the scheduled task; the absence of the
+# marker post-install is the SOLE diagnostic needed to conclude the device
+# blocks our SYSTEM-context invocation.
+if ($SelfTest) {
+    try {
+        if (-not [System.IO.Directory]::Exists($DataDir)) {
+            [void][System.IO.Directory]::CreateDirectory($DataDir)
+        }
+        $marker = [ordered]@{
+            ok            = $true
+            ts            = (Get-Date).ToUniversalTime().ToString('o')
+            user          = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+            pid           = $PID
+            psVersion     = $PSVersionTable.PSVersion.ToString()
+            languageMode  = "$($ExecutionContext.SessionState.LanguageMode)"
+            installDir    = $InstallDir
+            configExists  = (Test-Path $ConfigPath)
+            wipeExists    = (Test-Path $WipeScript)
+        }
+        $json = ([pscustomobject]$marker) | ConvertTo-Json -Depth 4
+        $selfTestPath = Join-Path $DataDir 'selftest.json'
+        [System.IO.File]::WriteAllText($selfTestPath, $json)
+        exit 0
+    } catch {
+        try {
+            $errPath = Join-Path $DataDir 'selftest-error.txt'
+            [System.IO.File]::WriteAllText($errPath, "$(Get-Date -Format o) $($_.Exception.Message)`r`n$($_.ScriptStackTrace)")
+        } catch { }
+        exit 7
+    }
+}
+
 # Earliest possible breadcrumb: drop a "running" sentinel BEFORE attempting
 # Start-Transcript so that any subsequent crash (including transcript
 # initialization failures or hot-path early throws) still leaves the user-mode
 # launcher with an actionable result file instead of the generic
 # "Stato non disponibile" dialog. Any later Write-Result call overwrites this.
 try {
-    New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+    if (-not [System.IO.Directory]::Exists($DataDir)) {
+        [void][System.IO.Directory]::CreateDirectory($DataDir)
+    }
     $earlySentinel = [ordered]@{
         status        = 'error'
-        message       = 'Task wrapper started but did not reach the wipe step (early crash before Start-Transcript or in setup). Inspect the latest Task_*.log under C:\ProgramData\IntuneWipeClient\Logs.'
+        message       = 'Task wrapper started but did not reach the wipe step (early crash before Start-Transcript or in setup). Inspect the latest Task_*.log under C:\ProgramData\IntuneWipeClient\Logs and C:\ProgramData\IntuneWipeClient\wrapper-reached.txt.'
         correlationId = $null
         ts            = (Get-Date).ToUniversalTime().ToString('o')
         kind          = 'task-wrapper-early-crash'
     }
-    ([pscustomobject]$earlySentinel) | ConvertTo-Json -Depth 6 |
-        Set-Content -LiteralPath $ResultPath -Encoding utf8
+    $earlyJson = ([pscustomobject]$earlySentinel) | ConvertTo-Json -Depth 6
+    # Use .NET IO directly (bypasses PS provider that WDAC ConstrainedLanguage
+    # can block).
+    [System.IO.File]::WriteAllText($ResultPath, $earlyJson)
 } catch {
     # Best-effort only; if even this fails we cannot help the launcher.
 }
@@ -115,7 +180,7 @@ function Start-StatusPoller {
         Trigger the SYSTEM-context StatusPoller scheduled task with the
         live correlationId so it can begin polling GET /actions/status/{id}
         for the operator-facing live progress UI. Best-effort: a failure
-        here must not bubble up — the wipe itself was already accepted.
+        here must not bubble up - the wipe itself was already accepted.
     #>
     param([string]$CorrelationId)
     if (-not $CorrelationId) { return }
@@ -139,7 +204,7 @@ function Invoke-LocalMdmNudge {
         freshly-issued wipe within seconds instead of waiting up to 8 hours
         for the next scheduled sync. Combines with the server-side syncDevice
         + rebootNow nudges already issued by WipeActionRunner; either path
-        alone is enough — running both shortens worst-case latency further.
+        alone is enough - running both shortens worst-case latency further.
 
         Returns the structured result from Invoke-MdmSyncNudge so the caller
         can persist it in last-result.json for telemetry.
@@ -150,7 +215,7 @@ function Invoke-LocalMdmNudge {
     )
     $modPath = Join-Path $InstallDir 'MdmSyncNudge.psm1'
     if (-not (Test-Path $modPath)) {
-        Write-Host ("WARN: MdmSyncNudge.psm1 not found at {0} — skipping local nudge." -f $modPath)
+        Write-Host ("WARN: MdmSyncNudge.psm1 not found at {0} - skipping local nudge." -f $modPath)
         return @{ ok = $false; method = 'module-missing'; taskCount = 0; attempts = @() }
     }
     try {
@@ -251,7 +316,7 @@ try {
     }
 
     # Best-effort local MDM nudge: force IME to fetch the freshly-issued wipe
-    # NOW (PushLaunch task → fallback to any EnterpriseMgmt sync task →
+    # NOW (PushLaunch task -> fallback to any EnterpriseMgmt sync task ->
     # optional scheduled reboot). Combined with the server-side syncDevice
     # + rebootNow calls issued by WipeActionRunner, this collapses end-to-end
     # latency from "tens of minutes" to "tens of seconds" on the typical path.

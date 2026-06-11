@@ -111,7 +111,7 @@ try {
     # User-mode breadcrumb: persist what THIS launcher observed about the
     # SYSTEM-task lifecycle in a location the SYSTEM script does not touch.
     # This gives ground truth even if the SYSTEM script never executed (e.g.
-    # AppLocker/WDAC blocked powershell.exe, .ps1 file missing, etc.) — IT
+    # AppLocker/WDAC blocked powershell.exe, .ps1 file missing, etc.) - IT
     # helpdesk can read this file from the user's profile to see whether the
     # task was triggered, the final state and the LastTaskResult.
     try {

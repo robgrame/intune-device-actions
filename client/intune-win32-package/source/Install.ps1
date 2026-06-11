@@ -221,7 +221,7 @@ try {
     # using the device cert (mTLS) every 60s for up to 30 min and writes
     # %ProgramData%\IntuneWipeClient\status\<corrId>.json. The user-side
     # Launch-Wipe.ps1 launches Show-WipeProgressDialog which tails that
-    # file — no msg.exe / Terminal-Services popups involved.
+    # file - no msg.exe / Terminal-Services popups involved.
     #
     # /Run does not pass arguments, so Watch-WipeStatus.ps1 falls back to
     # reading the correlationId from %ProgramData%\IntuneWipeClient\last-result.json
@@ -296,6 +296,32 @@ try {
     }
 
     Write-Host "Install completed successfully."
+
+    # --- Self-test: prove the SYSTEM-context wrapper can actually execute --
+    # Install.ps1 already runs as SYSTEM (via Intune Management Extension).
+    # Invoke the wrapper with -SelfTest so it writes a marker file without
+    # contacting the API. If this fails, the device blocks SYSTEM-context
+    # PowerShell invocation (AppLocker / WDAC / Constrained Language mode)
+    # and the wipe flow cannot work - surface the failure NOW at install time
+    # instead of waiting for the user's first wipe attempt.
+    try {
+        $selfTestMarker = Join-Path $env:ProgramData 'IntuneWipeClient\selftest.json'
+        if (Test-Path $selfTestMarker) { Remove-Item -LiteralPath $selfTestMarker -Force -ErrorAction SilentlyContinue }
+        $wrapperPath = Join-Path $InstallDir 'Invoke-WipeFromTask.ps1'
+        $selfTestExit = (Start-Process powershell.exe `
+            -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$wrapperPath`"",'-SelfTest') `
+            -Wait -PassThru -WindowStyle Hidden).ExitCode
+        Start-Sleep -Seconds 1
+        if (Test-Path $selfTestMarker) {
+            Write-Host ("  Self-test PASSED (exit {0}); wrapper marker written to {1}" -f $selfTestExit, $selfTestMarker)
+        } else {
+            Write-Host ("  Self-test FAILED: wrapper exited with {0} but produced no marker file. SYSTEM-context PowerShell invocation is likely blocked on this device (AppLocker / WDAC / Constrained Language mode). The wipe flow will NOT work." -f $selfTestExit) -ForegroundColor Yellow
+            Write-Host ("  Investigate: Event Viewer -> Applications and Services Logs -> Microsoft -> Windows -> AppLocker, and check Get-AppLockerPolicy / Get-WDACConfig.")
+        }
+    } catch {
+        Write-Host ("  Self-test ERROR: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+    }
+
     exit 0
 }
 catch {
