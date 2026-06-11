@@ -623,6 +623,14 @@ resource funcProc 'Microsoft.Web/sites@2023-12-01' = {
       scaleAndConcurrency: {
         maximumInstanceCount: 40
         instanceMemoryMB: 2048
+        // Flex Consumption per-function scaler does NOT auto-register Service
+        // Bus triggers that authenticate via managed identity. Without an
+        // alwaysReady entry the SB listener is never created and queue
+        // messages pile up. Names must be 'function:<lowercase-name>'.
+        alwaysReady: [
+          { name: 'function:requestintake',  instanceCount: 1 }
+          { name: 'function:actiondispatch', instanceCount: 1 }
+        ]
       }
       runtime: {
         name: 'dotnet-isolated'
@@ -731,6 +739,10 @@ resource funcWipe 'Microsoft.Web/sites@2023-12-01' = {
       scaleAndConcurrency: {
         maximumInstanceCount: 40
         instanceMemoryMB: 2048
+        // See Proc app note: SB+MI trigger requires an alwaysReady entry.
+        alwaysReady: [
+          { name: 'function:wipeaction', instanceCount: 1 }
+        ]
       }
       runtime: {
         name: 'dotnet-isolated'
@@ -1869,6 +1881,10 @@ resource funcAutopilot 'Microsoft.Web/sites@2023-12-01' = {
       scaleAndConcurrency: {
         maximumInstanceCount: 40
         instanceMemoryMB: 2048
+        // See Proc app note: SB+MI trigger requires an alwaysReady entry.
+        alwaysReady: [
+          { name: 'function:autopilotaction', instanceCount: 1 }
+        ]
       }
       runtime: {
         name: 'dotnet-isolated'
@@ -1944,6 +1960,10 @@ resource funcBitLocker 'Microsoft.Web/sites@2023-12-01' = {
       scaleAndConcurrency: {
         maximumInstanceCount: 40
         instanceMemoryMB: 2048
+        // See Proc app note: SB+MI trigger requires an alwaysReady entry.
+        alwaysReady: [
+          { name: 'function:bitlockeraction', instanceCount: 1 }
+        ]
       }
       runtime: {
         name: 'dotnet-isolated'
@@ -2021,6 +2041,10 @@ resource funcRename 'Microsoft.Web/sites@2023-12-01' = {
       scaleAndConcurrency: {
         maximumInstanceCount: 40
         instanceMemoryMB: 2048
+        // See Proc app note: SB+MI trigger requires an alwaysReady entry.
+        alwaysReady: [
+          { name: 'function:renameaction', instanceCount: 1 }
+        ]
       }
       runtime: {
         name: 'dotnet-isolated'
