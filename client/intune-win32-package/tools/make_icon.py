@@ -62,23 +62,14 @@ SVG = """<?xml version='1.0' encoding='UTF-8'?>
       <stop offset='0%'  stop-color='#00A063'/>
       <stop offset='100%' stop-color='#006B41'/>
     </linearGradient>
-    <filter id='glyphShadow' x='-10%' y='-10%' width='120%' height='120%'>
-      <feGaussianBlur in='SourceAlpha' stdDeviation='6'/>
-      <feOffset dx='0' dy='6' result='offsetblur'/>
-      <feComponentTransfer><feFuncA type='linear' slope='0.35'/></feComponentTransfer>
-      <feMerge><feMergeNode/><feMergeNode in='SourceGraphic'/></feMerge>
-    </filter>
   </defs>
 
   <!-- Plate -->
   <rect x='32' y='32' width='960' height='960' rx='192' ry='192' fill='url(#plate)'/>
-  <!-- Inner highlight (very subtle) -->
-  <rect x='32' y='32' width='960' height='32' rx='192' ry='192' fill='#ffffff' fill-opacity='0.10'/>
 
   <!-- Reset glyph: lucide rotate-ccw, translated+scaled (origin 152,152, scale 30) -->
   <g transform='translate(152 152) scale(30)' fill='none' stroke='#ffffff'
-     stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'
-     filter='url(#glyphShadow)'>
+     stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'>
     <!-- 3/4 arc + tail down to (3,8) -->
     <path d='M3 12a9 9 0 1 0 9 -9 9.75 9.75 0 0 0 -6.74 2.74L3 8'/>
     <!-- Arrowhead (corner of the tail) -->
