@@ -132,19 +132,33 @@ function Get-TokenInteractive {
     if (-not $port) { throw "Could not bind any port in 49152-49200 for the local redirect listener." }
     $redirectUri = "http://localhost:$port/"
 
-    $authUri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/authorize" + '?' + (@(
-        "client_id=$ClientId",
-        "response_type=code",
-        "redirect_uri=" + [System.Uri]::EscapeDataString($redirectUri),
-        "response_mode=query",
-        "scope=" + [System.Uri]::EscapeDataString($Scope),
-        "state=$state",
-        "code_challenge=$codeChallenge",
-        "code_challenge_method=S256",
-        "prompt=select_account"
-    ) -join '&')
+    $authUri = $null
+    $qs = [System.Web.HttpUtility]::ParseQueryString('')
+    $qs.Add('client_id',             $ClientId)
+    $qs.Add('response_type',         'code')
+    $qs.Add('redirect_uri',          $redirectUri)
+    $qs.Add('response_mode',         'query')
+    $qs.Add('scope',                 $Scope)
+    $qs.Add('state',                 $state)
+    $qs.Add('code_challenge',        $codeChallenge)
+    $qs.Add('code_challenge_method', 'S256')
+    $qs.Add('prompt',                'select_account')
+    $authUri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/authorize?" + $qs.ToString()
 
-    Write-Host "==> Opening browser for sign-in ($redirectUri) ..." -ForegroundColor Cyan
+    # Sanity check: redirect_uri must round-trip as absolute http://localhost
+    # URI or Entra rejects with AADSTS90102. Catch this client-side rather
+    # than after a browser round-trip.
+    $parsed = $null
+    if (-not [Uri]::TryCreate($redirectUri, [UriKind]::Absolute, [ref]$parsed)) {
+        throw "Internal: redirect URI '$redirectUri' is not a valid absolute URI."
+    }
+    if ($parsed.Scheme -ne 'http' -or $parsed.Host -ne 'localhost') {
+        throw "Internal: redirect URI '$redirectUri' must be http://localhost:<port>/."
+    }
+
+    Write-Host "==> Opening browser for sign-in ..." -ForegroundColor Cyan
+    Write-Host ("    redirect_uri = {0}" -f $redirectUri) -ForegroundColor DarkGray
+    Write-Host ("    authorize    = {0}" -f $authUri)     -ForegroundColor DarkGray
     Start-Process $authUri | Out-Null
 
     # Block up to 5 minutes waiting for the redirect callback.
