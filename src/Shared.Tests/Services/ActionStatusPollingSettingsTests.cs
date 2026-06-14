@@ -1,6 +1,7 @@
 using FluentAssertions;
 using IntuneDeviceActions.Services;
 using Microsoft.Extensions.Configuration;
+using Xunit;
 
 namespace IntuneDeviceActions.Shared.Tests.Services;
 
