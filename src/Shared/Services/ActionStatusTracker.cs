@@ -325,6 +325,8 @@ public sealed class ActionStatusTracker
         if (lastPolledAt > NeverTimestamp &&
             DateTimeOffset.UtcNow - lastPolledAt < TimeSpan.FromSeconds(_minPollIntervalSeconds))
         {
+            _log.LogDebug("ActionStatusTracker throttled poll for {CorrelationId}: min interval {MinPollIntervalSeconds}s not elapsed yet.",
+                correlationId, _minPollIntervalSeconds);
             return;
         }
 

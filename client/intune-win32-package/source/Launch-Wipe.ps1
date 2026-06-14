@@ -74,7 +74,7 @@ try {
             $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json -ErrorAction Stop
             $progressSettings = Resolve-ActionStatusMonitoringOptions -Config $cfg
         } catch {
-            Write-Host "WARN: could not read polling settings from config.json; using defaults."
+            Write-Host ("WARN: could not read polling settings from config.json; using defaults. {0}" -f $_.Exception.Message)
         }
     }
 

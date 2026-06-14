@@ -2,6 +2,10 @@ using Microsoft.Extensions.Configuration;
 
 namespace IntuneDeviceActions.Services;
 
+/// <summary>
+/// Centralized defaults/parsing for action-status polling settings shared by
+/// server and client-side composition roots.
+/// </summary>
 public static class ActionStatusPollingSettings
 {
     public const int DefaultPollMaxAgeHours = 24;
