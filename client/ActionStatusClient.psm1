@@ -1,5 +1,25 @@
 Set-StrictMode -Version Latest
 
+function Get-ActionStatusNow {
+    Get-Date
+}
+
+function Wait-ActionStatusDelay {
+    param([int] $Seconds)
+    Start-Sleep -Seconds $Seconds
+}
+
+function Invoke-ActionStatusRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string] $StatusUrl,
+        [Parameter(Mandatory = $true)] [object] $Certificate,
+        [Parameter(Mandatory = $true)] [hashtable] $Headers
+    )
+
+    Invoke-RestMethod -Method Get -Uri $StatusUrl -Certificate $Certificate -Headers $Headers -TimeoutSec 30 -ErrorAction Stop
+}
+
 function Get-ActionStatusUrl {
     [CmdletBinding()]
     param(
@@ -59,15 +79,15 @@ function Wait-ActionStatus {
     )
 
     $statusUrl = Get-ActionStatusUrl -ApiUrl $ApiUrl -CorrelationId $CorrelationId
-    $deadline = (Get-Date).AddMinutes($MaxMinutes)
+    $deadline = (Get-ActionStatusNow).AddMinutes($MaxMinutes)
     $headers = @{ 'x-functions-key' = $FunctionKey }
     $attempt = 0
     $lastSnapshot = $null
 
-    while ((Get-Date) -lt $deadline) {
+    while ((Get-ActionStatusNow) -lt $deadline) {
         $attempt++
         try {
-            $snapshot = Invoke-RestMethod -Method Get -Uri $statusUrl -Certificate $Certificate -Headers $headers -TimeoutSec 30 -ErrorAction Stop
+            $snapshot = Invoke-ActionStatusRequest -StatusUrl $statusUrl -Certificate $Certificate -Headers $headers
             $lastSnapshot = $snapshot
             if ($OnUpdate) {
                 & $OnUpdate ([pscustomobject]@{
@@ -101,7 +121,7 @@ function Wait-ActionStatus {
             }
         }
 
-        Start-Sleep -Seconds $IntervalSeconds
+        Wait-ActionStatusDelay -Seconds $IntervalSeconds
     }
 
     if ($OnUpdate) {

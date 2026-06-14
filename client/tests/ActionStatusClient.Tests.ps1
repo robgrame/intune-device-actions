@@ -57,11 +57,11 @@ Describe 'Wait-ActionStatus' {
         InModuleScope ActionStatusClient {
             $updates = New-Object System.Collections.Generic.List[object]
 
-            Mock Invoke-RestMethod {
+            Mock Invoke-ActionStatusRequest {
                 return [pscustomobject]@{ state = 'done'; terminal = $true }
             }
 
-            Mock Start-Sleep {}
+            Mock Wait-ActionStatusDelay {}
 
             $result = Wait-ActionStatus `
                 -ApiUrl 'https://host/api/actions' `
@@ -75,7 +75,7 @@ Describe 'Wait-ActionStatus' {
             $result.LocalState | Should -Be 'terminal'
             ([string]$result.Snapshot.state) | Should -Be 'done'
             $updates.Count | Should -Be 1
-            Assert-MockCalled Start-Sleep -Times 0 -Exactly
+            Assert-MockCalled Wait-ActionStatusDelay -Times 0 -Exactly
         }
     }
 
@@ -83,7 +83,7 @@ Describe 'Wait-ActionStatus' {
         InModuleScope ActionStatusClient {
             $global:ActionStatusClientGetDateCalls = 0
 
-            Mock Get-Date {
+            Mock Get-ActionStatusNow {
                 $global:ActionStatusClientGetDateCalls++
                 switch ($global:ActionStatusClientGetDateCalls) {
                     1 { [datetime]'2026-01-01T00:00:00Z' }
@@ -92,11 +92,11 @@ Describe 'Wait-ActionStatus' {
                 }
             }
 
-            Mock Invoke-RestMethod {
+            Mock Invoke-ActionStatusRequest {
                 [pscustomobject]@{ state = 'pending'; terminal = $false }
             }
 
-            Mock Start-Sleep {}
+            Mock Wait-ActionStatusDelay {}
 
             $result = Wait-ActionStatus `
                 -ApiUrl 'https://host/api/actions' `
@@ -107,7 +107,7 @@ Describe 'Wait-ActionStatus' {
                 -MaxMinutes 1
 
             $result.LocalState | Should -Be 'timeout'
-            Assert-MockCalled Start-Sleep -Times 1 -Exactly -ParameterFilter { $Seconds -eq 5 }
+            Assert-MockCalled Wait-ActionStatusDelay -Times 1 -Exactly -ParameterFilter { $Seconds -eq 5 }
         }
     }
 }
