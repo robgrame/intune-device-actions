@@ -56,7 +56,8 @@ Describe 'Wait-ActionStatus' {
     It 'returns terminal status and preserves the default 5-second cadence contract' {
         InModuleScope ActionStatusClient {
             $updates = New-Object System.Collections.Generic.List[object]
-            $calls = 0
+            $script:calls = 0
+            $script:now = [datetime]'2026-01-01T00:00:00Z'
 
             Mock Invoke-RestMethod {
                 $script:calls++
@@ -66,7 +67,8 @@ Describe 'Wait-ActionStatus' {
                 return [pscustomobject]@{ state = 'done'; terminal = $true }
             }
 
-            Mock Start-Sleep {}
+            Mock Get-Date { $script:now }
+            Mock Start-Sleep { param($Seconds) $script:now = $script:now.AddSeconds($Seconds) }
 
             $result = Wait-ActionStatus `
                 -ApiUrl 'https://host/api/actions' `
