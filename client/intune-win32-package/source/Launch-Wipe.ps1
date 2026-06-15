@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
 .SYNOPSIS
     User-context launcher. Shows the wipe-confirmation UI; on accept,
@@ -250,8 +250,16 @@ try {
                 # Inline live monitor: poll the SYSTEM-poller status file and
                 # log transitions inside THIS form so the operator does not
                 # have to open a second dialog.
-                if ($corr -and (Get-Command Start-WipeInlineMonitor -ErrorAction SilentlyContinue)) {
-                    try { Start-WipeInlineMonitor -Form $form -CorrelationId $corr -MaxMinutes $progressSettings.MaxMinutes } catch { }
+                if ($corr) {
+                    if (Get-Command Start-WipeInlineMonitor -ErrorAction SilentlyContinue) {
+                        try {
+                            Start-WipeInlineMonitor -Form $form -CorrelationId $corr -MaxMinutes $progressSettings.MaxMinutes
+                        } catch {
+                            Add-WipeFormLog -Form $form -Message ("WARN: monitor inline non avviato: {0}" -f $_.Exception.Message) -Kind warning
+                        }
+                    } else {
+                        Add-WipeFormLog -Form $form -Message 'WARN: monitor inline non disponibile in questa versione del client (reinstalla il pacchetto Intune per abilitarlo).' -Kind warning
+                    }
                 }
 
                 $script:exitCode = 0
