@@ -117,7 +117,7 @@ param(
     [hashtable]$Tags         = @{},
     [string]$ParametersFile,
     [ValidateSet('hardened','public')]
-    [string]$NetworkProfile = 'hardened',
+    [string]$NetworkProfile = 'public',
     [switch]$SkipPrereqInstall,
     [switch]$SkipPublish,
     [switch]$SkipInfra,
