@@ -395,7 +395,7 @@ function Invoke-InfraDeploy {
             --query "[?starts_with(name, '$NamePrefix-uami-')].name" -o tsv 2>$null
         if ($LASTEXITCODE -eq 0 -and $existing) {
             $foreignSuffixes = $existing |
-                ForEach-Object { ($_ -replace "^$NamePrefix-uami-", '') -replace '-(autopilot|bitlocker|web|wipe|portal|rename)$', '' } |
+                ForEach-Object { ($_ -replace "^$NamePrefix-uami-", '') -replace '^(autopilot|bitlocker|web|wipe|portal|rename)-', '' } |
                 Where-Object { $_ -and $_ -ne $effectiveSuffix -and $_ -ne 'portal' } |
                 Sort-Object -Unique
             if ($foreignSuffixes) {
