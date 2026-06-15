@@ -30,10 +30,21 @@ param()
 # === EDIT BEFORE UPLOADING TO INTUNE =========================================
 $ExpectedApiUrl      = 'https://devact-web-dev.azurewebsites.net/api/actions'
 $ExpectedFunctionKey = '__REPLACE_WITH_REAL_FUNCTION_KEY__'
+
+# Certificate selectors used by the wipe client to locate its mTLS client
+# cert in Cert:\LocalMachine\My. Leave any of these EMPTY ('') to opt out
+# of pinning that selector via env var (the value from config.json — or
+# from a previously-set env var — will be left untouched).
+$ExpectedCertThumbprint  = ''
+$ExpectedCertSubjectLike = '*Microsoft Intune MDM Device CA*'
+$ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*;*MSLABS-ADCS*'
 # =============================================================================
 
-$UrlVarName = 'INTUNE_WIPE_API_URL'
-$KeyVarName = 'INTUNE_WIPE_FUNCTION_KEY'
+$UrlVarName     = 'INTUNE_WIPE_API_URL'
+$KeyVarName     = 'INTUNE_WIPE_FUNCTION_KEY'
+$CertThumbVar   = 'INTUNE_WIPE_CERT_THUMBPRINT'
+$CertSubjectVar = 'INTUNE_WIPE_CERT_SUBJECT_LIKE'
+$CertIssuerVar  = 'INTUNE_WIPE_CERT_ISSUER_LIKE'
 
 function Write-OneLine {
     param([string] $Message)
@@ -49,13 +60,25 @@ try {
 
     $currentKey = [Environment]::GetEnvironmentVariable($KeyVarName, 'Machine')
     if (-not $currentKey -or $currentKey.Trim() -ne $ExpectedFunctionKey) {
-        # Never echo the key contents — only its presence / length.
         $obs = if ($currentKey) { "len=$($currentKey.Trim().Length)" } else { 'missing' }
         Write-OneLine "REMEDIATE: $KeyVarName mismatched ($obs vs expected len=$($ExpectedFunctionKey.Length))."
         exit 1
     }
 
-    Write-OneLine "OK: endpoint env vars match expected URL + key (len=$($ExpectedFunctionKey.Length))."
+    foreach ($pair in @(
+        @{ Var = $CertThumbVar  ; Expected = $ExpectedCertThumbprint  },
+        @{ Var = $CertSubjectVar; Expected = $ExpectedCertSubjectLike },
+        @{ Var = $CertIssuerVar ; Expected = $ExpectedCertIssuerLike  }
+    )) {
+        if (-not $pair.Expected) { continue }  # opted out
+        $current = [Environment]::GetEnvironmentVariable($pair.Var, 'Machine')
+        if (-not $current -or $current.Trim() -ne $pair.Expected) {
+            Write-OneLine ("REMEDIATE: {0} missing or mismatched (expected '{1}')." -f $pair.Var, $pair.Expected)
+            exit 1
+        }
+    }
+
+    Write-OneLine "OK: endpoint env vars (URL + key + cert selectors) match expected."
     exit 0
 } catch {
     Write-OneLine "ERROR: $($_.Exception.Message)"

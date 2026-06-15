@@ -262,6 +262,17 @@ try {
         Write-Host "FunctionKey override from machine env INTUNE_WIPE_FUNCTION_KEY (length=$($envKey.Trim().Length))"
         $cfg.FunctionKey = $envKey.Trim()
     }
+    foreach ($pair in @(
+        @{ Env = 'INTUNE_WIPE_CERT_THUMBPRINT'  ; Prop = 'CertificateThumbprint'  },
+        @{ Env = 'INTUNE_WIPE_CERT_SUBJECT_LIKE'; Prop = 'CertificateSubjectLike' },
+        @{ Env = 'INTUNE_WIPE_CERT_ISSUER_LIKE' ; Prop = 'CertificateIssuerLike'  }
+    )) {
+        $v = [Environment]::GetEnvironmentVariable($pair.Env, 'Machine')
+        if ($v -and $v.Trim()) {
+            Write-Host ("{0} override from machine env {1}: {2}" -f $pair.Prop, $pair.Env, $v.Trim())
+            $cfg.($pair.Prop) = $v.Trim()
+        }
+    }
     if (-not $cfg.ApiUrl)      { throw "ApiUrl missing: neither config.json nor INTUNE_WIPE_API_URL is set." }
     if (-not $cfg.FunctionKey) { throw "FunctionKey missing: neither config.json nor INTUNE_WIPE_FUNCTION_KEY is set." }
 

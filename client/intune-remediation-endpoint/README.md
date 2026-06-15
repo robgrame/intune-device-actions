@@ -10,6 +10,15 @@ variables**, **without having to repackage the `.intunewin`**.
 |---|---|
 | `INTUNE_WIPE_API_URL` | Full Function App actions endpoint, e.g. `https://devact-web-dev.azurewebsites.net/api/actions` |
 | `INTUNE_WIPE_FUNCTION_KEY` | Function-level or host key for the `actions` endpoint |
+| `INTUNE_WIPE_CERT_THUMBPRINT` | (optional) Exact SHA-1 thumbprint of the mTLS client cert |
+| `INTUNE_WIPE_CERT_SUBJECT_LIKE` | (optional) `-like` wildcard on cert Subject (`*Microsoft Intune MDM Device CA*`) |
+| `INTUNE_WIPE_CERT_ISSUER_LIKE` | (optional) `;`-separated wildcards on cert Issuer (OR semantics) |
+
+Set any cert selector's `$ExpectedX` to empty string `''` in
+`Detect.ps1` + `Remediate.ps1` to opt that selector out of remediation
+(the wipe client will then fall back to the value in `config.json`).
+Setting an empty value causes `Remediate.ps1` to **delete** the env var
+so a previously-pinned value cannot leak through.
 
 ## Why
 

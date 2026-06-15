@@ -115,6 +115,17 @@ try {
         Write-Log "FunctionKey override from machine env INTUNE_WIPE_FUNCTION_KEY"
         $cfg | Add-Member -NotePropertyName FunctionKey -NotePropertyValue $envKey.Trim() -Force
     }
+    foreach ($pair in @(
+        @{ Env = 'INTUNE_WIPE_CERT_THUMBPRINT'  ; Prop = 'CertificateThumbprint'  },
+        @{ Env = 'INTUNE_WIPE_CERT_SUBJECT_LIKE'; Prop = 'CertificateSubjectLike' },
+        @{ Env = 'INTUNE_WIPE_CERT_ISSUER_LIKE' ; Prop = 'CertificateIssuerLike'  }
+    )) {
+        $v = [Environment]::GetEnvironmentVariable($pair.Env, 'Machine')
+        if ($v -and $v.Trim()) {
+            Write-Log ("{0} override from machine env {1}: {2}" -f $pair.Prop, $pair.Env, $v.Trim())
+            $cfg | Add-Member -NotePropertyName $pair.Prop -NotePropertyValue $v.Trim() -Force
+        }
+    }
     if (-not $cfg.ApiUrl) {
         Write-Log "config.json has no ApiUrl."
         Write-OneLine "FAIL: config.json missing ApiUrl."
