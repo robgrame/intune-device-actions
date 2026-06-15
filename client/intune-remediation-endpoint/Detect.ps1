@@ -36,8 +36,8 @@ $ExpectedFunctionKey = '__REPLACE_WITH_REAL_FUNCTION_KEY__'
 # of pinning that selector via env var (the value from config.json — or
 # from a previously-set env var — will be left untouched).
 $ExpectedCertThumbprint  = ''
-$ExpectedCertSubjectLike = '*Microsoft Intune MDM Device CA*'
-$ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*;*MSLABS-ADCS*'
+$ExpectedCertSubjectLike = ''
+$ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*'
 # =============================================================================
 
 $UrlVarName     = 'INTUNE_WIPE_API_URL'

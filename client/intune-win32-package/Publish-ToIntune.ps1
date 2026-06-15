@@ -13,10 +13,6 @@
     if it isn't present. Authentication is interactive via the well-known
     Microsoft Intune PowerShell first-party client (no app reg needed).
 
-.PARAMETER ApiUrl
-    Wipe API endpoint, baked into the install command line.
-.PARAMETER FunctionKey
-    Function key for the API, baked into the install command line.
 .PARAMETER TenantId
     Entra tenant id (defaults to current az context).
 .PARAMETER StatusPollIntervalSeconds
@@ -27,19 +23,27 @@
     Optional Entra group object id to assign the app to as Required.
 .PARAMETER Publisher
     Vendor name shown in Company Portal.
+.NOTES
+    ApiUrl, FunctionKey and the certificate selectors are NO LONGER passed
+    on the Intune install command line. They are provisioned per-device by
+    the companion Proactive Remediation 'intune-remediation-endpoint'
+    which writes machine-scope env vars consumed by the wipe scripts:
+        INTUNE_WIPE_API_URL
+        INTUNE_WIPE_FUNCTION_KEY
+        INTUNE_WIPE_CERT_THUMBPRINT
+        INTUNE_WIPE_CERT_SUBJECT_LIKE
+        INTUNE_WIPE_CERT_ISSUER_LIKE
+    This keeps secrets out of IntuneManagementExtension.log and lets ops
+    rotate / repoint anything without repackaging the .intunewin.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $false)] [string] $ApiUrl,
-    [Parameter(Mandatory = $false)] [string] $FunctionKey,
     [Parameter(Mandatory = $false)] [string] $TenantId,
     [Parameter(Mandatory = $false)] [int] $StatusPollIntervalSeconds = 5,
     [Parameter(Mandatory = $false)] [int] $StatusPollMaxMinutes = 30,
     [Parameter(Mandatory = $false)] [string] $AssignToGroupId,
     [Parameter(Mandatory = $false)] [string] $Publisher = 'MSLABS IT',
     [Parameter(Mandatory = $false)] [string] $DisplayName = 'Intune Wipe Self-Service Client',
-    [Parameter(Mandatory = $false)] [string] $CertificateIssuerLike = '*MSLABS-SUBCA01*',
-    [Parameter(Mandatory = $false)] [string] $CertificateSubjectLike,
     # Well-known Microsoft Intune PowerShell first-party app (has Intune scopes
     # pre-consented in most tenants). Override with your own app reg if you have
     # one bound to DeviceManagementApps.ReadWrite.All.
@@ -302,21 +306,14 @@ $Global:AuthenticationHeader = @{
 Write-Host ("    Token OK (expires {0:HH:mm:ss}Z)" -f $expiresOnUtc) -ForegroundColor Green
 
 # --- Build install / uninstall / detection ---------------------------------
-# ApiUrl + FunctionKey are now provisioned by the Proactive Remediation
-# 'intune-remediation-endpoint' (machine-scope env vars). Skip them in the
-# install command unless explicitly supplied for backward compatibility.
-$installParts = @(
-    'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".\Install.ps1"'
-    "-CertificateIssuerLike `"$CertificateIssuerLike`""
-    "-StatusPollIntervalSeconds $StatusPollIntervalSeconds"
-    "-StatusPollMaxMinutes $StatusPollMaxMinutes"
-)
-if ($ApiUrl)      { $installParts += "-ApiUrl `"$ApiUrl`"" }
-if ($FunctionKey) { $installParts += "-FunctionKey `"$FunctionKey`"" }
-if ($CertificateSubjectLike) {
-    $installParts += "-CertificateSubjectLike `"$CertificateSubjectLike`""
-}
-$installCmd = $installParts -join ' '
+# All endpoint + certificate selectors are now provisioned by the Proactive
+# Remediation 'intune-remediation-endpoint' (machine-scope env vars). The
+# install command line carries ONLY the two polling tunables, so the
+# Intune Management Extension log no longer captures secrets or PKI hints.
+$installCmd = ('powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden ' +
+               '-File ".\Install.ps1" ' +
+               "-StatusPollIntervalSeconds $StatusPollIntervalSeconds " +
+               "-StatusPollMaxMinutes $StatusPollMaxMinutes")
 
 $uninstallCmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".\Uninstall.ps1"'
 

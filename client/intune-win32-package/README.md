@@ -52,7 +52,7 @@ re-published.
 ### What gets configured in Intune
 
 - **Install command**:
-  `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".\Install.ps1" -CertificateSubjectLike "*Microsoft Intune MDM Device CA*"`
+  `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".\Install.ps1" -StatusPollIntervalSeconds 5 -StatusPollMaxMinutes 30`
 - **Uninstall command**:
   `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".\Uninstall.ps1"`
 - **Install behaviour**: System
