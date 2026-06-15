@@ -30,8 +30,8 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]  [string] $ApiUrl,
-    [Parameter(Mandatory = $true)]  [string] $FunctionKey,
+    [Parameter(Mandatory = $false)] [string] $ApiUrl,
+    [Parameter(Mandatory = $false)] [string] $FunctionKey,
     [Parameter(Mandatory = $false)] [string] $TenantId,
     [Parameter(Mandatory = $false)] [int] $StatusPollIntervalSeconds = 5,
     [Parameter(Mandatory = $false)] [int] $StatusPollMaxMinutes = 30,
@@ -302,14 +302,17 @@ $Global:AuthenticationHeader = @{
 Write-Host ("    Token OK (expires {0:HH:mm:ss}Z)" -f $expiresOnUtc) -ForegroundColor Green
 
 # --- Build install / uninstall / detection ---------------------------------
+# ApiUrl + FunctionKey are now provisioned by the Proactive Remediation
+# 'intune-remediation-endpoint' (machine-scope env vars). Skip them in the
+# install command unless explicitly supplied for backward compatibility.
 $installParts = @(
     'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".\Install.ps1"'
-    "-ApiUrl `"$ApiUrl`""
-    "-FunctionKey `"$FunctionKey`""
     "-CertificateIssuerLike `"$CertificateIssuerLike`""
     "-StatusPollIntervalSeconds $StatusPollIntervalSeconds"
     "-StatusPollMaxMinutes $StatusPollMaxMinutes"
 )
+if ($ApiUrl)      { $installParts += "-ApiUrl `"$ApiUrl`"" }
+if ($FunctionKey) { $installParts += "-FunctionKey `"$FunctionKey`"" }
 if ($CertificateSubjectLike) {
     $installParts += "-CertificateSubjectLike `"$CertificateSubjectLike`""
 }

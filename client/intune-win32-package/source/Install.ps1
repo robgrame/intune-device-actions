@@ -18,8 +18,8 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)] [string] $ApiUrl,
-    [Parameter(Mandatory = $true)] [string] $FunctionKey,
+    [Parameter(Mandatory = $false)] [string] $ApiUrl,
+    [Parameter(Mandatory = $false)] [string] $FunctionKey,
     [Parameter(Mandatory = $false)] [string] $CertificateSubjectLike,
     [Parameter(Mandatory = $false)] [string] $CertificateIssuerLike = '*MSLABS-SUBCA01*;*MSLABS-ADCS*',
     [Parameter(Mandatory = $false)] [string] $CertificateThumbprint,
@@ -62,11 +62,24 @@ Write-Host ("=== IntuneWipeClient {0} install ===" -f $Version)
 
 try {
     # --- Pre-flight ---------------------------------------------------------
-    if (-not [Uri]::IsWellFormedUriString($ApiUrl, [UriKind]::Absolute)) {
-        throw "ApiUrl is not a well-formed absolute URI: $ApiUrl"
+    # ApiUrl + FunctionKey are now optional at install time: the Proactive
+    # Remediation 'intune-remediation-endpoint' provisions them as machine-
+    # scope env vars (INTUNE_WIPE_API_URL, INTUNE_WIPE_FUNCTION_KEY) which
+    # the wipe scripts read in preference to the values in config.json. This
+    # keeps secrets out of the Intune install command line / IME logs.
+    if ($ApiUrl) {
+        if (-not [Uri]::IsWellFormedUriString($ApiUrl, [UriKind]::Absolute)) {
+            throw "ApiUrl is not a well-formed absolute URI: $ApiUrl"
+        }
+    } else {
+        Write-Host "  No -ApiUrl supplied; expecting INTUNE_WIPE_API_URL env var (intune-remediation-endpoint)."
     }
-    if ($FunctionKey.Length -lt 20) {
-        throw "FunctionKey looks too short to be valid."
+    if ($FunctionKey) {
+        if ($FunctionKey.Length -lt 20) {
+            throw "FunctionKey looks too short to be valid."
+        }
+    } else {
+        Write-Host "  No -FunctionKey supplied; expecting INTUNE_WIPE_FUNCTION_KEY env var (intune-remediation-endpoint)."
     }
 
     # --- Copy payload -------------------------------------------------------

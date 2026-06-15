@@ -128,6 +128,13 @@ try {
         Write-Host ("ApiUrl override from machine env INTUNE_WIPE_API_URL: {0}" -f $envApiUrl)
         $cfg.ApiUrl = $envApiUrl.Trim()
     }
+    $envKey = [Environment]::GetEnvironmentVariable('INTUNE_WIPE_FUNCTION_KEY', 'Machine')
+    if ($envKey -and $envKey.Trim()) {
+        Write-Host "FunctionKey override from machine env INTUNE_WIPE_FUNCTION_KEY (length=$($envKey.Trim().Length))"
+        $cfg.FunctionKey = $envKey.Trim()
+    }
+    if (-not $cfg.ApiUrl)      { throw "ApiUrl missing: neither config.json nor INTUNE_WIPE_API_URL is set." }
+    if (-not $cfg.FunctionKey) { throw "FunctionKey missing: neither config.json nor INTUNE_WIPE_FUNCTION_KEY is set." }
 
     $cert = Get-ClientCertificate -Cfg $cfg
     if (-not $cert) { throw "No client certificate found in LocalMachine\My matching the configured selectors." }

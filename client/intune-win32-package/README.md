@@ -32,10 +32,16 @@ produces `dist\IntuneWipeClient.intunewin`.
 
 ```powershell
 .\Publish-ToIntune.ps1 `
-    -ApiUrl      "https://devact-web-dev.azurewebsites.net/api/actions" `
-    -FunctionKey "<host key>" `
     -AssignToGroupId "<entra group object id>"   # optional
 ```
+
+> **No more `-ApiUrl` / `-FunctionKey` in the install command line.**
+> Both values are now provisioned via the companion Proactive
+> Remediation [`intune-remediation-endpoint`](../intune-remediation-endpoint/),
+> which writes them as machine-scope env vars
+> (`INTUNE_WIPE_API_URL`, `INTUNE_WIPE_FUNCTION_KEY`). The wipe scripts
+> read those env vars in preference to `config.json`, so URL repointing
+> and key rotation no longer require repackaging the `.intunewin`.
 
 Authenticates interactively to Microsoft Graph via the
 [`IntuneWin32App`](https://github.com/MSEndpointMgr/IntuneWin32App) module
@@ -46,7 +52,7 @@ re-published.
 ### What gets configured in Intune
 
 - **Install command**:
-  `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".\Install.ps1" -ApiUrl "<url>" -FunctionKey "<key>" -CertificateSubjectLike "*Microsoft Intune MDM Device CA*"`
+  `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".\Install.ps1" -CertificateSubjectLike "*Microsoft Intune MDM Device CA*"`
 - **Uninstall command**:
   `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ".\Uninstall.ps1"`
 - **Install behaviour**: System
@@ -54,6 +60,10 @@ re-published.
   `HKLM\SOFTWARE\MSLABS\IntuneWipeClient\Version` equals the current version.
 - **Requirements**: Windows 10 1809+, all architectures.
 - **Restart behaviour**: suppress.
+
+> Backward compatibility: `Install.ps1` still accepts `-ApiUrl` and
+> `-FunctionKey` as optional parameters for environments not yet
+> running the endpoint remediation.
 
 ## Operational notes
 

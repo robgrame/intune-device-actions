@@ -110,6 +110,11 @@ try {
         Write-Log ("ApiUrl override from machine env INTUNE_WIPE_API_URL: {0}" -f $envApiUrl)
         $cfg | Add-Member -NotePropertyName ApiUrl -NotePropertyValue $envApiUrl.Trim() -Force
     }
+    $envKey = [Environment]::GetEnvironmentVariable('INTUNE_WIPE_FUNCTION_KEY', 'Machine')
+    if ($envKey -and $envKey.Trim()) {
+        Write-Log "FunctionKey override from machine env INTUNE_WIPE_FUNCTION_KEY"
+        $cfg | Add-Member -NotePropertyName FunctionKey -NotePropertyValue $envKey.Trim() -Force
+    }
     if (-not $cfg.ApiUrl) {
         Write-Log "config.json has no ApiUrl."
         Write-OneLine "FAIL: config.json missing ApiUrl."
