@@ -67,18 +67,69 @@ downgrade).
    `powershell.exe` per run and therefore picks up the latest Machine
    env values on every invocation.
 
+## Choosing the right certificate selector
+
+`Get-ClientCertificate` (in `DeviceIdentity.psm1`) applies the active
+selectors in AND:
+
+1. `LocalMachine\My` (then `CurrentUser\My`, but the wipe task runs as
+   **SYSTEM** so only `LocalMachine\My` matters in practice)
+2. `HasPrivateKey` + within `NotBefore`/`NotAfter`
+3. **EKU** `1.3.6.1.5.5.7.3.2` (clientAuth)
+4. `IssuerLike` — if set, at least one `;`-separated wildcard must match
+5. `Thumbprint` exact match, **else** `SubjectLike` wildcard, **else**
+   the cert with the longest `NotAfter` remaining
+
+### Gotcha: empty Subject (SAN-only certs)
+
+Enterprise auto-enrolled device certs frequently have an **empty
+Subject DN** (the device identity lives in the SAN-DNS / SAN-UPN). If
+you set `INTUNE_WIPE_CERT_SUBJECT_LIKE` to a non-empty pattern, those
+certs are filtered out — including the one you actually need. Symptom:
+`Client certificate not found (with Client Authentication EKU and
+private key)` even though a perfectly valid cert sits in
+`LocalMachine\My`.
+
+### Recommended values
+
+- **Single enterprise CA** (typical):
+  ```powershell
+  $ExpectedCertThumbprint  = ''
+  $ExpectedCertSubjectLike = ''
+  $ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*'
+  ```
+- **Multiple acceptable CAs** (migration, partner CA, etc.):
+  ```powershell
+  $ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*;*MSLABS-ADCS*'
+  ```
+- **Single device pinning (lab / repro)**: hard-pin the thumbprint;
+  zero ambiguity but you'll need to re-pin on renewal:
+  ```powershell
+  $ExpectedCertThumbprint  = '09BFC7AD8B69917B65A7FE476321AAFAA3FB6E9C'
+  $ExpectedCertSubjectLike = ''
+  $ExpectedCertIssuerLike  = ''
+  ```
+
+**Never** combine an Issuer-like enterprise CA pattern with a Subject
+pattern modelled on Intune MDM certs (`*Microsoft Intune MDM Device
+CA*`) — Intune MDM certs are issued by `CN=Microsoft Intune MDM Device
+CA`, so the AND of `IssuerLike '*MSLABS*'` and `SubjectLike '*Intune
+MDM*'` is the empty set.
+
 ## Migration from -ApiUrl / -FunctionKey install args
 
 Existing devices still have `ApiUrl` + `FunctionKey` written to
 `%ProgramData%\IntuneWipeClient\config.json` from the old install
 command. They will keep working — the env-var overrides only take
-precedence when set. Once this remediation has reached the fleet you
-can simplify the Intune Win32 install command to:
+precedence when set. The Intune Win32 install command has been
+simplified to:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden ^
     -File ".\Install.ps1" ^
-    -CertificateSubjectLike "*Microsoft Intune MDM Device CA*"
+    -StatusPollIntervalSeconds 5 -StatusPollMaxMinutes 30
 ```
 
-(no `-ApiUrl`, no `-FunctionKey`).
+(no `-ApiUrl`, no `-FunctionKey`, no `-Certificate*`). All five values
+are now provisioned exclusively through the env vars set by this
+remediation.
