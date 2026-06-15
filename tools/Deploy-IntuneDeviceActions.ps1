@@ -132,6 +132,7 @@ $ProgressPreference    = 'SilentlyContinue'
 # Capture NameSuffix override decision at script scope (function scopes
 # don't see the script-level $PSBoundParameters).
 $script:NameSuffixOverridden = $PSBoundParameters.ContainsKey('NameSuffix')
+$script:NamePrefixOverridden = $PSBoundParameters.ContainsKey('NamePrefix')
 
 # -- Paths -------------------------------------------------------------------
 $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -434,6 +435,10 @@ function Invoke-InfraDeploy {
         '--only-show-errors'
     )
     # Bound (incl. empty string) -> forward to bicep as named param override.
+    if ($script:NamePrefixOverridden) {
+        Write-Host "    namePrefix override: '$NamePrefix'"
+        $azArgs += @('-p', "namePrefix=$NamePrefix")
+    }
     if ($script:NameSuffixOverridden) {
         Write-Host "    nameSuffix override: '$NameSuffix'"
         $azArgs += @('-p', "nameSuffix=$NameSuffix")
