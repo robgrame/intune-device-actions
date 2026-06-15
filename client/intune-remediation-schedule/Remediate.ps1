@@ -105,6 +105,11 @@ try {
     }
 
     $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+    $envApiUrl = [Environment]::GetEnvironmentVariable('INTUNE_WIPE_API_URL', 'Machine')
+    if ($envApiUrl -and $envApiUrl.Trim()) {
+        Write-Log ("ApiUrl override from machine env INTUNE_WIPE_API_URL: {0}" -f $envApiUrl)
+        $cfg | Add-Member -NotePropertyName ApiUrl -NotePropertyValue $envApiUrl.Trim() -Force
+    }
     if (-not $cfg.ApiUrl) {
         Write-Log "config.json has no ApiUrl."
         Write-OneLine "FAIL: config.json missing ApiUrl."

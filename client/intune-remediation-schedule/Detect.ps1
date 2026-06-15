@@ -82,6 +82,14 @@ try {
         exit 1
     }
 
+    # Machine env override (intune-remediation-apiurl) wins so the script
+    # detects a stale schedule.json when the Function App URL has been
+    # repointed without re-installing the .intunewin package.
+    $envApiUrl = [Environment]::GetEnvironmentVariable('INTUNE_WIPE_API_URL', 'Machine')
+    if ($envApiUrl -and $envApiUrl.Trim()) {
+        $cfg | Add-Member -NotePropertyName ApiUrl -NotePropertyValue $envApiUrl.Trim() -Force
+    }
+
     $maxAgeHours = $DefaultMaxAgeHours
     if ($cfg.PSObject.Properties.Name -contains 'ScheduleManifestMaxAgeHours') {
         $candidate = [double]$cfg.ScheduleManifestMaxAgeHours

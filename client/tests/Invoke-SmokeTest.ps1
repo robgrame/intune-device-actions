@@ -48,10 +48,10 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter()] [string] $FunctionAppHost = 'idactions-web-kngz2afknjtjk.azurewebsites.net',
+    [Parameter()] [string] $FunctionAppHost = 'devact-web-dev.azurewebsites.net',
     [Parameter()] [string] $FunctionKey,
     [Parameter()] [string] $ResourceGroup = 'rg-idactions-dev',
-    [Parameter()] [string] $FunctionAppName = 'idactions-web-kngz2afknjtjk',
+    [Parameter()] [string] $FunctionAppName = 'devact-web-dev',
     [Parameter()] [string] $MetaJsonPath = (Join-Path $PSScriptRoot 'smoke-pki\meta.json'),
     [Parameter()] [ValidateSet('Status','Request','RoundTrip')] [string] $Mode = 'RoundTrip'
 )

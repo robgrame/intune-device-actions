@@ -49,7 +49,7 @@ function Build-WipeConfirmationForm {
     $header = New-Object System.Windows.Forms.Panel
     $header.Dock      = 'Top'
     $header.Height    = 64
-    $header.BackColor = [System.Drawing.Color]::FromArgb(196, 30, 58)
+    $header.BackColor = [System.Drawing.Color]::FromArgb(0, 150, 57)
     $form.Controls.Add($header)
 
     $hLbl = New-Object System.Windows.Forms.Label
@@ -119,7 +119,7 @@ $bul Assicurati di aver salvato tutto il lavoro in corso e di essere collegato a
     $btnOk.Text      = 'Esegui reset'
     $btnOk.Location  = New-Object System.Drawing.Point(360, 406)
     $btnOk.Size      = New-Object System.Drawing.Size(120, 36)
-    $btnOk.BackColor = [System.Drawing.Color]::FromArgb(196, 30, 58)
+    $btnOk.BackColor = [System.Drawing.Color]::FromArgb(0, 150, 57)
     $btnOk.ForeColor = [System.Drawing.Color]::White
     $btnOk.FlatStyle = 'Flat'
     $btnOk.Enabled   = $false

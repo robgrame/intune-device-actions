@@ -123,6 +123,12 @@ try {
     if (-not (Test-Path $ConfigPath)) { throw "Config not found: $ConfigPath" }
     $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
 
+    $envApiUrl = [Environment]::GetEnvironmentVariable('INTUNE_WIPE_API_URL', 'Machine')
+    if ($envApiUrl -and $envApiUrl.Trim()) {
+        Write-Host ("ApiUrl override from machine env INTUNE_WIPE_API_URL: {0}" -f $envApiUrl)
+        $cfg.ApiUrl = $envApiUrl.Trim()
+    }
+
     $cert = Get-ClientCertificate -Cfg $cfg
     if (-not $cert) { throw "No client certificate found in LocalMachine\My matching the configured selectors." }
 

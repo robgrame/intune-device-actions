@@ -40,13 +40,13 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter()] [string] $FunctionAppHost   = 'idactions-web-dev.azurewebsites.net',
+    [Parameter()] [string] $FunctionAppHost   = 'devact-web-dev.azurewebsites.net',
     [Parameter(Mandatory)] [string] $CertThumbprint,
     [Parameter()] [ValidateSet('LocalMachine','CurrentUser')] [string] $CertStoreLocation = 'LocalMachine',
     [Parameter()] [ValidateSet('bitlocker-rotate','device-rename','autopilot-register')] [string] $ActionType = 'bitlocker-rotate',
     [Parameter()] [string] $FunctionKey,
     [Parameter()] [string] $ResourceGroup    = 'RG-INTUNE-DEVICEACTIONS',
-    [Parameter()] [string] $FunctionAppName  = 'idactions-web-dev',
+    [Parameter()] [string] $FunctionAppName  = 'devact-web-dev',
     [Parameter()] [string] $BoundEntraDeviceId,
     [Parameter()] [int]    $PollTimeoutSec   = 90
 )

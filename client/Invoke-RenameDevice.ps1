@@ -21,7 +21,7 @@
     be sourced from local hardware (default) or passed explicitly via -SerialNumber.
 
 .PARAMETER ApiBaseUrl
-    Full URL of the actions endpoint, e.g. https://idactions-web.azurewebsites.net/api/v2/actions
+    Full URL of the actions endpoint, e.g. https://devact-web-dev.azurewebsites.net/api/v2/actions
 
 .PARAMETER ClientCertThumbprint
     SHA1 thumbprint of the client certificate enrolled in the API's allow-list
@@ -44,7 +44,7 @@
 
 .EXAMPLE
     .\Invoke-RenameDevice.ps1 `
-        -ApiBaseUrl 'https://idactions-web.azurewebsites.net/api/v2/actions' `
+        -ApiBaseUrl 'https://devact-web-dev.azurewebsites.net/api/v2/actions' `
         -ClientCertThumbprint 'AB12CD34EF56...'
 
     Renames the local machine; serial is read from BIOS and the new name is

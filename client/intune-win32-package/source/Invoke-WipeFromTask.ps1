@@ -249,6 +249,15 @@ try {
     if (-not (Test-Path $WipeScript)) { throw "Wipe script not found: $WipeScript" }
     $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
 
+    # Allow a machine-scope env var to override the baked-in ApiUrl so the
+    # Function App can be repointed without repackaging the .intunewin
+    # (see intune-remediation-apiurl).
+    $envApiUrl = [Environment]::GetEnvironmentVariable('INTUNE_WIPE_API_URL', 'Machine')
+    if ($envApiUrl -and $envApiUrl.Trim()) {
+        Write-Host ("ApiUrl override from machine env INTUNE_WIPE_API_URL: {0}" -f $envApiUrl)
+        $cfg.ApiUrl = $envApiUrl.Trim()
+    }
+
     $params = @{
         ApiUrl      = $cfg.ApiUrl
         FunctionKey = $cfg.FunctionKey
