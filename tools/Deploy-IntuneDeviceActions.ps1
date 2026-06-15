@@ -406,6 +406,24 @@ function Invoke-InfraDeploy {
         }
     }
 
+    # Pre-flight: purge any soft-deleted App Configuration store sharing the target
+    # name. App Config soft-delete blocks re-creation with NameUnavailable until
+    # the retention window expires (default 7d). Auto-purge unless purge protection
+    # is on (in which case we surface the error instead of silently failing later).
+    $appConfigName = "$NamePrefix-appcfg-$effectiveSuffix"
+    $softDeleted = & az appconfig list-deleted --query "[?name=='$appConfigName' && location=='$Location']" -o json 2>$null
+    if ($LASTEXITCODE -eq 0 -and $softDeleted -and $softDeleted -ne '[]') {
+        $sd = $softDeleted | ConvertFrom-Json
+        if ($sd -and $sd[0].purgeProtectionEnabled) {
+            Write-Warn2 "App Config '$appConfigName' is soft-deleted with purge protection ON; deploy will fail with NameUnavailable."
+        } else {
+            Write-Host "    purging soft-deleted App Config '$appConfigName' (blocks re-create)..."
+            & az appconfig purge -n $appConfigName --location $Location --yes --only-show-errors 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { Write-Ok "purged soft-deleted App Config '$appConfigName'" }
+            else { Write-Warn2 "Failed to purge soft-deleted App Config '$appConfigName' (exit $LASTEXITCODE); deploy may fail." }
+        }
+    }
+
     $deployName = "$NamePrefix-deploy-$([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))"
     Write-Host "    deployment name: $deployName"
     $azArgs = @(
