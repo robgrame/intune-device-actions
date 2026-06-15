@@ -237,7 +237,6 @@ try {
                 }
                 if ($msg) { Add-WipeFormLog -Form $form -Message ("Server message : {0}" -f $msg) -Kind muted }
                 Add-WipeFormLog -Form $form -Message 'Intune prenderà in carico il comando entro pochi minuti.' -Kind muted
-                Add-WipeFormLog -Form $form -Message 'Apro automaticamente il monitor avanzamento live...' -Kind muted
 
                 $openLive = $null
                 if (Get-Command Show-WipeProgressDialog -ErrorAction SilentlyContinue) {
@@ -247,6 +246,14 @@ try {
                 Complete-WipeForm -Form $form -Success $true `
                     -FinalStatus 'Reset richiesto. In attesa di presa in carico da Intune.' `
                     -OnOpenLiveProgress $openLive
+
+                # Inline live monitor: poll the SYSTEM-poller status file and
+                # log transitions inside THIS form so the operator does not
+                # have to open a second dialog.
+                if ($corr -and (Get-Command Start-WipeInlineMonitor -ErrorAction SilentlyContinue)) {
+                    try { Start-WipeInlineMonitor -Form $form -CorrelationId $corr -MaxMinutes $progressSettings.MaxMinutes } catch { }
+                }
+
                 $script:exitCode = 0
                 return
             }

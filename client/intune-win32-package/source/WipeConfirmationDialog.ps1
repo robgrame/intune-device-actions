@@ -338,21 +338,116 @@ function Complete-WipeForm {
         $Form.OpenLiveProgressBtn.Add_Click({
             try { & $captured $Form.CorrelationId } catch { }
         }.GetNewClosure())
-
-        # Auto-open the live progress dialog so the operator sees in-flight
-        # state without having to click the button first. Scheduled via
-        # BeginInvoke so it fires after Complete-WipeForm returns and the
-        # final paint of the parent form has settled.
-        $btn = $Form.OpenLiveProgressBtn
-        [void]$Form.BeginInvoke([Action]{
-            try { $btn.PerformClick() } catch { }
-        })
     }
 
     $Form.ProgressCloseBtn.Enabled = $true
     $Form.AcceptButton = $Form.ProgressCloseBtn
     $Form.CancelButton = $Form.ProgressCloseBtn
     [System.Windows.Forms.Application]::DoEvents()
+}
+
+<#
+.SYNOPSIS
+    Starts polling the SYSTEM-poller status file inline on the confirmation
+    form, logging each state transition via Add-WipeFormLog.
+.DESCRIPTION
+    Mirrors the polling logic in Show-WipeProgressDialog but renders the
+    timeline inside the existing confirmation form (no second dialog).
+    Reads %ProgramData%\IntuneWipeClient\status\<corrId>.json every 2s
+    (written by Watch-WipeStatus.ps1 in the SYSTEM scheduled task). On
+    each new server state, appends a log line; on terminal/timeout/error
+    or UI deadline, stops the timer and updates the final status banner.
+    Safe no-op if the status file never appears (e.g. SYSTEM poller
+    missing) — just logs a single notice and stops after the deadline.
+#>
+function Start-WipeInlineMonitor {
+    param(
+        [Parameter(Mandatory)] [System.Windows.Forms.Form] $Form,
+        [Parameter(Mandatory)] [string] $CorrelationId,
+        [int] $MaxMinutes = 30
+    )
+
+    $statusFile = Join-Path $env:ProgramData ("IntuneWipeClient\status\{0}.json" -f $CorrelationId)
+    $deadline   = (Get-Date).AddMinutes([math]::Max(1, $MaxMinutes))
+
+    $translate = {
+        param([string]$s)
+        switch -Regex ($s) {
+            '^pending$'           { return 'In attesa di presa in carico da Intune' }
+            '^active$'            { return 'Comando di wipe in corso sul dispositivo' }
+            '^done$'              { return 'Comando completato da Intune' }
+            '^failed$'            { return 'Intune ha segnalato un errore' }
+            '^notSupported$'      { return 'Operazione non supportata su questo dispositivo' }
+            '^removedFromIntune$' { return 'Dispositivo rimosso da Intune (wipe completato)' }
+            '^awaiting-graph$'    { return 'In attesa del primo controllo Intune' }
+            default               { if ($s) { return $s } else { return 'In attesa...' } }
+        }
+    }
+
+    $state = @{
+        LastEffective = ''
+    }
+
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 2000
+
+    $tick = {
+        try {
+            if (-not (Test-Path -LiteralPath $statusFile)) {
+                if ((Get-Date) -ge $deadline) {
+                    Add-WipeFormLog -Form $Form -Message 'Monitor avanzamento: nessun aggiornamento entro la finestra UI; il poller SYSTEM continua in background.' -Kind muted
+                    $timer.Stop()
+                }
+                return
+            }
+
+            $state.FileSeen = $true
+            $raw = Get-Content -LiteralPath $statusFile -Raw -ErrorAction Stop
+            if (-not $raw) { return }
+            $obj = $raw | ConvertFrom-Json -ErrorAction Stop
+
+            $local    = [string]$obj.localState
+            $srvState = $null
+            if ($obj.server) { $srvState = [string]$obj.server.state }
+
+            $effective = if ($srvState) { $srvState } else { "[$local]" }
+            if ($effective -and $effective -ne $state.LastEffective) {
+                $label = if ($srvState) { & $translate $srvState } else { "in attesa di risposta da Intune ($local)" }
+                Add-WipeFormLog -Form $Form -Message ("Stato Intune: {0}" -f $label) -Kind muted
+                $state.LastEffective = $effective
+            }
+
+            $terminal = ($local -eq 'terminal') -or ($local -eq 'timeout')
+            if ($terminal) {
+                $isError = ($srvState -match 'failed|notSupported')
+                if ($isError) {
+                    Set-WipeFormStatus -Form $Form -Status 'Intune ha segnalato un errore durante il reset.'
+                } elseif ($local -eq 'timeout') {
+                    Set-WipeFormStatus -Form $Form -Status 'Tempo di monitoraggio scaduto. Il poller SYSTEM continua in background.'
+                } else {
+                    Set-WipeFormStatus -Form $Form -Status 'Reset completato.'
+                }
+                $timer.Stop()
+            }
+            elseif ((Get-Date) -ge $deadline) {
+                Add-WipeFormLog -Form $Form -Message 'Monitor avanzamento: timeout UI raggiunto, il poller SYSTEM continua in background.' -Kind muted
+                $timer.Stop()
+            }
+        }
+        catch {
+            # Transient parse/IO errors are expected while the SYSTEM poller
+            # is rewriting the file — swallow and retry on the next tick.
+        }
+    }
+    $timer.Add_Tick($tick.GetNewClosure())
+
+    # Cleanup if the form closes mid-flight.
+    $Form.Add_FormClosed({
+        try { $timer.Stop(); $timer.Dispose() } catch { }
+    }.GetNewClosure())
+
+    Add-WipeFormLog -Form $Form -Message 'Monitoraggio avanzamento attivo in questa finestra.' -Kind muted
+    $timer.Start()
 }
 
 <#
