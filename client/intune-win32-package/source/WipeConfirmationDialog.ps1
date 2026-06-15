@@ -419,19 +419,22 @@ function Start-WipeInlineMonitor {
 
             $terminal = ($local -eq 'terminal') -or ($local -eq 'timeout')
             if ($terminal) {
+                $timer.Stop()
                 $isError = ($srvState -match 'failed|notSupported')
                 if ($isError) {
-                    Set-WipeFormStatus -Form $Form -Status 'Intune ha segnalato un errore durante il reset.'
+                    $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(168, 0, 0)
+                    Set-WipeFormStatus -Form $Form -Text 'Intune ha segnalato un errore durante il reset.'
                 } elseif ($local -eq 'timeout') {
-                    Set-WipeFormStatus -Form $Form -Status 'Tempo di monitoraggio scaduto. Il poller SYSTEM continua in background.'
+                    $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(184, 134, 11)
+                    Set-WipeFormStatus -Form $Form -Text 'Tempo di monitoraggio scaduto. Il poller SYSTEM continua in background.'
                 } else {
-                    Set-WipeFormStatus -Form $Form -Status 'Reset completato.'
+                    $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 50)
+                    Set-WipeFormStatus -Form $Form -Text 'Reset completato.'
                 }
-                $timer.Stop()
             }
             elseif ((Get-Date) -ge $deadline) {
-                Add-WipeFormLog -Form $Form -Message 'Monitor avanzamento: timeout UI raggiunto, il poller SYSTEM continua in background.' -Kind muted
                 $timer.Stop()
+                Add-WipeFormLog -Form $Form -Message 'Monitor avanzamento: timeout UI raggiunto, il poller SYSTEM continua in background.' -Kind muted
             }
         }
         catch {

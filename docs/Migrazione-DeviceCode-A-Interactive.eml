@@ -1,0 +1,334 @@
+From: Roberto Gramellini <robertogramellini@hotmail.com>
+To: <destinatario@example.com>
+Subject: Dismissione device code flow - migrazione a Connect-MgGraph interactive
+Date: Thu, 11 Jun 2026 17:40:00 +0200
+Message-ID: <178015560000.41872.7253914820395176408@idactions.local>
+X-Unsent: 1
+X-Mailer: Microsoft Outlook
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============5821093746518290374=="
+
+--===============5821093746518290374==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Buongiorno,
+
+a seguito della raccomandazione di Microsoft (e dei nostri recenti audit
+di sicurezza) vi proponiamo di dismettere il "device code flow" come
+metodo di autenticazione interattiva nei vostri script PowerShell, in
+favore del "interactive code flow" che e' lo stesso utilizzato di default
+da Connect-MgGraph.
+
+----------------------------------------------------------------------
+PERCHE'
+----------------------------------------------------------------------
+Il device code flow e' progettato per dispositivi senza tastiera o senza
+browser (smart TV, IoT, console). Su un normale PC e' invece uno dei
+vettori di phishing piu' sfruttati negli ultimi 18 mesi (campagne
+Storm-0867, Midnight Blizzard, attacchi a tenant M365 di grandi
+organizzazioni). L'attaccante genera lui un device code e induce la
+vittima a "completarlo" via mail / Teams / SMS: il token risultante
+finisce nella sua sessione, non in quella della vittima. MFA e
+Conditional Access NON proteggono da questo schema.
+
+Microsoft ha gia' reso disponibile in Conditional Access una policy
+nativa per bloccarlo a livello tenant (vedi piu' avanti).
+
+----------------------------------------------------------------------
+COSA CAMBIA PER L'UTENTE FINALE
+----------------------------------------------------------------------
+PRIMA (device code):
+  1. Lo script stampa un codice tipo "EC3GJ4NGM"
+  2. L'utente apre microsoft.com/devicelogin
+  3. Incolla il codice, fa login, conferma scope
+  4. Torna allo script
+
+DOPO (interactive):
+  1. Lo script apre automaticamente il browser di default
+  2. L'utente fa login (MFA, Conditional Access tutto invariato)
+  3. Il browser mostra "Autenticazione completata, puoi chiudere"
+  4. Lo script prosegue
+  5. Al lancio successivo: NESSUN prompt (token in cache, silent refresh)
+
+E' la stessa UX di Connect-MgGraph quando NON si specifica -UseDeviceCode.
+
+----------------------------------------------------------------------
+COSA DOVETE FARE: 3 PASSI
+----------------------------------------------------------------------
+
+PASSO 1 - Aggiornare la app registration
+  Portale Entra > App registrations > <vostra app> > Authentication
+
+  a) Sezione "Advanced settings"
+       Allow public client flows  ->  SI'
+
+  b) Sezione "Platform configurations"
+       Se non c'e' gia' "Mobile and desktop applications", aggiungetela.
+       Sotto, registrate il redirect URI:
+           http://localhost
+       (senza porta - Entra fa port-agnostic matching come da RFC 8252)
+
+  Salvate. Nessun altro setting cambia. I delegated permission esistenti
+  restano validi.
+
+PASSO 2 - Modificare lo script
+  Sostituite la chiamata a Connect-MgGraph rimuovendo il parametro
+  -UseDeviceCode:
+
+      # PRIMA
+      Connect-MgGraph -UseDeviceCode `
+                      -ClientId '<app-id>' `
+                      -TenantId '<tenant-id>' `
+                      -Scopes 'DeviceManagementManagedDevices.ReadWrite.All'
+
+      # DOPO
+      Connect-MgGraph -ClientId '<app-id>' `
+                      -TenantId '<tenant-id>' `
+                      -Scopes 'DeviceManagementManagedDevices.ReadWrite.All'
+
+  Tutto il resto dello script (Get-MgDevice, Invoke-MgGraphRequest, etc.)
+  resta invariato. Stessi scope, stessi cmdlet, stessi risultati.
+
+PASSO 3 (consigliato) - Bloccare device code flow a livello tenant
+  Anche dopo aver "ripulito" gli script vostri, un attaccante esterno
+  puo' sempre lanciare un device code flow contro i vostri utenti per
+  fare phishing. L'unico modo per chiudere il vettore e' una policy
+  Conditional Access:
+
+      Entra > Protection > Conditional Access > New policy
+        Nome:      Block device code flow
+        Users:     All users (escludere SOLO i break-glass account)
+        Resources: All cloud apps
+        Conditions > Authentication flows > Device code flow = Block
+        Grant: Block access
+        Enable policy: ON
+
+  Importante: prima di metterla "On" lanciatela in modalita'
+  "Report-only" per qualche giorno e controllate i Sign-in logs di Entra
+  filtrando per AuthenticationProtocol = "deviceCode", per assicurarvi
+  che nessun workload legittimo verrebbe rotto (vecchi script CI,
+  dispositivi shared, console di lab).
+
+----------------------------------------------------------------------
+PIANO DI ROLLOUT SUGGERITO
+----------------------------------------------------------------------
+Settimana 1
+  - Aggiornare l'app registration (passo 1)
+  - Modificare lo script in ambiente di test (passo 2)
+  - Pilotare la modifica con 2-3 utenti chiave
+
+Settimana 2
+  - Abilitare la CA policy in Report-only (passo 3)
+  - Audit dei Sign-in logs per identificare eventuali altri script o
+    workload che usano ancora device code
+
+Settimana 3-4
+  - Distribuire la versione aggiornata dello script alla popolazione
+    target
+  - Migrare i restanti workload identificati nell'audit
+  - Promuovere la CA policy da Report-only a Enabled
+
+----------------------------------------------------------------------
+CHECKLIST RAPIDA DI VERIFICA
+----------------------------------------------------------------------
+[ ] App registration: "Allow public client flows" = Yes
+[ ] App registration: redirect URI "http://localhost" registrato
+[ ] Script: rimosso -UseDeviceCode da Connect-MgGraph
+[ ] Test funzionale: il browser si apre, login MFA OK, lo script
+    completa l'operazione senza errori
+[ ] Test silent refresh: al secondo lancio nessun prompt
+[ ] (Opzionale) CA policy "Block device code flow" attivata almeno in
+    Report-only
+
+----------------------------------------------------------------------
+FAQ
+----------------------------------------------------------------------
+
+D. Devo cambiare gli scope o i permessi?
+R. No. Gli scope delegated restano gli stessi. Non serve nuovo admin
+   consent.
+
+D. Devo creare un client secret?
+R. No. L'app registration resta "public client" - niente segreti da
+   custodire o ruotare.
+
+D. Cosa succede se lo script gira in contesto SYSTEM o headless (es.
+   scheduled task senza utente loggato)?
+R. Il flusso interactive non e' applicabile (non c'e' browser). In quel
+   caso si passa a client credentials con certificato (best practice) o
+   a Managed Identity se siete in Azure.
+
+D. La porta del redirect URI puo' essere bloccata da firewall locali?
+R. No: e' loopback puro (127.0.0.1), il traffico non lascia il PC. Nessun
+   firewall perimetrale o NSG la vede.
+
+D. http://localhost senza HTTPS non e' insicuro?
+R. No. E' un'eccezione esplicita di RFC 8252 perche' il loopback non
+   transita su rete. Entra lo accetta solo per questa specifica casistica.
+
+D. Cosa cambia per chi ha gia' Conditional Access "Require MFA" o
+   "Require compliant device"?
+R. Nulla, anzi: queste policy continuano a funzionare. Con device code
+   in alcuni scenari "compliant device" non veniva valutata correttamente
+   perche' la sessione che completa il code e' su un device DIVERSO da
+   quello che ha generato il code. Con interactive il device e' lo
+   stesso, le policy applicano in modo deterministico.
+
+----------------------------------------------------------------------
+TEMPI ED EFFORT STIMATI
+----------------------------------------------------------------------
+Modifica app registration:   5 minuti
+Modifica script:             1 riga
+Test funzionale:             15 minuti
+Setup CA policy report-only: 10 minuti
+Audit sign-in logs:          2 ore distribuite su 7 giorni
+Cutover CA policy enabled:   5 minuti
+
+Restiamo a disposizione per supportarvi nel rollout e per validare la
+modifica nei vostri ambienti.
+
+Cordiali saluti,
+Roberto Gramellini
+
+--===============5821093746518290374==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<html>
+<head>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #1f2d24; line-height: 1.45; max-width: 780px; }
+  h2 { color: #008652; border-bottom: 2px solid #008652; padding-bottom: 4px; margin-top: 1.6em; }
+  h3 { color: #006b41; margin-top: 1.4em; }
+  code, pre { font-family: Consolas, 'Courier New', monospace; }
+  pre { background: #f4f7f5; border-left: 3px solid #008652; padding: 10px 14px; overflow-x: auto; font-size: 9.5pt; }
+  code { background: #f4f7f5; padding: 1px 5px; border-radius: 3px; font-size: 0.95em; }
+  table { border-collapse: collapse; margin: 0.8em 0; }
+  th, td { border: 1px solid #d8e0dc; padding: 6px 12px; text-align: left; font-size: 10pt; vertical-align: top; }
+  th { background: #e8f5ee; color: #006b41; }
+  .callout { background: #fff7e6; border-left: 3px solid #d68f00; padding: 10px 14px; margin: 1em 0; }
+  .danger { background: #fdecec; border-left: 3px solid #c0392b; padding: 10px 14px; margin: 1em 0; }
+  .ok { background: #ecf7ef; border-left: 3px solid #008652; padding: 10px 14px; margin: 1em 0; }
+  ul.checklist { list-style: none; padding-left: 0; }
+  ul.checklist li::before { content: "\2610  "; color: #008652; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<p>Buongiorno,</p>
+<p>a seguito della raccomandazione di Microsoft (e dei nostri recenti audit di sicurezza) vi proponiamo di dismettere il <strong>device code flow</strong> come metodo di autenticazione interattiva nei vostri script PowerShell, in favore dello stesso <em>interactive code flow</em> utilizzato di default da <code>Connect-MgGraph</code>.</p>
+
+<h2>Perch&eacute;</h2>
+<p>Il device code flow &egrave; progettato per dispositivi senza tastiera o senza browser (smart TV, IoT, console). Su un normale PC &egrave; invece uno dei vettori di phishing pi&ugrave; sfruttati negli ultimi 18 mesi (campagne <strong>Storm-0867</strong>, <strong>Midnight Blizzard</strong>, attacchi a tenant M365 di grandi organizzazioni).</p>
+<div class="danger">
+<strong>Schema dell'attacco:</strong> l'attaccante genera lui un device code e induce la vittima a "completarlo" via mail / Teams / SMS. Il token risultante finisce nella sessione dell'attaccante, non in quella della vittima. <strong>MFA e Conditional Access non proteggono da questo schema</strong> perch&eacute; l'utente effettivamente si autentica - solo che il token finisce altrove.
+</div>
+<p>Microsoft ha gi&agrave; reso disponibile in Conditional Access una policy nativa per bloccarlo a livello tenant (vedi <a href="#passo3">Passo 3</a>).</p>
+
+<h2>Cosa cambia per l'utente finale</h2>
+<table>
+<tr><th>Step</th><th>Prima (device code)</th><th>Dopo (interactive)</th></tr>
+<tr><td>1</td><td>Lo script stampa un codice tipo <code>EC3GJ4NGM</code></td><td>Lo script apre automaticamente il browser</td></tr>
+<tr><td>2</td><td>L'utente apre <code>microsoft.com/devicelogin</code></td><td>L'utente fa login (MFA, CA tutto invariato)</td></tr>
+<tr><td>3</td><td>Incolla il codice, fa login, conferma scope</td><td>Il browser mostra "Autenticazione completata"</td></tr>
+<tr><td>4</td><td>Torna allo script</td><td>Lo script prosegue</td></tr>
+<tr><td>5</td><td>Al lancio successivo: stesso giro</td><td><strong>Nessun prompt</strong> (token in cache, silent refresh)</td></tr>
+</table>
+<p>&Egrave; la stessa UX di <code>Connect-MgGraph</code> quando <strong>non</strong> si specifica <code>-UseDeviceCode</code>.</p>
+
+<h2>Cosa dovete fare: 3 passi</h2>
+
+<h3>Passo 1 &mdash; Aggiornare la app registration</h3>
+<p>Portale Entra &rsaquo; <em>App registrations</em> &rsaquo; <em>&lt;vostra app&gt;</em> &rsaquo; <em>Authentication</em></p>
+<ol>
+<li>Sezione <strong>Advanced settings</strong>: <code>Allow public client flows</code> = <strong>Yes</strong></li>
+<li>Sezione <strong>Platform configurations</strong> &rsaquo; <em>Mobile and desktop applications</em> &rsaquo; registrate il redirect URI:
+<pre>http://localhost</pre>
+(senza porta &mdash; Entra fa port-agnostic matching come da RFC 8252)</li>
+</ol>
+<div class="ok">Nessun altro setting cambia. I delegated permission esistenti restano validi. Non serve nuovo admin consent.</div>
+
+<h3>Passo 2 &mdash; Modificare lo script</h3>
+<p>Rimuovete il parametro <code>-UseDeviceCode</code> dalla chiamata a <code>Connect-MgGraph</code>:</p>
+<pre><span style="color:#888"># PRIMA</span>
+Connect-MgGraph -UseDeviceCode <span style="color:#888">`</span>
+                -ClientId '&lt;app-id&gt;' <span style="color:#888">`</span>
+                -TenantId '&lt;tenant-id&gt;' <span style="color:#888">`</span>
+                -Scopes   'DeviceManagementManagedDevices.ReadWrite.All'
+
+<span style="color:#888"># DOPO</span>
+Connect-MgGraph -ClientId '&lt;app-id&gt;' <span style="color:#888">`</span>
+                -TenantId '&lt;tenant-id&gt;' <span style="color:#888">`</span>
+                -Scopes   'DeviceManagementManagedDevices.ReadWrite.All'</pre>
+<p>Tutto il resto dello script (<code>Get-MgDevice</code>, <code>Invoke-MgGraphRequest</code>, ecc.) resta invariato.</p>
+
+<h3 id="passo3">Passo 3 (consigliato) &mdash; Bloccare device code flow a livello tenant</h3>
+<p>Anche dopo aver "ripulito" i vostri script, un attaccante esterno pu&ograve; sempre lanciare un device code flow contro i vostri utenti per fare phishing. L'unico modo per chiudere il vettore &egrave; una Conditional Access policy:</p>
+<pre>Entra &rsaquo; Protection &rsaquo; Conditional Access &rsaquo; New policy
+  Nome:      Block device code flow
+  Users:     All users (escludere SOLO i break-glass account)
+  Resources: All cloud apps
+  Conditions &rsaquo; Authentication flows &rsaquo; Device code flow = Block
+  Grant: Block access
+  Enable policy: ON</pre>
+<div class="callout"><strong>Importante:</strong> prima di metterla "On" lanciatela in modalit&agrave; <em>Report-only</em> per qualche giorno e controllate i Sign-in logs filtrando per <code>AuthenticationProtocol = "deviceCode"</code>, per assicurarvi che nessun workload legittimo verrebbe rotto (vecchi script CI, dispositivi shared, console di lab).</div>
+
+<h2>Piano di rollout suggerito</h2>
+<table>
+<tr><th>Settimana</th><th>Attivit&agrave;</th></tr>
+<tr><td>1</td><td>Aggiornare app registration; modificare script in test; pilotare con 2-3 utenti chiave</td></tr>
+<tr><td>2</td><td>Abilitare CA policy in Report-only; audit Sign-in logs per altri workload</td></tr>
+<tr><td>3-4</td><td>Rollout script aggiornato in produzione; migrare workload residui; promuovere CA policy a <em>Enabled</em></td></tr>
+</table>
+
+<h2>Checklist di verifica</h2>
+<ul class="checklist">
+<li>App registration: <code>Allow public client flows</code> = Yes</li>
+<li>App registration: redirect URI <code>http://localhost</code> registrato</li>
+<li>Script: rimosso <code>-UseDeviceCode</code> da <code>Connect-MgGraph</code></li>
+<li>Test funzionale: browser si apre, login MFA OK, script completa senza errori</li>
+<li>Test silent refresh: al secondo lancio nessun prompt</li>
+<li>(Opzionale) CA policy "Block device code flow" attivata almeno in Report-only</li>
+</ul>
+
+<h2>FAQ</h2>
+<p><strong>D. Devo cambiare gli scope o i permessi?</strong><br>
+R. No. Gli scope delegated restano gli stessi. Non serve nuovo admin consent.</p>
+
+<p><strong>D. Devo creare un client secret?</strong><br>
+R. No. L'app registration resta <em>public client</em> &mdash; niente segreti da custodire o ruotare.</p>
+
+<p><strong>D. Cosa succede se lo script gira in contesto SYSTEM o headless (es. scheduled task senza utente loggato)?</strong><br>
+R. Il flusso interactive non &egrave; applicabile (non c'&egrave; browser). In quel caso si passa a <em>client credentials con certificato</em> (best practice) o a Managed Identity se siete in Azure.</p>
+
+<p><strong>D. La porta del redirect URI pu&ograve; essere bloccata da firewall locali?</strong><br>
+R. No: &egrave; loopback puro (127.0.0.1), il traffico non lascia il PC. Nessun firewall perimetrale o NSG la vede.</p>
+
+<p><strong>D. <code>http://localhost</code> senza HTTPS non &egrave; insicuro?</strong><br>
+R. No. &Egrave; un'eccezione esplicita di RFC 8252 perch&eacute; il loopback non transita su rete. Entra lo accetta solo per questa casistica.</p>
+
+<p><strong>D. Cosa cambia per chi ha gi&agrave; Conditional Access "Require MFA" o "Require compliant device"?</strong><br>
+R. Nulla, anzi: queste policy continuano a funzionare. Con device code in alcuni scenari "compliant device" non veniva valutata correttamente perch&eacute; la sessione che completa il code &egrave; su un device <em>diverso</em> da quello che ha generato il code. Con interactive il device &egrave; lo stesso, le policy applicano in modo deterministico.</p>
+
+<h2>Tempi ed effort stimati</h2>
+<table>
+<tr><th>Attivit&agrave;</th><th>Effort</th></tr>
+<tr><td>Modifica app registration</td><td>5 minuti</td></tr>
+<tr><td>Modifica script</td><td>1 riga</td></tr>
+<tr><td>Test funzionale</td><td>15 minuti</td></tr>
+<tr><td>Setup CA policy Report-only</td><td>10 minuti</td></tr>
+<tr><td>Audit Sign-in logs</td><td>2 ore distribuite su 7 giorni</td></tr>
+<tr><td>Cutover CA policy <em>Enabled</em></td><td>5 minuti</td></tr>
+</table>
+
+<p>Restiamo a disposizione per supportarvi nel rollout e per validare la modifica nei vostri ambienti.</p>
+
+<p>Cordiali saluti,<br>
+<strong>Roberto Gramellini</strong></p>
+
+</body>
+</html>
+
+--===============5821093746518290374==--
