@@ -672,9 +672,10 @@ function Invoke-PortalDeploy {
         # Convenience: when skipping app-reg, try to re-use existing portal app
         # settings so the operator does not need to pass secrets each run.
         if (-not $tenant -or -not $client -or -not $secret) {
-            $portalApp = (& az webapp list -g $ResourceGroup `
+            $portalAppRaw = & az webapp list -g $ResourceGroup `
                 --query "[?starts_with(name, '$NamePrefix-portal-') || name == '$NamePrefix-portal'].name | [0]" `
-                -o tsv --only-show-errors).Trim()
+                -o tsv --only-show-errors
+            $portalApp = if ($portalAppRaw) { $portalAppRaw.Trim() } else { $null }
             if ($portalApp) {
                 $appSettings = & az webapp config appsettings list -g $ResourceGroup -n $portalApp -o json --only-show-errors 2>$null
                 if ($LASTEXITCODE -eq 0 -and $appSettings) {
