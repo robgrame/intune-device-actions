@@ -116,6 +116,18 @@
     Portal deploy option. When -DeployPortal is used, skip portal app
     registration creation/rotation and deploy only infra/app code.
 
+.PARAMETER EntraTenantId
+    Portal deploy option used with -SkipAppRegistration. If omitted, the
+    script tries to read it from the existing portal app settings.
+
+.PARAMETER EntraClientId
+    Portal deploy option used with -SkipAppRegistration. If omitted, the
+    script tries to read it from the existing portal app settings.
+
+.PARAMETER EntraClientSecret
+    Portal deploy option used with -SkipAppRegistration. If omitted, the
+    script tries to read it from the existing portal app settings.
+
 .PARAMETER DeployOnlyPortal
     Convenience switch: run only the portal phase (equivalent to enabling
     -DeployPortal and skipping all API phases: publish, infra, zip deploy,
@@ -168,6 +180,9 @@ param(
     [ValidateSet('Actions.Observer','Actions.Auditor')]
     [string]$AssignRole = 'Actions.Observer',
     [switch]$SkipAppRegistration,
+    [string]$EntraTenantId,
+    [string]$EntraClientId,
+    [SecureString]$EntraClientSecret,
     [switch]$DeployOnlyPortal
 )
 
@@ -643,7 +658,41 @@ function Invoke-PortalDeploy {
         AppServicePlanSku         = $PortalSku
         LogAnalyticsWorkspaceName = $law
     }
-    if ($SkipAppRegistration) { $portalArgs.SkipAppRegistration = $true }
+    if ($SkipAppRegistration) {
+        $portalArgs.SkipAppRegistration = $true
+
+        $tenant = $EntraTenantId
+        $client = $EntraClientId
+        $secret = $EntraClientSecret
+
+        # Convenience: when skipping app-reg, try to re-use existing portal app
+        # settings so the operator does not need to pass secrets each run.
+        if (-not $tenant -or -not $client -or -not $secret) {
+            $portalApp = (& az webapp list -g $ResourceGroup `
+                --query "[?starts_with(name, '$NamePrefix-portal-') || name == '$NamePrefix-portal'].name | [0]" `
+                -o tsv --only-show-errors).Trim()
+            if ($portalApp) {
+                $appSettings = & az webapp config appsettings list -g $ResourceGroup -n $portalApp -o json --only-show-errors 2>$null
+                if ($LASTEXITCODE -eq 0 -and $appSettings) {
+                    $items = $appSettings | ConvertFrom-Json
+                    if (-not $tenant) { $tenant = ($items | Where-Object { $_.name -eq 'Entra__TenantId' } | Select-Object -First 1).value }
+                    if (-not $client) { $client = ($items | Where-Object { $_.name -eq 'Entra__ClientId' } | Select-Object -First 1).value }
+                    if (-not $secret) {
+                        $secretRaw = ($items | Where-Object { $_.name -eq 'Entra__ClientSecret' } | Select-Object -First 1).value
+                        if ($secretRaw) { $secret = ConvertTo-SecureString $secretRaw -AsPlainText -Force }
+                    }
+                }
+            }
+        }
+
+        if (-not $tenant -or -not $client -or -not $secret) {
+            throw "When -SkipAppRegistration is set, provide -EntraTenantId/-EntraClientId/-EntraClientSecret or ensure existing portal app settings contain Entra__TenantId/Entra__ClientId/Entra__ClientSecret."
+        }
+
+        $portalArgs.EntraTenantId = $tenant
+        $portalArgs.EntraClientId = $client
+        $portalArgs.EntraClientSecret = $secret
+    }
     if ($script:NameSuffixOverridden) { $portalArgs.NameSuffix = $NameSuffix }
     if ($AssignUserUpn) {
         $portalArgs.AssignUserUpn = $AssignUserUpn
