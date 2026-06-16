@@ -1,18 +1,21 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    End-to-end deploy of IntuneDeviceActions (Web + Proc + Wipe + Autopilot + BitLocker Function Apps).
+    End-to-end deploy of IntuneDeviceActions (Web + Proc + Wipe + Autopilot + BitLocker + Rename Function Apps), with optional portal deploy.
 
 .DESCRIPTION
     Idempotent helper that:
       1. Verifies / auto-installs prerequisites: .NET 10 SDK, Azure CLI, Bicep.
       2. Logs in to Azure (interactive) and selects subscription.
       3. Prompts only for parameters not supplied on the command line.
-      4. Builds + publishes Web/Proc/Wipe/Autopilot/BitLocker and creates 5 deployment zips.
+      4. Builds + publishes Web/Proc/Wipe/Autopilot/BitLocker/Rename and creates deployment zips.
       5. Deploys infra via Bicep (creates the RG if missing).
-      6. Restarts the 3 Function Apps (RBAC propagation) and deploys the zips.
+      6. Restarts the Function Apps (RBAC propagation) and deploys the zips.
       7. Runs a smoke test and prints remaining manual steps
          (Graph admin consent, optional AppConfig seed).
+      8. Optionally deploys the portal app from the sibling repo
+         `..\intune-wipe-portal` (infra + publish/deploy), always skipping
+         app-registration creation/rotation.
 
     Safe to re-run. Each phase can be skipped with -Skip* switches.
 
@@ -86,6 +89,29 @@
 .PARAMETER NoSmokeTest
     Skip the final HTTP smoke test.
 
+.PARAMETER DeployPortal
+    Also deploy the portal app from the sibling `intune-wipe-portal` repo.
+    Portal app-registration creation is always skipped.
+
+.PARAMETER PortalRepoPath
+    Optional path to the `intune-wipe-portal` repo. When omitted and
+    -DeployPortal is set, defaults to `..\intune-wipe-portal` relative to
+    this repository.
+
+.PARAMETER LogAnalyticsWorkspaceName
+    Portal deploy parameter. If omitted, auto-detected in the target RG as
+    `<NamePrefix>-law-*` (or `<NamePrefix>-law`), falling back to
+    `<NamePrefix>-law-<NameSuffix>`.
+
+.PARAMETER PortalSku
+    App Service plan SKU for portal deploy.
+
+.PARAMETER AssignUserUpn
+    Optional portal role assignment target user UPN.
+
+.PARAMETER AssignRole
+    Optional portal role assigned when -AssignUserUpn is provided.
+
 .EXAMPLE
     .\tools\Deploy-IntuneDeviceActions.ps1
 
@@ -123,7 +149,15 @@ param(
     [switch]$SkipInfra,
     [switch]$SkipDeploy,
     [switch]$SkipGraphConsent,
-    [switch]$NoSmokeTest
+    [switch]$NoSmokeTest,
+    [switch]$DeployPortal,
+    [string]$PortalRepoPath,
+    [string]$LogAnalyticsWorkspaceName,
+    [ValidateSet('B1','B2','P0v3','P1v3')]
+    [string]$PortalSku = 'B1',
+    [string]$AssignUserUpn,
+    [ValidateSet('Actions.Observer','Actions.Auditor')]
+    [string]$AssignRole = 'Actions.Observer'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -322,6 +356,22 @@ function Resolve-Inputs {
     Write-Ok "Location:        $Location"
     Write-Ok "Bicep file:      $BicepFile"
     Write-Ok "Parameters file: $ParametersFile"
+
+    if ($DeployPortal) {
+        if (-not $PortalRepoPath) {
+            $script:PortalRepoPath = (Resolve-Path (Join-Path $RepoRoot '..\intune-wipe-portal') -ErrorAction SilentlyContinue)?.Path
+        } else {
+            $script:PortalRepoPath = (Resolve-Path $PortalRepoPath -ErrorAction SilentlyContinue)?.Path
+        }
+        if (-not $script:PortalRepoPath) {
+            throw "Portal repo not found. Pass -PortalRepoPath (expected sibling folder '..\intune-wipe-portal')."
+        }
+        $portalScript = Join-Path $script:PortalRepoPath 'infra\deploy.ps1'
+        if (-not (Test-Path $portalScript)) {
+            throw "Portal deploy script not found: $portalScript"
+        }
+        Write-Ok "Portal repo:     $script:PortalRepoPath"
+    }
 }
 
 # -- Build + publish --------------------------------------------------------
@@ -556,6 +606,58 @@ function Invoke-RunbookPublish {
         Write-Warn2 "No Automation Account in $ResourceGroup; skipping runbook publish (enableRunbookVariant=false)."
         return
     }
+
+    # -- Portal deploy (optional) -------------------------------------------------
+    function Get-DefaultLawName {
+        param([string]$SuffixHint)
+        $matches = (& az monitor log-analytics workspace list -g $ResourceGroup `
+            --query "[?starts_with(name, '$NamePrefix-law-') || name == '$NamePrefix-law'].name" `
+            -o tsv --only-show-errors 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $matches) {
+            return ($matches | Select-Object -First 1).Trim()
+        }
+        if ($SuffixHint) { return "$NamePrefix-law-$SuffixHint" }
+        return "$NamePrefix-law-dev"
+    }
+
+    function Invoke-PortalDeploy {
+        if (-not $DeployPortal) { return }
+        Write-Step 'Deploying portal from sibling repo'
+
+        $effectiveSuffix = if ($script:NameSuffixOverridden) {
+            $NameSuffix
+        } else {
+            $pf = Get-Content $ParametersFile -Raw | ConvertFrom-Json
+            $pf.parameters.nameSuffix.value
+        }
+
+        $law = $LogAnalyticsWorkspaceName
+        if (-not $law) { $law = Get-DefaultLawName -SuffixHint $effectiveSuffix }
+
+        $portalScript = Join-Path $script:PortalRepoPath 'infra\deploy.ps1'
+        $portalArgs = @{
+            ResourceGroup             = $ResourceGroup
+            Location                  = $Location
+            NamePrefix                = $NamePrefix
+            AppServicePlanSku         = $PortalSku
+            LogAnalyticsWorkspaceName = $law
+            SkipAppRegistration       = $true
+        }
+        if ($script:NameSuffixOverridden) { $portalArgs.NameSuffix = $NameSuffix }
+        if ($SkipInfra) { $portalArgs.SkipInfra = $true }
+        if ($AssignUserUpn) {
+            $portalArgs.AssignUserUpn = $AssignUserUpn
+            $portalArgs.AssignRole = $AssignRole
+        }
+
+        Write-Host "    portal script: $portalScript"
+        Write-Host "    LAW:           $law"
+        & $portalScript @portalArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "Portal deploy failed with exit code $LASTEXITCODE"
+        }
+        Write-Ok "Portal deployed ($NamePrefix-portal)"
+    }
     Write-Step "Publishing runbook content -> $aaName"
     $runbookDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'runbooks'
     if (-not (Test-Path $runbookDir)) {
@@ -652,6 +754,11 @@ function Show-PostDeployNotes {
             --query defaultHostName -o tsv --only-show-errors).Trim()
         Write-Host "     client\Invoke-DeviceWipe.ps1 -ApiUrl https://$webHost/api/actions ..." -ForegroundColor Gray
     }
+    if ($DeployPortal) {
+        Write-Host ''
+        Write-Host "5) Portal URL:" -ForegroundColor White
+        Write-Host "     https://$NamePrefix-portal.azurewebsites.net/" -ForegroundColor Gray
+    }
     Write-Host ''
     Write-Host '====================================================' -ForegroundColor Magenta
 }
@@ -677,6 +784,7 @@ try {
     Invoke-InfraDeploy
     Invoke-ZipDeploy
     Invoke-RunbookPublish
+    Invoke-PortalDeploy
     if ($SkipGraphConsent) {
         Write-Warn2 'Skipping Graph consent (-SkipGraphConsent).'
     } else {
