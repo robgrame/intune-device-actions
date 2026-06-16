@@ -116,6 +116,11 @@
     Portal deploy option. When -DeployPortal is used, skip portal app
     registration creation/rotation and deploy only infra/app code.
 
+.PARAMETER DeployOnlyPortal
+    Convenience switch: run only the portal phase (equivalent to enabling
+    -DeployPortal and skipping all API phases: publish, infra, zip deploy,
+    runbook publish, Graph consent, smoke test).
+
 .EXAMPLE
     .\tools\Deploy-IntuneDeviceActions.ps1
 
@@ -162,7 +167,8 @@ param(
     [string]$AssignUserUpn,
     [ValidateSet('Actions.Observer','Actions.Auditor')]
     [string]$AssignRole = 'Actions.Observer',
-    [switch]$SkipAppRegistration
+    [switch]$SkipAppRegistration,
+    [switch]$DeployOnlyPortal
 )
 
 $ErrorActionPreference = 'Stop'
@@ -784,17 +790,22 @@ try {
     Confirm-AzLogin
     Register-ResourceProviders
     Resolve-Inputs
-    Invoke-Publish
-    Invoke-InfraDeploy
-    Invoke-ZipDeploy
-    Invoke-RunbookPublish
-    Invoke-PortalDeploy
-    if ($SkipGraphConsent) {
-        Write-Warn2 'Skipping Graph consent (-SkipGraphConsent).'
+    if ($DeployOnlyPortal) {
+        $DeployPortal = $true
+        Write-Warn2 'DeployOnlyPortal set: skipping all API phases (publish/infra/zip/runbooks/graph/smoke).'
     } else {
-        Invoke-GraphConsent
+        Invoke-Publish
+        Invoke-InfraDeploy
+        Invoke-ZipDeploy
+        Invoke-RunbookPublish
+        if ($SkipGraphConsent) {
+            Write-Warn2 'Skipping Graph consent (-SkipGraphConsent).'
+        } else {
+            Invoke-GraphConsent
+        }
+        Invoke-SmokeTest
     }
-    Invoke-SmokeTest
+    Invoke-PortalDeploy
     Show-PostDeployNotes
 
     Write-Host ''
