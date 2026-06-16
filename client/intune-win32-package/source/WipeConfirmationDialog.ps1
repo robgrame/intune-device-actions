@@ -382,6 +382,7 @@ function Start-WipeInlineMonitor {
             '^notSupported$'      { return 'Operazione non supportata su questo dispositivo' }
             '^removedFromIntune$' { return 'Dispositivo rimosso da Intune (wipe completato)' }
             '^awaiting-graph$'    { return 'In attesa del primo controllo Intune' }
+            '^denied:'            { return ('NEGATO: {0}' -f ($s -replace '^denied:', '')) }
             default               { if ($s) { return $s } else { return 'In attesa...' } }
         }
     }
@@ -422,8 +423,20 @@ function Start-WipeInlineMonitor {
             $terminal = ($local -eq 'terminal') -or ($local -eq 'timeout')
             if ($terminal) {
                 $timer.Stop()
+                $isDenied = ($srvState -match '^denied')
                 $isError = ($srvState -match 'failed|notSupported')
-                if ($isError) {
+                if ($isDenied) {
+                    $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(168, 0, 0)
+                    $reason = if ($srvState -match 'denied:(.+)') { $Matches[1] } else { 'motivo sconosciuto' }
+                    $friendlyReason = switch -Regex ($reason) {
+                        'not-in-allowed-group' { 'il dispositivo non appartiene al gruppo autorizzato per il reset' }
+                        'not-in-entra'         { 'il dispositivo non e'' registrato in Entra ID' }
+                        'not-allowed'          { 'azione non consentita dalla configurazione' }
+                        default                { $reason }
+                    }
+                    Set-WipeFormStatus -Form $Form -Text ("RICHIESTA NEGATA: {0}." -f $friendlyReason)
+                    Add-WipeFormLog -Form $Form -Message ("DENIED - {0} (state={1})" -f $friendlyReason, $srvState) -Kind error
+                } elseif ($isError) {
                     $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(168, 0, 0)
                     Set-WipeFormStatus -Form $Form -Text 'Intune ha segnalato un errore durante il reset.'
                 } elseif ($local -eq 'timeout') {
