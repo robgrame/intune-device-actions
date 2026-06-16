@@ -47,6 +47,7 @@ function Show-WipeProgressDialog {
             '^notSupported$'      { return 'Operazione non supportata su questo dispositivo' }
             '^removedFromIntune$' { return 'Dispositivo rimosso da Intune (wipe completato)' }
             '^awaiting-graph$'    { return 'In attesa del primo controllo Intune' }
+            '^denied:'            { return ('NEGATO: {0}' -f ($State -replace '^denied:', '')) }
             default               { if ($State) { return $State } else { return 'In attesa...' } }
         }
     }
@@ -190,7 +191,15 @@ function Show-WipeProgressDialog {
 
             switch ($local) {
                 'terminal' {
-                    $state.ForeColor = if ($srvState -match 'failed|notSupported') { [System.Drawing.Color]::FromArgb(168, 0, 0) } else { [System.Drawing.Color]::FromArgb(0, 120, 50) }
+                    $isDenied = ($srvState -match '^denied')
+                    $isError  = ($srvState -match 'failed|notSupported')
+                    if ($isDenied) {
+                        $state.ForeColor = [System.Drawing.Color]::FromArgb(168, 0, 0)
+                    } elseif ($isError) {
+                        $state.ForeColor = [System.Drawing.Color]::FromArgb(168, 0, 0)
+                    } else {
+                        $state.ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 50)
+                    }
                     $progress.Style = 'Continuous'
                     $progress.Value = 100
                     $timer.Stop()
