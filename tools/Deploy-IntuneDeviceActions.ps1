@@ -639,7 +639,6 @@ function Invoke-PortalDeploy {
     }
     if ($SkipAppRegistration) { $portalArgs.SkipAppRegistration = $true }
     if ($script:NameSuffixOverridden) { $portalArgs.NameSuffix = $NameSuffix }
-    if ($SkipInfra) { $portalArgs.SkipInfra = $true }
     if ($AssignUserUpn) {
         $portalArgs.AssignUserUpn = $AssignUserUpn
         $portalArgs.AssignRole = $AssignRole
