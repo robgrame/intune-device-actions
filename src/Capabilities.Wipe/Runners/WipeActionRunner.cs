@@ -127,6 +127,12 @@ public sealed class WipeActionRunner : IActionRunner
                 // continue — failing open is the safe behaviour here
                 // (operator intent is "this device IS wipeable, just maybe
                 // not yet"; the client gate is the primary mechanism).
+                _audit.TrackEvent(WipeAuditEvents.ScheduleGateLookupFailed, ex, new Dictionary<string, string>
+                {
+                    [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
+                    [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+                    [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
+                }, LogLevel.Warning);
                 _log.LogWarning(ex, "Wipe schedule gate lookup failed; proceeding without gating.");
             }
         }
@@ -165,6 +171,13 @@ public sealed class WipeActionRunner : IActionRunner
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:device-not-in-entra", ct);
             return;
         }
+        _audit.TrackEvent(WipeAuditEvents.ValidationDeviceResolved, new Dictionary<string, string>
+        {
+            [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
+            [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+            [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
+            [WipeAuditEvents.Prop.DeviceObjectId] = deviceObjId,
+        });
 
         // 2) Group membership check
         bool inGroup;
@@ -199,6 +212,14 @@ public sealed class WipeActionRunner : IActionRunner
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:not-in-allowed-group", ct);
             return;
         }
+        _audit.TrackEvent(WipeAuditEvents.ValidationGroupAllowed, new Dictionary<string, string>
+        {
+            [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
+            [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+            [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
+            [WipeAuditEvents.Prop.DeviceObjectId] = deviceObjId,
+            [WipeAuditEvents.Prop.AllowedGroupId] = _graph.AllowedGroupId,
+        });
 
         // 3) Ownership: resolve managedDevice via Graph filter by azureADDeviceId (server-authoritative)
         string? managedId;
@@ -245,6 +266,14 @@ public sealed class WipeActionRunner : IActionRunner
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:ownership-mismatch", ct);
             return;
         }
+        _audit.TrackEvent(WipeAuditEvents.ValidationManagedResolved, new Dictionary<string, string>
+        {
+            [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+            [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
+            [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
+            [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+            [AuditEvents.Prop.ManagedDeviceId] = managedId,
+        });
 
         // 4) Idempotency reservation (with auto-rearm + rate limiting)
         var reserve = await _ledger.ReserveAsync(msg.IntuneDeviceId, msg.CorrelationId, msg.ForceRearm, ct);
@@ -321,6 +350,17 @@ public sealed class WipeActionRunner : IActionRunner
             return;
         }
 
+        if (state == ActionIdempotencyService.State.Reserved && entry.CorrelationId == msg.CorrelationId)
+        {
+            _audit.TrackEvent(WipeAuditEvents.LedgerReserved, new Dictionary<string, string>
+            {
+                [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+                [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
+                [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+                [AuditEvents.Prop.ActionSequence] = entry.ActionSequence.ToString(),
+            });
+        }
+
         // 5) Execute wipe
         bool wipeSucceeded = false;
         try
@@ -339,8 +379,28 @@ public sealed class WipeActionRunner : IActionRunner
             });
             wipeSucceeded = true;
 
-            try { await _statusTracker.InitializeAsync(msg, Type, managedId, ct); }
-            catch (Exception ex) { _log.LogWarning(ex, "Status tracker initialization failed for {Corr}", msg.CorrelationId); }
+            try
+            {
+                await _statusTracker.InitializeAsync(msg, Type, managedId, ct);
+                _audit.TrackEvent(WipeAuditEvents.StatusTrackerInitialized, new Dictionary<string, string>
+                {
+                    [AuditEvents.Prop.CorrelationId]   = msg.CorrelationId,
+                    [AuditEvents.Prop.DeviceName]      = msg.DeviceName,
+                    [AuditEvents.Prop.IntuneDeviceId]  = msg.IntuneDeviceId,
+                    [AuditEvents.Prop.ManagedDeviceId] = managedId,
+                });
+            }
+            catch (Exception ex)
+            {
+                _audit.TrackEvent(WipeAuditEvents.StatusTrackerInitFailed, ex, new Dictionary<string, string>
+                {
+                    [AuditEvents.Prop.CorrelationId]   = msg.CorrelationId,
+                    [AuditEvents.Prop.DeviceName]      = msg.DeviceName,
+                    [AuditEvents.Prop.IntuneDeviceId]  = msg.IntuneDeviceId,
+                    [AuditEvents.Prop.ManagedDeviceId] = managedId,
+                }, LogLevel.Warning);
+                _log.LogWarning(ex, "Status tracker initialization failed for {Corr}", msg.CorrelationId);
+            }
         }
         catch (Exception ex) when (GraphWipeService.Classify(ex) == GraphWipeService.GraphErrorKind.Permanent)
         {

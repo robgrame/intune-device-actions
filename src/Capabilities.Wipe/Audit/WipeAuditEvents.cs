@@ -32,6 +32,13 @@ public static class WipeAuditEvents
     // Wipe-runner Function App (consumer of the per-capability wipe-action queue)
     public const string WipeActionConsumed           = "wipe.action.consumed";
     public const string WipeActionInvalidEnvelope    = "wipe.action.invalid-envelope";
+    public const string ValidationDeviceResolved     = "wipe.validation.device-resolved";
+    public const string ValidationGroupAllowed       = "wipe.validation.group-allowed";
+    public const string ValidationManagedResolved    = "wipe.validation.managed-device-resolved";
+    public const string LedgerReserved               = "wipe.ledger.reserved";
+    public const string StatusTrackerInitialized     = "wipe.status-tracker.initialized";
+    public const string StatusTrackerInitFailed      = "wipe.status-tracker.init-failed";
+    public const string ScheduleGateLookupFailed     = "wipe.schedule.gate-lookup-failed";
     public const string WipeActionCompleted          = "wipe.action.completed";
     public const string WipeActionRunnerFailed       = "wipe.action.runner-failed";
 
@@ -43,5 +50,7 @@ public static class WipeAuditEvents
     {
         public const string KeepEnrollmentData = "keepEnrollmentData";
         public const string KeepUserData       = "keepUserData";
+        public const string AllowedGroupId     = "allowedGroupId";
+        public const string DeviceObjectId     = "deviceObjectId";
     }
 }

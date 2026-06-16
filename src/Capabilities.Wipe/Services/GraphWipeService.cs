@@ -66,6 +66,7 @@ public sealed class GraphWipeService
     public int RebootFallbackMaxAttempts   => _rebootFallbackMaxAttempts;
     public bool KeepEnrollmentData         => _keepEnrollment;
     public bool KeepUserData               => _keepUserData;
+    public string AllowedGroupId           => _allowedGroupId;
 
     /// <summary>
     /// Resolves the directory object id of an Entra device by its deviceId (azureADDeviceId).
