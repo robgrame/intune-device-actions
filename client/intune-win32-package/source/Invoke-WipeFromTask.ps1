@@ -337,7 +337,7 @@ try {
     # Success path: pull correlationId out of the captured stdout.
     $corr = $null
     foreach ($line in $out) {
-        if ($line -match 'correlationId\s*:\s*([0-9a-fA-F-]{36})') {
+        if ($line -match 'correlationId\s*:\s*([0-9a-fA-F]{32}|[0-9a-fA-F-]{36})') {
             $corr = $Matches[1]; break
         }
     }
