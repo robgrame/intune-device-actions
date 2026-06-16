@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "12738364364789213269"
+      "templateHash": "3807073823040997363"
     }
   },
   "parameters": {
@@ -288,6 +288,41 @@
         "description": "Provisions an Azure Automation Account + PowerShell 7.2 runbook (Invoke-DeviceWipe) as an alternative wipe executor."
       }
     },
+    "enableEventGridAuditStream": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Enable Event Grid audit stream (all audit events are fanned out to a custom topic)."
+      }
+    },
+    "eventGridAuditTopicName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional explicit Event Grid custom topic name. Leave empty for generated name."
+      }
+    },
+    "eventGridDashboardWebhookEndpoint": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional dashboard webhook endpoint (for portal realtime ingest). Leave empty to skip subscription creation."
+      }
+    },
+    "eventGridDashboardSubscriptionName": {
+      "type": "string",
+      "defaultValue": "dashboard-webhook",
+      "metadata": {
+        "description": "Event Grid subscription name used for dashboard webhook delivery when endpoint is configured."
+      }
+    },
+    "eventGridDeadLetterContainerName": {
+      "type": "string",
+      "defaultValue": "eventgrid-deadletter",
+      "metadata": {
+        "description": "Blob container used by Event Grid dead-letter delivery for dashboard subscription."
+      }
+    },
     "storageAllowedIpRanges": {
       "type": "array",
       "defaultValue": [],
@@ -333,6 +368,7 @@
     "renameName": "[toLower(format('{0}-rename{1}{2}', parameters('namePrefix'), variables('sep'), variables('suffix')))]",
     "aiName": "[toLower(format('{0}-ai{1}{2}', parameters('namePrefix'), variables('sep'), variables('suffix')))]",
     "lawName": "[toLower(format('{0}-law{1}{2}', parameters('namePrefix'), variables('sep'), variables('suffix')))]",
+    "eventGridTopicName": "[if(empty(parameters('eventGridAuditTopicName')), toLower(format('{0}-eg-audit{1}{2}', parameters('namePrefix'), variables('sep'), variables('suffix'))), toLower(parameters('eventGridAuditTopicName')))]",
     "uamiName": "[toLower(format('{0}-uami{1}{2}', parameters('namePrefix'), variables('sep'), variables('suffix')))]",
     "uamiWebName": "[toLower(format('{0}-uami-web{1}{2}', parameters('namePrefix'), variables('sep'), variables('suffix')))]",
     "uamiWipeName": "[toLower(format('{0}-uami-wipe{1}{2}', parameters('namePrefix'), variables('sep'), variables('suffix')))]",
@@ -358,6 +394,7 @@
     "tableDataContributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')]",
     "sbDataSender": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39')]",
     "sbDataReceiver": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0')]",
+    "eventGridDataSender": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'd5a91429-5739-47e2-a06b-3470a27159e7')]",
     "automationAccountName": "[toLower(format('{0}-aa{1}{2}', parameters('namePrefix'), variables('sep'), variables('suffix')))]",
     "runbookName": "Invoke-DeviceWipe",
     "appConfigDataReader": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '516239f1-63e1-4d78-a4de-a74fb236a071')]",
@@ -844,6 +881,14 @@
               "value": "web"
             },
             {
+              "name": "EventGrid__Enabled",
+              "value": "[string(parameters('enableEventGridAuditStream'))]"
+            },
+            {
+              "name": "EventGrid__AuditTopicEndpoint",
+              "value": "[if(parameters('enableEventGridAuditStream'), reference(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), '2022-06-15').endpoint, '')]"
+            },
+            {
               "name": "ServiceBus__fullyQualifiedNamespace",
               "value": "[format('{0}.servicebus.windows.net', variables('sbNamespaceName'))]"
             },
@@ -969,8 +1014,10 @@
       "dependsOn": [
         "[resourceId('Microsoft.Insights/components', variables('aiName'))]",
         "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
         "[resourceId('Microsoft.Web/serverfarms', variables('planWebName'))]",
         "[extensionResourceId(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName')), 'appcfg-reader'))]",
+        "[extensionResourceId(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName')), 'eventgrid-send'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stWebName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stWebName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName')), 'blob'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', parameters('ledgerContainerName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', parameters('ledgerContainerName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName')), 'blob-ledger'))]",
         "[extensionResourceId(resourceId('Microsoft.ServiceBus/namespaces/queues', variables('sbNamespaceName'), parameters('actionRequestsQueueName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ServiceBus/namespaces/queues', variables('sbNamespaceName'), parameters('actionRequestsQueueName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName')), 'sb-send'))]",
@@ -1062,6 +1109,14 @@
             {
               "name": "App__Role",
               "value": "proc"
+            },
+            {
+              "name": "EventGrid__Enabled",
+              "value": "[string(parameters('enableEventGridAuditStream'))]"
+            },
+            {
+              "name": "EventGrid__AuditTopicEndpoint",
+              "value": "[if(parameters('enableEventGridAuditStream'), reference(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), '2022-06-15').endpoint, '')]"
             },
             {
               "name": "ServiceBus__fullyQualifiedNamespace",
@@ -1169,8 +1224,10 @@
       "dependsOn": [
         "[resourceId('Microsoft.Insights/components', variables('aiName'))]",
         "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
         "[resourceId('Microsoft.Web/serverfarms', variables('planProcName'))]",
         "[extensionResourceId(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), 'appcfg-reader'))]",
+        "[extensionResourceId(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), 'eventgrid-send'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stProcName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stProcName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), 'blob'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', variables('procDeployContainer')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', variables('procDeployContainer')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), 'flex-deploy'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stProcName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stProcName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), 'queue'))]",
@@ -1264,6 +1321,14 @@
               "value": "wipe"
             },
             {
+              "name": "EventGrid__Enabled",
+              "value": "[string(parameters('enableEventGridAuditStream'))]"
+            },
+            {
+              "name": "EventGrid__AuditTopicEndpoint",
+              "value": "[if(parameters('enableEventGridAuditStream'), reference(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), '2022-06-15').endpoint, '')]"
+            },
+            {
               "name": "ServiceBus__fullyQualifiedNamespace",
               "value": "[format('{0}.servicebus.windows.net', variables('sbNamespaceName'))]"
             },
@@ -1345,8 +1410,10 @@
       "dependsOn": [
         "[resourceId('Microsoft.Insights/components', variables('aiName'))]",
         "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
         "[resourceId('Microsoft.Web/serverfarms', variables('planWipeName'))]",
         "[extensionResourceId(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName')), 'appcfg-reader'))]",
+        "[extensionResourceId(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName')), 'eventgrid-send'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stWipeName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stWipeName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName')), 'blob'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stWipeName'), 'default', variables('wipeDeployContainer')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stWipeName'), 'default', variables('wipeDeployContainer')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName')), 'flex-deploy'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', parameters('ledgerContainerName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', parameters('ledgerContainerName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName')), 'blob-ledger'))]",
@@ -2019,6 +2086,78 @@
       }
     },
     {
+      "condition": "[parameters('enableEventGridAuditStream')]",
+      "type": "Microsoft.EventGrid/topics",
+      "apiVersion": "2022-06-15",
+      "name": "[variables('eventGridTopicName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "publicNetworkAccess": "Enabled",
+        "inputSchema": "EventGridSchema",
+        "disableLocalAuth": true
+      }
+    },
+    {
+      "condition": "[and(parameters('enableEventGridAuditStream'), not(empty(parameters('eventGridDashboardWebhookEndpoint'))))]",
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/default/{1}', variables('stProcName'), parameters('eventGridDeadLetterContainerName'))]",
+      "properties": {
+        "publicAccess": "None"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]"
+      ]
+    },
+    {
+      "condition": "[and(parameters('enableEventGridAuditStream'), not(empty(parameters('eventGridDashboardWebhookEndpoint'))))]",
+      "type": "Microsoft.EventGrid/topics/eventSubscriptions",
+      "apiVersion": "2022-06-15",
+      "name": "[format('{0}/{1}', variables('eventGridTopicName'), parameters('eventGridDashboardSubscriptionName'))]",
+      "properties": {
+        "eventDeliverySchema": "EventGridSchema",
+        "destination": {
+          "endpointType": "WebHook",
+          "properties": {
+            "endpointUrl": "[parameters('eventGridDashboardWebhookEndpoint')]",
+            "maxEventsPerBatch": 1,
+            "preferredBatchSizeInKilobytes": 64
+          }
+        },
+        "deadLetterDestination": {
+          "endpointType": "StorageBlob",
+          "properties": {
+            "resourceId": "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]",
+            "blobContainerName": "[parameters('eventGridDeadLetterContainerName')]"
+          }
+        },
+        "retryPolicy": {
+          "maxDeliveryAttempts": 30,
+          "eventTimeToLiveInMinutes": 1440
+        },
+        "filter": {
+          "includedEventTypes": [
+            "action.request.accepted",
+            "action.dispatch.enqueued",
+            "action.dispatch.received",
+            "action.forwarded",
+            "action.state-observed",
+            "action.state-changed",
+            "action.completed",
+            "action.failed",
+            "action.poll-timeout"
+          ],
+          "isSubjectCaseSensitive": false
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', split(format('{0}/default/{1}', variables('stProcName'), parameters('eventGridDeadLetterContainerName')), '/')[0], split(format('{0}/default/{1}', variables('stProcName'), parameters('eventGridDeadLetterContainerName')), '/')[1], split(format('{0}/default/{1}', variables('stProcName'), parameters('eventGridDeadLetterContainerName')), '/')[2])]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]"
+      ]
+    },
+    {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
       "scope": "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
@@ -2061,6 +2200,102 @@
       "dependsOn": [
         "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
         "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableEventGridAuditStream')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+      "name": "[guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName')), 'eventgrid-send')]",
+      "properties": {
+        "roleDefinitionId": "[variables('eventGridDataSender')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableEventGridAuditStream')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+      "name": "[guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), 'eventgrid-send')]",
+      "properties": {
+        "roleDefinitionId": "[variables('eventGridDataSender')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableEventGridAuditStream')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+      "name": "[guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName')), 'eventgrid-send')]",
+      "properties": {
+        "roleDefinitionId": "[variables('eventGridDataSender')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableEventGridAuditStream')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+      "name": "[guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName')), 'eventgrid-send')]",
+      "properties": {
+        "roleDefinitionId": "[variables('eventGridDataSender')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableEventGridAuditStream')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+      "name": "[guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName')), 'eventgrid-send')]",
+      "properties": {
+        "roleDefinitionId": "[variables('eventGridDataSender')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableEventGridAuditStream')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+      "name": "[guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName')), 'eventgrid-send')]",
+      "properties": {
+        "roleDefinitionId": "[variables('eventGridDataSender')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName'))]"
       ]
     },
     {
@@ -3223,6 +3458,14 @@
               "value": "autopilot"
             },
             {
+              "name": "EventGrid__Enabled",
+              "value": "[string(parameters('enableEventGridAuditStream'))]"
+            },
+            {
+              "name": "EventGrid__AuditTopicEndpoint",
+              "value": "[if(parameters('enableEventGridAuditStream'), reference(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), '2022-06-15').endpoint, '')]"
+            },
+            {
               "name": "ServiceBus__fullyQualifiedNamespace",
               "value": "[format('{0}.servicebus.windows.net', variables('sbNamespaceName'))]"
             },
@@ -3292,6 +3535,7 @@
       "dependsOn": [
         "[resourceId('Microsoft.Insights/components', variables('aiName'))]",
         "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
         "[resourceId('Microsoft.Web/serverfarms', variables('planAutopilotName'))]",
         "[extensionResourceId(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName')), 'appcfg-reader'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stAplName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stAplName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName')), 'blob'))]",
@@ -3300,6 +3544,7 @@
         "[extensionResourceId(resourceId('Microsoft.ServiceBus/namespaces/queues', variables('sbNamespaceName'), parameters('autopilotActionQueueName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ServiceBus/namespaces/queues', variables('sbNamespaceName'), parameters('autopilotActionQueueName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName')), 'sb-recv'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stAplName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stAplName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName')), 'table'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stProcName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stProcName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName')), 'table-shared'))]",
+        "[extensionResourceId(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName')), 'eventgrid-send'))]",
         "[resourceId('Microsoft.ServiceBus/namespaces', variables('sbNamespaceName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts', variables('stAplName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]",
@@ -3382,6 +3627,14 @@
               "value": "bitlocker"
             },
             {
+              "name": "EventGrid__Enabled",
+              "value": "[string(parameters('enableEventGridAuditStream'))]"
+            },
+            {
+              "name": "EventGrid__AuditTopicEndpoint",
+              "value": "[if(parameters('enableEventGridAuditStream'), reference(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), '2022-06-15').endpoint, '')]"
+            },
+            {
               "name": "ServiceBus__fullyQualifiedNamespace",
               "value": "[format('{0}.servicebus.windows.net', variables('sbNamespaceName'))]"
             },
@@ -3455,6 +3708,7 @@
       "dependsOn": [
         "[resourceId('Microsoft.Insights/components', variables('aiName'))]",
         "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
         "[resourceId('Microsoft.Web/serverfarms', variables('planBitLockerName'))]",
         "[extensionResourceId(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName')), 'appcfg-reader'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stBlkName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stBlkName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName')), 'blob'))]",
@@ -3463,6 +3717,7 @@
         "[extensionResourceId(resourceId('Microsoft.ServiceBus/namespaces/queues', variables('sbNamespaceName'), parameters('bitlockerActionQueueName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ServiceBus/namespaces/queues', variables('sbNamespaceName'), parameters('bitlockerActionQueueName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName')), 'sb-recv'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stBlkName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stBlkName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName')), 'table'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stProcName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stProcName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName')), 'table-shared'))]",
+        "[extensionResourceId(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName')), 'eventgrid-send'))]",
         "[resourceId('Microsoft.ServiceBus/namespaces', variables('sbNamespaceName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts', variables('stBlkName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]",
@@ -3546,6 +3801,14 @@
               "value": "rename"
             },
             {
+              "name": "EventGrid__Enabled",
+              "value": "[string(parameters('enableEventGridAuditStream'))]"
+            },
+            {
+              "name": "EventGrid__AuditTopicEndpoint",
+              "value": "[if(parameters('enableEventGridAuditStream'), reference(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), '2022-06-15').endpoint, '')]"
+            },
+            {
               "name": "ServiceBus__fullyQualifiedNamespace",
               "value": "[format('{0}.servicebus.windows.net', variables('sbNamespaceName'))]"
             },
@@ -3627,9 +3890,11 @@
       "dependsOn": [
         "[resourceId('Microsoft.Insights/components', variables('aiName'))]",
         "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]",
         "[resourceId('Microsoft.Network/privateEndpoints/privateDnsZoneGroups', format('{0}-pe-blob', variables('stRnName')), 'default')]",
         "[resourceId('Microsoft.Web/serverfarms', variables('planRenameName'))]",
         "[extensionResourceId(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName')), 'appcfg-reader'))]",
+        "[extensionResourceId(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName')), 'eventgrid-send'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', variables('stRnName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', variables('stRnName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName')), 'blob'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stRnName'), 'default', variables('renameDeployContainer')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stRnName'), 'default', variables('renameDeployContainer')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName')), 'flex-deploy'))]",
         "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', parameters('ledgerContainerName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('stProcName'), 'default', parameters('ledgerContainerName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName')), 'blob-ledger'))]",
@@ -3804,6 +4069,14 @@
     "renameActionQueueName": {
       "type": "string",
       "value": "[parameters('renameActionQueueName')]"
+    },
+    "eventGridAuditTopicName": {
+      "type": "string",
+      "value": "[if(parameters('enableEventGridAuditStream'), variables('eventGridTopicName'), '')]"
+    },
+    "eventGridAuditTopicEndpoint": {
+      "type": "string",
+      "value": "[if(parameters('enableEventGridAuditStream'), reference(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), '2022-06-15').endpoint, '')]"
     },
     "ledgerContainerName": {
       "type": "string",

@@ -171,6 +171,22 @@ param idempotencyAdminApiEnabled bool = true
 @description('Provisions an Azure Automation Account + PowerShell 7.2 runbook (Invoke-DeviceWipe) as an alternative wipe executor.')
 param enableRunbookVariant bool = true
 
+@description('Enable Event Grid audit stream (all audit events are fanned out to a custom topic).')
+param enableEventGridAuditStream bool = true
+
+@description('Optional explicit Event Grid custom topic name. Leave empty for generated name.')
+param eventGridAuditTopicName string = ''
+
+@description('Optional dashboard webhook endpoint (for portal realtime ingest). Leave empty to skip subscription creation.')
+@secure()
+param eventGridDashboardWebhookEndpoint string = ''
+
+@description('Event Grid subscription name used for dashboard webhook delivery when endpoint is configured.')
+param eventGridDashboardSubscriptionName string = 'dashboard-webhook'
+
+@description('Blob container used by Event Grid dead-letter delivery for dashboard subscription.')
+param eventGridDeadLetterContainerName string = 'eventgrid-deadletter'
+
 // ── Storage network access (operator IPs whitelisted on the public endpoint)
 // Storage stays publicNetworkAccess=Enabled with defaultAction=Deny: only
 // Azure trusted services (bypass=AzureServices) and listed operator IPs can
@@ -210,6 +226,9 @@ var bitlockerName = toLower('${namePrefix}-bitlocker${sep}${suffix}')
 var renameName = toLower('${namePrefix}-rename${sep}${suffix}')
 var aiName   = toLower('${namePrefix}-ai${sep}${suffix}')
 var lawName  = toLower('${namePrefix}-law${sep}${suffix}')
+var eventGridTopicName = empty(eventGridAuditTopicName)
+  ? toLower('${namePrefix}-eg-audit${sep}${suffix}')
+  : toLower(eventGridAuditTopicName)
 
 var uamiName     = toLower('${namePrefix}-uami${sep}${suffix}')      // dispatcher (no Graph)
 var uamiWebName  = toLower('${namePrefix}-uami-web${sep}${suffix}')   // public web (Graph: Device.Read.All only, for DeviceDirectoryResolver SAN-DNS -> Entra deviceId binding)
@@ -558,6 +577,8 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AZURE_CLIENT_ID', value: uamiWeb.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'web' }
+        { name: 'EventGrid__Enabled', value: string(enableEventGridAuditStream) }
+        { name: 'EventGrid__AuditTopicEndpoint', value: enableEventGridAuditStream ? eventGridAuditTopic!.properties.endpoint : '' }
         // Service Bus (MI auth, namespace-scoped FQDN, Sender on action-requests only).
         { name: 'ServiceBus__fullyQualifiedNamespace', value: '${sbNamespace.name}.servicebus.windows.net' }
         { name: 'ServiceBus__credential',              value: 'managedidentity' }
@@ -606,6 +627,7 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
     raWebLedger
     raWebSbSendRequests
     raAppConfigWeb
+    raEventGridWeb
   ]
 }
 
@@ -672,6 +694,8 @@ resource funcProc 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'proc' }
+        { name: 'EventGrid__Enabled', value: string(enableEventGridAuditStream) }
+        { name: 'EventGrid__AuditTopicEndpoint', value: enableEventGridAuditStream ? eventGridAuditTopic!.properties.endpoint : '' }
         // Service Bus (MI auth) — Receiver action-requests + Sender/Receiver action-dispatch + Sender wipe-action.
         { name: 'ServiceBus__fullyQualifiedNamespace', value: '${sbNamespace.name}.servicebus.windows.net' }
         { name: 'ServiceBus__credential',              value: 'managedidentity' }
@@ -719,6 +743,7 @@ resource funcProc 'Microsoft.Web/sites@2023-12-01' = {
     raProcSbSendBitLocker
     raProcDeploy
     raAppConfigProc
+    raEventGridProc
   ]
 }
 
@@ -783,6 +808,8 @@ resource funcWipe 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AZURE_CLIENT_ID', value: uamiWipe.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'wipe' }
+        { name: 'EventGrid__Enabled', value: string(enableEventGridAuditStream) }
+        { name: 'EventGrid__AuditTopicEndpoint', value: enableEventGridAuditStream ? eventGridAuditTopic!.properties.endpoint : '' }
         // Service Bus (MI auth) — Receiver on wipe-action only.
         { name: 'ServiceBus__fullyQualifiedNamespace', value: '${sbNamespace.name}.servicebus.windows.net' }
         { name: 'ServiceBus__credential',              value: 'managedidentity' }
@@ -821,6 +848,7 @@ resource funcWipe 'Microsoft.Web/sites@2023-12-01' = {
     raWipeSbRecv
     raWipeDeploy
     raAppConfigWipe
+    raEventGridWipe
   ]
 }
 
@@ -833,6 +861,7 @@ var queueDataContributor   = subscriptionResourceId('Microsoft.Authorization/rol
 var tableDataContributor   = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
 var sbDataSender           = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39')
 var sbDataReceiver         = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0')
+var eventGridDataSender    = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'd5a91429-5739-47e2-a06b-3470a27159e7')
 
 // ── Proc UAMI → full data-plane on its own storage (Functions host) ─────────
 resource raProcBlob 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -1142,6 +1171,68 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2024-05-01' =
   }
 }
 
+resource eventGridAuditTopic 'Microsoft.EventGrid/topics@2022-06-15' = if (enableEventGridAuditStream) {
+  name: eventGridTopicName
+  location: location
+  tags: tags
+  properties: {
+    publicNetworkAccess: 'Enabled'
+    inputSchema: 'EventGridSchema'
+    disableLocalAuth: true
+  }
+}
+
+resource eventGridDeadLetterContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = if (enableEventGridAuditStream && !empty(eventGridDashboardWebhookEndpoint)) {
+  name: '${storageProc.name}/default/${eventGridDeadLetterContainerName}'
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource eventGridDashboardWebhookSub 'Microsoft.EventGrid/topics/eventSubscriptions@2022-06-15' = if (enableEventGridAuditStream && !empty(eventGridDashboardWebhookEndpoint)) {
+  parent: eventGridAuditTopic
+  name: eventGridDashboardSubscriptionName
+  properties: {
+    eventDeliverySchema: 'EventGridSchema'
+    destination: {
+      endpointType: 'WebHook'
+      properties: {
+        endpointUrl: eventGridDashboardWebhookEndpoint
+        maxEventsPerBatch: 1
+        preferredBatchSizeInKilobytes: 64
+      }
+    }
+    deadLetterDestination: {
+      endpointType: 'StorageBlob'
+      properties: {
+        resourceId: storageProc.id
+        blobContainerName: eventGridDeadLetterContainerName
+      }
+    }
+    retryPolicy: {
+      maxDeliveryAttempts: 30
+      eventTimeToLiveInMinutes: 1440
+    }
+    filter: {
+      includedEventTypes: [
+        'action.request.accepted'
+        'action.dispatch.enqueued'
+        'action.dispatch.received'
+        'action.forwarded'
+        'action.state-observed'
+        'action.state-changed'
+        'action.completed'
+        'action.failed'
+        'action.poll-timeout'
+      ]
+      isSubjectCaseSensitive: false
+    }
+  }
+  dependsOn: [
+    eventGridDeadLetterContainer
+  ]
+}
+
 var appConfigDataReader = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '516239f1-63e1-4d78-a4de-a74fb236a071')
 
 resource raAppConfigWeb 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -1158,6 +1249,37 @@ resource raAppConfigWipe 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   name: guid(appConfig.id, uamiWipe.id, 'appcfg-reader')
   scope: appConfig
   properties: { roleDefinitionId: appConfigDataReader, principalId: uamiWipe.properties.principalId, principalType: 'ServicePrincipal' }
+}
+
+resource raEventGridWeb 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableEventGridAuditStream) {
+  name: guid(eventGridAuditTopic.id, uamiWeb.id, 'eventgrid-send')
+  scope: eventGridAuditTopic
+  properties: { roleDefinitionId: eventGridDataSender, principalId: uamiWeb.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raEventGridProc 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableEventGridAuditStream) {
+  name: guid(eventGridAuditTopic.id, uami.id, 'eventgrid-send')
+  scope: eventGridAuditTopic
+  properties: { roleDefinitionId: eventGridDataSender, principalId: uami.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raEventGridWipe 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableEventGridAuditStream) {
+  name: guid(eventGridAuditTopic.id, uamiWipe.id, 'eventgrid-send')
+  scope: eventGridAuditTopic
+  properties: { roleDefinitionId: eventGridDataSender, principalId: uamiWipe.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raEventGridAutopilot 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableEventGridAuditStream) {
+  name: guid(eventGridAuditTopic.id, uamiAutopilot.id, 'eventgrid-send')
+  scope: eventGridAuditTopic
+  properties: { roleDefinitionId: eventGridDataSender, principalId: uamiAutopilot.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raEventGridBitLocker 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableEventGridAuditStream) {
+  name: guid(eventGridAuditTopic.id, uamiBitLocker.id, 'eventgrid-send')
+  scope: eventGridAuditTopic
+  properties: { roleDefinitionId: eventGridDataSender, principalId: uamiBitLocker.properties.principalId, principalType: 'ServicePrincipal' }
+}
+resource raEventGridRename 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableEventGridAuditStream) {
+  name: guid(eventGridAuditTopic.id, uamiRename.id, 'eventgrid-send')
+  scope: eventGridAuditTopic
+  properties: { roleDefinitionId: eventGridDataSender, principalId: uamiRename.properties.principalId, principalType: 'ServicePrincipal' }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1482,6 +1604,8 @@ resource funcAutopilot 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AZURE_CLIENT_ID', value: uamiAutopilot.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'autopilot' }
+        { name: 'EventGrid__Enabled', value: string(enableEventGridAuditStream) }
+        { name: 'EventGrid__AuditTopicEndpoint', value: enableEventGridAuditStream ? eventGridAuditTopic!.properties.endpoint : '' }
         { name: 'ServiceBus__fullyQualifiedNamespace', value: '${sbNamespace.name}.servicebus.windows.net' }
         { name: 'ServiceBus__credential',              value: 'managedidentity' }
         { name: 'ServiceBus__clientId',                value: uamiAutopilot.properties.clientId }
@@ -1509,6 +1633,7 @@ resource funcAutopilot 'Microsoft.Web/sites@2023-12-01' = {
     raAutopilotSbRecv
     raAutopilotDeploy
     raAppConfigAutopilot
+    raEventGridAutopilot
   ]
 }
 
@@ -1561,6 +1686,8 @@ resource funcBitLocker 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AZURE_CLIENT_ID', value: uamiBitLocker.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'bitlocker' }
+        { name: 'EventGrid__Enabled', value: string(enableEventGridAuditStream) }
+        { name: 'EventGrid__AuditTopicEndpoint', value: enableEventGridAuditStream ? eventGridAuditTopic!.properties.endpoint : '' }
         { name: 'ServiceBus__fullyQualifiedNamespace', value: '${sbNamespace.name}.servicebus.windows.net' }
         { name: 'ServiceBus__credential',              value: 'managedidentity' }
         { name: 'ServiceBus__clientId',                value: uamiBitLocker.properties.clientId }
@@ -1589,6 +1716,7 @@ resource funcBitLocker 'Microsoft.Web/sites@2023-12-01' = {
     raBitLockerSbRecv
     raBitLockerDeploy
     raAppConfigBitLocker
+    raEventGridBitLocker
   ]
 }
 
@@ -1641,6 +1769,8 @@ resource funcRename 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AZURE_CLIENT_ID', value: uamiRename.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'rename' }
+        { name: 'EventGrid__Enabled', value: string(enableEventGridAuditStream) }
+        { name: 'EventGrid__AuditTopicEndpoint', value: enableEventGridAuditStream ? eventGridAuditTopic!.properties.endpoint : '' }
         { name: 'ServiceBus__fullyQualifiedNamespace', value: '${sbNamespace.name}.servicebus.windows.net' }
         { name: 'ServiceBus__credential',              value: 'managedidentity' }
         { name: 'ServiceBus__clientId',                value: uamiRename.properties.clientId }
@@ -1671,6 +1801,7 @@ resource funcRename 'Microsoft.Web/sites@2023-12-01' = {
     raRenameSbRecv
     raRenameDeploy
     raAppConfigRename
+    raEventGridRename
   ]
 }
 
@@ -1721,6 +1852,9 @@ output wipeActionQueueName     string = wipeActionQueueName
 output autopilotActionQueueName string = autopilotActionQueueName
 output bitlockerActionQueueName string = bitlockerActionQueueName
 output renameActionQueueName    string = renameActionQueueName
+
+output eventGridAuditTopicName     string = enableEventGridAuditStream ? eventGridAuditTopic!.name : ''
+output eventGridAuditTopicEndpoint string = enableEventGridAuditStream ? eventGridAuditTopic!.properties.endpoint : ''
 
 output ledgerContainerName string = ledgerContainerName
 output procDeployContainer string = procDeployContainer

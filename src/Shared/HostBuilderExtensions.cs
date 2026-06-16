@@ -94,6 +94,7 @@ public static class HostBuilderExtensions
         services.AddMemoryCache(o => o.SizeLimit = 100_000);
 
         services.AddSingleton<AuditService>();
+        services.AddSingleton<IAuditEventPublisher, EventGridAuditEventPublisher>();
 
         services.AddSingleton<TokenCredential>(sp =>
         {

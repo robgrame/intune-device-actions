@@ -33,12 +33,18 @@ public sealed class AuditService
     private readonly TelemetryClient _telemetry;
     private readonly ILogger<AuditService> _log;
     private readonly AuditTableSink _tableSink;
+    private readonly IAuditEventPublisher? _eventPublisher;
 
-    public AuditService(TelemetryClient telemetry, AuditTableSink tableSink, ILogger<AuditService> log)
+    public AuditService(
+        TelemetryClient telemetry,
+        AuditTableSink tableSink,
+        ILogger<AuditService> log,
+        IAuditEventPublisher? eventPublisher = null)
     {
         _telemetry = telemetry;
         _tableSink = tableSink;
         _log = log;
+        _eventPublisher = eventPublisher;
     }
 
     public void TrackEvent(
@@ -53,6 +59,7 @@ public sealed class AuditService
 
         _telemetry.TrackEvent(eventName, props);
         _tableSink.TrackEvent(eventName, props, logLevel);
+        _eventPublisher?.Publish(eventName, props, logLevel);
         WriteLog(logLevel, eventName, props, exception: null);
     }
 
@@ -79,6 +86,7 @@ public sealed class AuditService
         _telemetry.TrackEvent(eventName, props);
         _telemetry.TrackException(exception, props);
         _tableSink.TrackEvent(eventName, props, logLevel);
+        _eventPublisher?.Publish(eventName, props, logLevel);
         WriteLog(logLevel, eventName, props, exception);
     }
 
@@ -111,4 +119,3 @@ public sealed class AuditService
         return value.Length <= max ? value : value.Substring(0, max) + "…";
     }
 }
-

@@ -39,6 +39,8 @@ Dashboard:LogsWorkspaceId            = <LAW customerId GUID>   # richiesto per /
 Dashboard:AllowedCertThumbprints     = <thumb1>,<thumb2>       # opzionale; fallback ad Idempotency:AdminCertThumbprints
 Idempotency:AdminApiEnabled          = true                    # richiesto per /actions/reset-ledger
 Idempotency:AdminCertThumbprints     = <thumb-operatore>       # serve anche al portale per il reset
+EventGrid:Enabled                    = true                    # abilita fanout near-realtime eventi audit
+EventGrid:AuditTopicEndpoint         = https://<topic>.<region>-1.eventgrid.azure.net/api/events
 ```
 
 Per recuperare il LAW customer ID:
@@ -73,3 +75,17 @@ Standalone — `infra/dashboard-grafana.bicep` crea
 `Monitoring Reader` sul Service Bus + AI e `Storage Blob Data Reader` sul
 ledger SA. Import del JSON in `infra/grafana/` come standard pannelli SB
 backlog / ledger growth / poller success rate.
+
+## Path Event Grid (near-realtime)
+
+`infra/main.bicep` e `infra/main-public.bicep` ora provisionano (flag
+`enableEventGridAuditStream=true`):
+
+- custom topic Event Grid per stream audit (`action.*`, `wipe.*`, `autopilot.*`, …);
+- role assignment `EventGrid Data Sender` a tutte le UAMI dei Function App;
+- wiring runtime via app settings `EventGrid__Enabled` + `EventGrid__AuditTopicEndpoint`;
+- subscription webhook opzionale verso il portale (`eventGridDashboardWebhookEndpoint`)
+  con retry + dead-letter su blob container `eventgrid-deadletter`.
+
+In pratica: ogni `AuditService.TrackEvent(...)` continua a scrivere su App
+Insights + tabella audit, e in più pubblica lo stesso evento sul topic Event Grid.
