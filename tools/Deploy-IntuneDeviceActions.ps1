@@ -133,6 +133,9 @@
     -DeployPortal and skipping all API phases: publish, infra, zip deploy,
     runbook publish, Graph consent, smoke test).
 
+.PARAMETER SkipRegisterResourceProvider
+    Skip the Azure Resource Provider registration check/registration step.
+
 .EXAMPLE
     .\tools\Deploy-IntuneDeviceActions.ps1
 
@@ -183,7 +186,8 @@ param(
     [string]$EntraTenantId,
     [string]$EntraClientId,
     [SecureString]$EntraClientSecret,
-    [switch]$DeployOnlyPortal
+    [switch]$DeployOnlyPortal,
+    [switch]$SkipRegisterResourceProvider
 )
 
 $ErrorActionPreference = 'Stop'
@@ -837,7 +841,11 @@ try {
         Confirm-Bicep
     }
     Confirm-AzLogin
-    Register-ResourceProviders
+    if ($SkipRegisterResourceProvider) {
+        Write-Warn2 'Skipping resource provider registration (-SkipRegisterResourceProvider).'
+    } else {
+        Register-ResourceProviders
+    }
     if ($DeployOnlyPortal) {
         $DeployPortal = $true
     }
