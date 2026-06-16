@@ -313,7 +313,9 @@ function Set-WipeFormCorrelationId {
         [Parameter(Mandatory)] [string] $CorrelationId
     )
     if ([string]::IsNullOrWhiteSpace($CorrelationId)) { return }
-    $Form.ProgressCorrLabel.Text = ("CorrelationId : {0}" -f $CorrelationId)
+    $boldFont = New-Object System.Drawing.Font($Form.ProgressCorrLabel.Font, [System.Drawing.FontStyle]::Bold)
+    $Form.ProgressCorrLabel.Font = $boldFont
+    $Form.ProgressCorrLabel.Text = ("CORRELATION ID: {0}" -f $CorrelationId)
     $Form | Add-Member -NotePropertyName 'CorrelationId' -NotePropertyValue $CorrelationId -Force
     [System.Windows.Forms.Application]::DoEvents()
 }
