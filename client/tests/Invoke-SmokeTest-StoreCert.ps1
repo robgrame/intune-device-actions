@@ -99,7 +99,9 @@ function Invoke-Status {
         return [pscustomobject]@{ Status = [int]$resp.StatusCode; Body = $resp.Content }
     }
     catch {
-        $sc  = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { -1 }
+        $resp = $null
+        if ($_.Exception -and ($_.Exception.PSObject.Properties.Name -contains 'Response')) { $resp = $_.Exception.Response }
+        $sc  = if ($resp) { [int]$resp.StatusCode } else { -1 }
         $msg = if ($_.ErrorDetails)       { $_.ErrorDetails.Message }               else { $_.Exception.Message }
         $color = if ($sc -in 404, 200) { 'Yellow' } else { 'Red' }
         Write-Host "    HTTP $sc :: $msg" -ForegroundColor $color
@@ -143,7 +145,9 @@ try {
     $postResp = Invoke-WebRequest -Uri $uri -Method Post -Headers $hdrs -Certificate $leaf -Body $body -UseBasicParsing -SslProtocol Tls12
 }
 catch {
-    $sc  = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { -1 }
+    $resp = $null
+    if ($_.Exception -and ($_.Exception.PSObject.Properties.Name -contains 'Response')) { $resp = $_.Exception.Response }
+    $sc  = if ($resp) { [int]$resp.StatusCode } else { -1 }
     $msg = if ($_.ErrorDetails)       { $_.ErrorDetails.Message }               else { $_.Exception.Message }
     Write-Host "    HTTP $sc :: $msg" -ForegroundColor Red
     throw "STEP 2 failed: HTTP $sc"
