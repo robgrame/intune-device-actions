@@ -14,8 +14,8 @@
       7. Runs a smoke test and prints remaining manual steps
          (Graph admin consent, optional AppConfig seed).
       8. Optionally deploys the portal app from the sibling repo
-         `..\intune-wipe-portal` (infra + publish/deploy), always skipping
-         app-registration creation/rotation.
+         `..\intune-wipe-portal` (infra + publish/deploy), including app
+         registration unless -SkipAppRegistration is specified.
 
     Safe to re-run. Each phase can be skipped with -Skip* switches.
 
@@ -112,6 +112,10 @@
 .PARAMETER AssignRole
     Optional portal role assigned when -AssignUserUpn is provided.
 
+.PARAMETER SkipAppRegistration
+    Portal deploy option. When -DeployPortal is used, skip portal app
+    registration creation/rotation and deploy only infra/app code.
+
 .EXAMPLE
     .\tools\Deploy-IntuneDeviceActions.ps1
 
@@ -157,7 +161,8 @@ param(
     [string]$PortalSku = 'B1',
     [string]$AssignUserUpn,
     [ValidateSet('Actions.Observer','Actions.Auditor')]
-    [string]$AssignRole = 'Actions.Observer'
+    [string]$AssignRole = 'Actions.Observer',
+    [switch]$SkipAppRegistration
 )
 
 $ErrorActionPreference = 'Stop'
@@ -641,8 +646,8 @@ function Invoke-RunbookPublish {
             NamePrefix                = $NamePrefix
             AppServicePlanSku         = $PortalSku
             LogAnalyticsWorkspaceName = $law
-            SkipAppRegistration       = $true
         }
+        if ($SkipAppRegistration) { $portalArgs.SkipAppRegistration = $true }
         if ($script:NameSuffixOverridden) { $portalArgs.NameSuffix = $NameSuffix }
         if ($SkipInfra) { $portalArgs.SkipInfra = $true }
         if ($AssignUserUpn) {
