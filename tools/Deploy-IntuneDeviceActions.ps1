@@ -602,6 +602,58 @@ function Invoke-SmokeTest {
     }
 }
 
+# -- Portal deploy (optional) -------------------------------------------------
+function Get-DefaultLawName {
+    param([string]$SuffixHint)
+    $matches = (& az monitor log-analytics workspace list -g $ResourceGroup `
+        --query "[?starts_with(name, '$NamePrefix-law-') || name == '$NamePrefix-law'].name" `
+        -o tsv --only-show-errors 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $matches) {
+        return ($matches | Select-Object -First 1).Trim()
+    }
+    if ($SuffixHint) { return "$NamePrefix-law-$SuffixHint" }
+    return "$NamePrefix-law-dev"
+}
+
+function Invoke-PortalDeploy {
+    if (-not $DeployPortal) { return }
+    Write-Step 'Deploying portal from sibling repo'
+
+    $effectiveSuffix = if ($script:NameSuffixOverridden) {
+        $NameSuffix
+    } else {
+        $pf = Get-Content $ParametersFile -Raw | ConvertFrom-Json
+        $pf.parameters.nameSuffix.value
+    }
+
+    $law = $LogAnalyticsWorkspaceName
+    if (-not $law) { $law = Get-DefaultLawName -SuffixHint $effectiveSuffix }
+
+    $portalScript = Join-Path $script:PortalRepoPath 'infra\deploy.ps1'
+    $portalArgs = @{
+        ResourceGroup             = $ResourceGroup
+        Location                  = $Location
+        NamePrefix                = $NamePrefix
+        AppServicePlanSku         = $PortalSku
+        LogAnalyticsWorkspaceName = $law
+    }
+    if ($SkipAppRegistration) { $portalArgs.SkipAppRegistration = $true }
+    if ($script:NameSuffixOverridden) { $portalArgs.NameSuffix = $NameSuffix }
+    if ($SkipInfra) { $portalArgs.SkipInfra = $true }
+    if ($AssignUserUpn) {
+        $portalArgs.AssignUserUpn = $AssignUserUpn
+        $portalArgs.AssignRole = $AssignRole
+    }
+
+    Write-Host "    portal script: $portalScript"
+    Write-Host "    LAW:           $law"
+    & $portalScript @portalArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Portal deploy failed with exit code $LASTEXITCODE"
+    }
+    Write-Ok "Portal deployed ($NamePrefix-portal)"
+}
+
 # -- Runbook content publish (optional, when enableRunbookVariant=true) ------
 function Invoke-RunbookPublish {
     $aaName = (& az automation account list -g $ResourceGroup `
@@ -610,58 +662,6 @@ function Invoke-RunbookPublish {
     if (-not $aaName) {
         Write-Warn2 "No Automation Account in $ResourceGroup; skipping runbook publish (enableRunbookVariant=false)."
         return
-    }
-
-    # -- Portal deploy (optional) -------------------------------------------------
-    function Get-DefaultLawName {
-        param([string]$SuffixHint)
-        $matches = (& az monitor log-analytics workspace list -g $ResourceGroup `
-            --query "[?starts_with(name, '$NamePrefix-law-') || name == '$NamePrefix-law'].name" `
-            -o tsv --only-show-errors 2>$null)
-        if ($LASTEXITCODE -eq 0 -and $matches) {
-            return ($matches | Select-Object -First 1).Trim()
-        }
-        if ($SuffixHint) { return "$NamePrefix-law-$SuffixHint" }
-        return "$NamePrefix-law-dev"
-    }
-
-    function Invoke-PortalDeploy {
-        if (-not $DeployPortal) { return }
-        Write-Step 'Deploying portal from sibling repo'
-
-        $effectiveSuffix = if ($script:NameSuffixOverridden) {
-            $NameSuffix
-        } else {
-            $pf = Get-Content $ParametersFile -Raw | ConvertFrom-Json
-            $pf.parameters.nameSuffix.value
-        }
-
-        $law = $LogAnalyticsWorkspaceName
-        if (-not $law) { $law = Get-DefaultLawName -SuffixHint $effectiveSuffix }
-
-        $portalScript = Join-Path $script:PortalRepoPath 'infra\deploy.ps1'
-        $portalArgs = @{
-            ResourceGroup             = $ResourceGroup
-            Location                  = $Location
-            NamePrefix                = $NamePrefix
-            AppServicePlanSku         = $PortalSku
-            LogAnalyticsWorkspaceName = $law
-        }
-        if ($SkipAppRegistration) { $portalArgs.SkipAppRegistration = $true }
-        if ($script:NameSuffixOverridden) { $portalArgs.NameSuffix = $NameSuffix }
-        if ($SkipInfra) { $portalArgs.SkipInfra = $true }
-        if ($AssignUserUpn) {
-            $portalArgs.AssignUserUpn = $AssignUserUpn
-            $portalArgs.AssignRole = $AssignRole
-        }
-
-        Write-Host "    portal script: $portalScript"
-        Write-Host "    LAW:           $law"
-        & $portalScript @portalArgs
-        if ($LASTEXITCODE -ne 0) {
-            throw "Portal deploy failed with exit code $LASTEXITCODE"
-        }
-        Write-Ok "Portal deployed ($NamePrefix-portal)"
     }
     Write-Step "Publishing runbook content -> $aaName"
     $runbookDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'runbooks'
