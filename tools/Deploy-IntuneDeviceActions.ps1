@@ -315,6 +315,20 @@ function Confirm-AzLogin {
     Write-Ok "Signed-in as: $($acc.user.name)"
 }
 
+function Assert-GraphTokenFresh {
+    Write-Step 'Microsoft Graph token preflight'
+    $out = & az account get-access-token --resource-type ms-graph --query accessToken -o tsv 2>&1
+    if ($LASTEXITCODE -eq 0 -and $out) {
+        Write-Ok 'Graph token acquired.'
+        return
+    }
+    $msg = ($out | Out-String).Trim()
+    if ($msg -match 'TokenCreatedWithOutdatedPolicies' -or $msg -match 'InteractionRequired') {
+        throw "Azure AD requires re-authentication (CAE: TokenCreatedWithOutdatedPolicies). Run 'az logout' then 'az login --tenant $((az account show --query tenantId -o tsv 2>$null))' and retry."
+    }
+    throw "Unable to acquire Microsoft Graph token. Details: $msg"
+}
+
 # -- Resource providers ----------------------------------------------------
 # Tutti i namespace usati (esplicitamente nei Bicep o implicitamente da
 # servizi derivati come App Insights → AlertsManagement). Vanno registrati
@@ -643,6 +657,9 @@ function Get-DefaultLawName {
 function Invoke-PortalDeploy {
     if (-not $DeployPortal) { return }
     Write-Step 'Deploying portal from sibling repo'
+    if (-not $SkipAppRegistration) {
+        Assert-GraphTokenFresh
+    }
 
     $effectiveSuffix = if ($script:NameSuffixOverridden) {
         $NameSuffix
