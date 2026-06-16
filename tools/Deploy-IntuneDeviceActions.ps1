@@ -789,9 +789,11 @@ try {
     }
     Confirm-AzLogin
     Register-ResourceProviders
-    Resolve-Inputs
     if ($DeployOnlyPortal) {
         $DeployPortal = $true
+    }
+    Resolve-Inputs
+    if ($DeployOnlyPortal) {
         Write-Warn2 'DeployOnlyPortal set: skipping all API phases (publish/infra/zip/runbooks/graph/smoke).'
     } else {
         Invoke-Publish
