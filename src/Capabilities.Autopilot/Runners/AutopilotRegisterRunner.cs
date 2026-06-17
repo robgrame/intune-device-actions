@@ -86,6 +86,7 @@ public sealed class AutopilotRegisterRunner : IActionRunner
                 [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
                 [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
                 [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
+                [AuditEvents.Prop.ActionType]    = Type,
             }, LogLevel.Warning);
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:missing-hardware-hash", ct);
             return;
@@ -110,6 +111,7 @@ public sealed class AutopilotRegisterRunner : IActionRunner
                 [AuditEvents.Prop.IntuneDeviceId]            = msg.IntuneDeviceId,
                 [AuditEvents.Prop.RecentActionsInWindow]     = reserve.RecentActionsInWindow.ToString(),
                 [AuditEvents.Prop.MaxActionsPerDevicePerDay] = reserve.MaxActionsPerDevicePerDay.ToString(),
+                [AuditEvents.Prop.ActionType]                = Type,
             }, LogLevel.Warning);
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:rate-limited", ct);
             return;

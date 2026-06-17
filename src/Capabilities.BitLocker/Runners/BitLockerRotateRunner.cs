@@ -86,6 +86,7 @@ public sealed class BitLockerRotateRunner : IActionRunner
                 [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
                 [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
                 [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+                [AuditEvents.Prop.ActionType]    = Type,
             });
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:device-resolve-failed", ct);
             return;
@@ -98,6 +99,7 @@ public sealed class BitLockerRotateRunner : IActionRunner
                 [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
                 [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
                 [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+                [AuditEvents.Prop.ActionType]    = Type,
             }, LogLevel.Warning);
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:device-not-in-entra", ct);
             return;
@@ -120,6 +122,7 @@ public sealed class BitLockerRotateRunner : IActionRunner
             {
                 [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
                 [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+                [AuditEvents.Prop.ActionType]    = Type,
             });
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:group-check-failed", ct);
             return;
@@ -132,6 +135,7 @@ public sealed class BitLockerRotateRunner : IActionRunner
                 [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
                 [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
                 [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
+                [AuditEvents.Prop.ActionType]    = Type,
             }, LogLevel.Warning);
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:not-in-allowed-group", ct);
             return;
@@ -156,6 +160,7 @@ public sealed class BitLockerRotateRunner : IActionRunner
                 [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
                 [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
                 [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
+                [AuditEvents.Prop.ActionType]     = Type,
             });
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:managed-device-resolve-failed", ct);
             return;
@@ -169,6 +174,7 @@ public sealed class BitLockerRotateRunner : IActionRunner
                 [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
                 [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
                 [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
+                [AuditEvents.Prop.ActionType]     = Type,
             }, LogLevel.Warning);
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:ownership-mismatch", ct);
             return;
@@ -188,6 +194,7 @@ public sealed class BitLockerRotateRunner : IActionRunner
                 [AuditEvents.Prop.IntuneDeviceId]            = msg.IntuneDeviceId,
                 [AuditEvents.Prop.RecentActionsInWindow]     = reserve.RecentActionsInWindow.ToString(),
                 [AuditEvents.Prop.MaxActionsPerDevicePerDay] = reserve.MaxActionsPerDevicePerDay.ToString(),
+                [AuditEvents.Prop.ActionType]                = Type,
             }, LogLevel.Warning);
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:rate-limited", ct, managedId);
             return;

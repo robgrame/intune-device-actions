@@ -120,6 +120,7 @@ public sealed class RenameActionRunner : IActionRunner
                 [AuditEvents.Prop.IntuneDeviceId]            = msg.IntuneDeviceId,
                 [AuditEvents.Prop.RecentActionsInWindow]     = reserve.RecentActionsInWindow.ToString(),
                 [AuditEvents.Prop.MaxActionsPerDevicePerDay] = reserve.MaxActionsPerDevicePerDay.ToString(),
+                [AuditEvents.Prop.ActionType]                = Type,
             }, LogLevel.Warning);
             await _statusTracker.RecordTerminalAsync(msg, Type, "denied:rate-limited", ct);
             return;
