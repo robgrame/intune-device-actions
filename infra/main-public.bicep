@@ -199,6 +199,9 @@ param storageAllowedIpRanges array = []
 @description('Seed App Configuration key-values via ARM. Disable on first deploy if ARM data-plane proxy returns Forbidden; use Seed-AppConfig.ps1 post-deploy instead.')
 param seedAppConfig bool = false
 
+@description('Principal ID of the portal UAMI. When set, grants App Configuration Data Owner so the portal can manage settings directly. Leave empty to skip.')
+param portalPrincipalId string = ''
+
 // ── Naming ───────────────────────────────────────────────────────────────────
 @description('Disambiguation suffix appended to globally-unique resource names (Storage, App Configuration, Service Bus, Function App FQDN, etc.). Leave default for deterministic per-RG hash; override with empty string to omit (only safe if namePrefix is already globally unique).')
 param nameSuffix string = uniqueString(resourceGroup().id)
@@ -1729,6 +1732,13 @@ resource eventGridDashboardWebhookSub 'Microsoft.EventGrid/topics/eventSubscript
 }
 
 var appConfigDataReader = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '516239f1-63e1-4d78-a4de-a74fb236a071')
+var appConfigDataOwner = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5ae67dd6-f5a0-4898-8f75-c2f867767d48')
+
+resource raAppConfigPortal 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(portalPrincipalId)) {
+  name: guid(appConfig.id, portalPrincipalId, 'appcfg-owner')
+  scope: appConfig
+  properties: { roleDefinitionId: appConfigDataOwner, principalId: portalPrincipalId, principalType: 'ServicePrincipal' }
+}
 
 resource raAppConfigWeb 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(appConfig.id, uamiWeb.id, 'appcfg-reader')

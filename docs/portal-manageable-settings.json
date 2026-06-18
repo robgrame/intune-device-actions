@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Settings catalog: keys in Azure App Configuration that the operator portal is allowed to read and modify. The portal uses its own UAMI (App Configuration Data Owner) to interact with the store directly.",
+  "settings": [
+    {
+      "key": "Actions:AllowedTypes",
+      "displayName": "Action Types abilitati",
+      "description": "Lista CSV dei tipi di azione che l'API accetta (es. wipe,autopilot,bitlocker,rename).",
+      "type": "string",
+      "default": "wipe",
+      "validation": { "pattern": "^[a-z]+(,[a-z]+)*$" },
+      "category": "General",
+      "sensitive": false,
+      "requiresRestart": true
+    },
+    {
+      "key": "Wipe:AllowedGroupId",
+      "displayName": "Gruppo Entra autorizzato (Wipe)",
+      "description": "Object ID del gruppo Entra i cui device sono autorizzati per il wipe. Lasciare vuoto per disabilitare il gate.",
+      "type": "string",
+      "default": "",
+      "validation": { "pattern": "^([0-9a-fA-F-]{36})?$" },
+      "category": "Wipe",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "Wipe:KeepEnrollmentData",
+      "displayName": "Mantieni dati di enrollment",
+      "description": "Se true, il wipe preserva i dati di enrollment Intune sul device.",
+      "type": "boolean",
+      "default": "false",
+      "category": "Wipe",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "Wipe:KeepUserData",
+      "displayName": "Mantieni dati utente",
+      "description": "Se true, il wipe preserva la cartella utente sul device.",
+      "type": "boolean",
+      "default": "false",
+      "category": "Wipe",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "BitLocker:AllowedGroupId",
+      "displayName": "Gruppo Entra autorizzato (BitLocker)",
+      "description": "Object ID del gruppo Entra i cui device sono autorizzati per la rotazione BitLocker.",
+      "type": "string",
+      "default": "",
+      "validation": { "pattern": "^([0-9a-fA-F-]{36})?$" },
+      "category": "BitLocker",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "Idempotency:MaxActionsPerDevicePerDay",
+      "displayName": "Max azioni per device al giorno",
+      "description": "Numero massimo di azioni consentite per lo stesso device in 24h (rate limiting).",
+      "type": "integer",
+      "default": "5",
+      "validation": { "min": 1, "max": 100 },
+      "category": "Idempotency",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "Idempotency:RearmGracePeriodHours",
+      "displayName": "Periodo di grazia rearm (ore)",
+      "description": "Ore dopo le quali un ledger bloccato diventa eleggibile per rearm automatico.",
+      "type": "integer",
+      "default": "48",
+      "validation": { "min": 1, "max": 720 },
+      "category": "Idempotency",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "Idempotency:AllowForceRearm",
+      "displayName": "Consenti rearm manuale",
+      "description": "Se true, gli operatori possono forzare il rearm del ledger dal portale.",
+      "type": "boolean",
+      "default": "true",
+      "category": "Idempotency",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "ActionStatus:PollMaxAgeHours",
+      "displayName": "Finestra poller stato (ore)",
+      "description": "Numero di ore entro cui il poller verifica lo stato delle azioni su Graph.",
+      "type": "integer",
+      "default": "24",
+      "validation": { "min": 1, "max": 168 },
+      "category": "Monitoring",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "ActionStatusPoller:CronExpression",
+      "displayName": "Frequenza poller stato (CRON)",
+      "description": "Espressione CRON a 6 campi per la frequenza di polling dello stato azione.",
+      "type": "string",
+      "default": "*/5 * * * * *",
+      "validation": { "pattern": "^[0-9*/,-]+ [0-9*/,-]+ [0-9*/,-]+ [0-9*/,-]+ [0-9*/,-]+ [0-9*/,-]+$" },
+      "category": "Monitoring",
+      "sensitive": false,
+      "requiresRestart": true
+    },
+    {
+      "key": "Replay:MaxTimestampSkewSeconds",
+      "displayName": "Anti-replay: skew massimo (secondi)",
+      "description": "Finestra temporale entro cui un timestamp del client è considerato valido per la protezione anti-replay.",
+      "type": "integer",
+      "default": "300",
+      "validation": { "min": 30, "max": 3600 },
+      "category": "Security",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "EventGrid:Enabled",
+      "displayName": "Event Grid audit stream",
+      "description": "Se true, gli eventi di audit vengono pubblicati anche su Event Grid per il portale real-time.",
+      "type": "boolean",
+      "default": "true",
+      "category": "Monitoring",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "Idempotency:AdminApiEnabled",
+      "displayName": "API Admin Ledger abilitata",
+      "description": "Se true, gli endpoint admin per reset/gestione ledger sono disponibili.",
+      "type": "boolean",
+      "default": "true",
+      "category": "Idempotency",
+      "sensitive": false,
+      "requiresRestart": false
+    }
+  ]
+}
