@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "9500831163663258686"
+      "templateHash": "6804980258749175541"
     }
   },
   "parameters": {
@@ -2049,6 +2049,769 @@
           "privateLinkDelegation": "Disabled"
         }
       }
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Sentinel')]",
+      "properties": {
+        "value": "1"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Audit:TableName')]",
+      "properties": {
+        "value": "[parameters('auditTableName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Audit:StorageAccount')]",
+      "properties": {
+        "value": "[variables('stProcName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ActionStatus:TableName')]",
+      "properties": {
+        "value": "[parameters('actionStatusTableName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ActionStatus:PollMaxAgeHours')]",
+      "properties": {
+        "value": "[string(parameters('actionStatusPollMaxAgeHours'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ActionStatusPoller:CronExpression')]",
+      "properties": {
+        "value": "[parameters('actionStatusPollerCron')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:BlobContainer')]",
+      "properties": {
+        "value": "[parameters('ledgerContainerName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:StorageAccount')]",
+      "properties": {
+        "value": "[variables('stProcName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('stProcName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AllowForceRearm')]",
+      "properties": {
+        "value": "[string(parameters('idempotencyAllowForceRearm'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:MaxActionsPerDevicePerDay')]",
+      "properties": {
+        "value": "[string(parameters('idempotencyMaxActionsPerDay'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:RearmGracePeriodHours')]",
+      "properties": {
+        "value": "[string(parameters('idempotencyRearmGracePeriodHours'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'EventGrid:Enabled')]",
+      "properties": {
+        "value": "[string(parameters('enableEventGridAuditStream'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'EventGrid:AuditTopicEndpoint')]",
+      "properties": {
+        "value": "[if(parameters('enableEventGridAuditStream'), reference(resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName')), '2022-06-15').endpoint, '')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.EventGrid/topics', variables('eventGridTopicName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:fullyQualifiedNamespace')]",
+      "properties": {
+        "value": "[format('{0}.servicebus.windows.net', variables('sbNamespaceName'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ServiceBus/namespaces', variables('sbNamespaceName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:credential')]",
+      "properties": {
+        "value": "managedidentity"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:ActionRequestsQueue')]",
+      "properties": {
+        "value": "[parameters('actionRequestsQueueName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:ActionDispatchQueue')]",
+      "properties": {
+        "value": "[parameters('actionDispatchQueueName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:WipeActionQueue')]",
+      "properties": {
+        "value": "[parameters('wipeActionQueueName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:AutopilotActionQueue')]",
+      "properties": {
+        "value": "[parameters('autopilotActionQueueName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:BitLockerActionQueue')]",
+      "properties": {
+        "value": "[parameters('bitlockerActionQueueName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:RenameActionQueue')]",
+      "properties": {
+        "value": "[parameters('renameActionQueueName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:TenantId')]",
+      "properties": {
+        "value": "[parameters('graphTenantId')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Wipe:AllowedGroupId')]",
+      "properties": {
+        "value": "[parameters('allowedGroupId')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Wipe:KeepEnrollmentData')]",
+      "properties": {
+        "value": "[string(parameters('keepEnrollmentData'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Wipe:KeepUserData')]",
+      "properties": {
+        "value": "[string(parameters('keepUserData'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'BitLocker:AllowedGroupId')]",
+      "properties": {
+        "value": "[parameters('bitlockerAllowedGroupId')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:RequireClientCert')]",
+      "properties": {
+        "value": "true"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:TrustForwardedHeader')]",
+      "properties": {
+        "value": "true"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:TrustedCaThumbprints')]",
+      "properties": {
+        "value": "[parameters('trustedCaThumbprints')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:TrustedRootCertificates')]",
+      "properties": {
+        "value": "[parameters('trustedRootCertificatesBase64')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:TrustedIntermediateCertificates')]",
+      "properties": {
+        "value": "[parameters('trustedIntermediateCertificatesBase64')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:TrustedCaCertificates')]",
+      "properties": {
+        "value": "[parameters('trustedCaCertificatesBase64')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:AllowedLeafThumbprints')]",
+      "properties": {
+        "value": "[parameters('allowedLeafThumbprints')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:CheckRevocation')]",
+      "properties": {
+        "value": "[string(parameters('checkRevocation'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:RevocationMode')]",
+      "properties": {
+        "value": "[parameters('revocationMode')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:RevocationFlag')]",
+      "properties": {
+        "value": "[parameters('revocationFlag')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:RequireClientAuthEku')]",
+      "properties": {
+        "value": "[string(parameters('requireClientAuthEku'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:DeviceIdBindingClaim')]",
+      "properties": {
+        "value": "[parameters('deviceIdBindingClaim')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:ThumbprintToDeviceMap')]",
+      "properties": {
+        "value": "[parameters('clientCertThumbprintToDeviceMap')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Replay:MaxTimestampSkewSeconds')]",
+      "properties": {
+        "value": "[string(parameters('maxTimestampSkewSeconds'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AdminApiEnabled')]",
+      "properties": {
+        "value": "true"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Actions:AllowedTypes')]",
+      "properties": {
+        "value": "wipe"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$web')]",
+      "properties": {
+        "value": "web"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$web')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWebName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$proc')]",
+      "properties": {
+        "value": "proc"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$proc')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:ManagedIdentityClientId$proc')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$wipe')]",
+      "properties": {
+        "value": "wipe"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$wipe')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:ManagedIdentityClientId$wipe')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiWipeName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AdminApiEnabled$wipe')]",
+      "properties": {
+        "value": "false"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$autopilot')]",
+      "properties": {
+        "value": "autopilot"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$autopilot')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:ManagedIdentityClientId$autopilot')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiAutopilotName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AdminApiEnabled$autopilot')]",
+      "properties": {
+        "value": "false"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$bitlocker')]",
+      "properties": {
+        "value": "bitlocker"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$bitlocker')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:ManagedIdentityClientId$bitlocker')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiBitLockerName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AdminApiEnabled$bitlocker')]",
+      "properties": {
+        "value": "false"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$rename')]",
+      "properties": {
+        "value": "rename"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$rename')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:ManagedIdentityClientId$rename')]",
+      "properties": {
+        "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName')), '2023-01-31').clientId]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('uamiRenameName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AdminApiEnabled$rename')]",
+      "properties": {
+        "value": "false"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Rename:Endpoint$rename')]",
+      "properties": {
+        "value": "[parameters('renameEndpoint')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Rename:AuthHeaderName$rename')]",
+      "properties": {
+        "value": "[parameters('renameAuthHeaderName')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Rename:NewNameJsonPath$rename')]",
+      "properties": {
+        "value": "[parameters('renameNewNameJsonPath')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Rename:OnCollision$rename')]",
+      "properties": {
+        "value": "[parameters('renameOnCollision')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}', variables('appConfigName'), 'Rename:TimeoutSeconds$rename')]",
+      "properties": {
+        "value": "30"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.AppConfiguration/configurationStores', variables('appConfigName'))]"
+      ]
     },
     {
       "condition": "[parameters('enableEventGridAuditStream')]",

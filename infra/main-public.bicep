@@ -1171,6 +1171,498 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2024-05-01' =
   }
 }
 
+// --- Sentinel ---
+resource appConfigKv_Sentinel 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Sentinel'
+  properties: {
+    value: '1'
+  }
+}
+
+// --- Shared settings ---
+resource appConfigKv_AuditTableName 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Audit:TableName'
+  properties: {
+    value: auditTableName
+  }
+}
+resource appConfigKv_AuditStorageAccount 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Audit:StorageAccount'
+  properties: {
+    value: storageProc.name
+  }
+}
+resource appConfigKv_ActionStatusTableName 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ActionStatus:TableName'
+  properties: {
+    value: actionStatusTableName
+  }
+}
+resource appConfigKv_ActionStatusPollMaxAgeHours 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ActionStatus:PollMaxAgeHours'
+  properties: {
+    value: string(actionStatusPollMaxAgeHours)
+  }
+}
+resource appConfigKv_ActionStatusPollerCronExpression 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ActionStatusPoller:CronExpression'
+  properties: {
+    value: actionStatusPollerCron
+  }
+}
+resource appConfigKv_IdempotencyBlobContainer 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Idempotency:BlobContainer'
+  properties: {
+    value: ledgerContainerName
+  }
+}
+resource appConfigKv_IdempotencyStorageAccount 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Idempotency:StorageAccount'
+  properties: {
+    value: storageProc.name
+  }
+}
+resource appConfigKv_IdempotencyAllowForceRearm 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Idempotency:AllowForceRearm'
+  properties: {
+    value: string(idempotencyAllowForceRearm)
+  }
+}
+resource appConfigKv_IdempotencyMaxActionsPerDevicePerDay 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Idempotency:MaxActionsPerDevicePerDay'
+  properties: {
+    value: string(idempotencyMaxActionsPerDay)
+  }
+}
+resource appConfigKv_IdempotencyRearmGracePeriodHours 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Idempotency:RearmGracePeriodHours'
+  properties: {
+    value: string(idempotencyRearmGracePeriodHours)
+  }
+}
+resource appConfigKv_EventGridEnabled 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'EventGrid:Enabled'
+  properties: {
+    value: string(enableEventGridAuditStream)
+  }
+}
+resource appConfigKv_EventGridAuditTopicEndpoint 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'EventGrid:AuditTopicEndpoint'
+  properties: {
+    value: enableEventGridAuditStream ? eventGridAuditTopic!.properties.endpoint : ''
+  }
+}
+resource appConfigKv_ServiceBusFullyQualifiedNamespace 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:fullyQualifiedNamespace'
+  properties: {
+    value: '${sbNamespace.name}.servicebus.windows.net'
+  }
+}
+resource appConfigKv_ServiceBusCredential 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:credential'
+  properties: {
+    value: 'managedidentity'
+  }
+}
+resource appConfigKv_ServiceBusActionRequestsQueue 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:ActionRequestsQueue'
+  properties: {
+    value: actionRequestsQueueName
+  }
+}
+resource appConfigKv_ServiceBusActionDispatchQueue 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:ActionDispatchQueue'
+  properties: {
+    value: actionDispatchQueueName
+  }
+}
+resource appConfigKv_ServiceBusWipeActionQueue 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:WipeActionQueue'
+  properties: {
+    value: wipeActionQueueName
+  }
+}
+resource appConfigKv_ServiceBusAutopilotActionQueue 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:AutopilotActionQueue'
+  properties: {
+    value: autopilotActionQueueName
+  }
+}
+resource appConfigKv_ServiceBusBitLockerActionQueue 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:BitLockerActionQueue'
+  properties: {
+    value: bitlockerActionQueueName
+  }
+}
+resource appConfigKv_ServiceBusRenameActionQueue 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:RenameActionQueue'
+  properties: {
+    value: renameActionQueueName
+  }
+}
+resource appConfigKv_GraphTenantId 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Graph:TenantId'
+  properties: {
+    value: graphTenantId
+  }
+}
+resource appConfigKv_WipeAllowedGroupId 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Wipe:AllowedGroupId'
+  properties: {
+    value: allowedGroupId
+  }
+}
+resource appConfigKv_WipeKeepEnrollmentData 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Wipe:KeepEnrollmentData'
+  properties: {
+    value: string(keepEnrollmentData)
+  }
+}
+resource appConfigKv_WipeKeepUserData 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Wipe:KeepUserData'
+  properties: {
+    value: string(keepUserData)
+  }
+}
+resource appConfigKv_BitLockerAllowedGroupId 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'BitLocker:AllowedGroupId'
+  properties: {
+    value: bitlockerAllowedGroupId
+  }
+}
+resource appConfigKv_ClientCertRequireClientCert 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:RequireClientCert'
+  properties: {
+    value: 'true'
+  }
+}
+resource appConfigKv_ClientCertTrustForwardedHeader 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:TrustForwardedHeader'
+  properties: {
+    value: 'true'
+  }
+}
+resource appConfigKv_ClientCertTrustedCaThumbprints 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:TrustedCaThumbprints'
+  properties: {
+    value: trustedCaThumbprints
+  }
+}
+resource appConfigKv_ClientCertTrustedRootCertificates 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:TrustedRootCertificates'
+  properties: {
+    value: trustedRootCertificatesBase64
+  }
+}
+resource appConfigKv_ClientCertTrustedIntermediateCertificates 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:TrustedIntermediateCertificates'
+  properties: {
+    value: trustedIntermediateCertificatesBase64
+  }
+}
+resource appConfigKv_ClientCertTrustedCaCertificates 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:TrustedCaCertificates'
+  properties: {
+    value: trustedCaCertificatesBase64
+  }
+}
+resource appConfigKv_ClientCertAllowedLeafThumbprints 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:AllowedLeafThumbprints'
+  properties: {
+    value: allowedLeafThumbprints
+  }
+}
+resource appConfigKv_ClientCertCheckRevocation 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:CheckRevocation'
+  properties: {
+    value: string(checkRevocation)
+  }
+}
+resource appConfigKv_ClientCertRevocationMode 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:RevocationMode'
+  properties: {
+    value: revocationMode
+  }
+}
+resource appConfigKv_ClientCertRevocationFlag 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:RevocationFlag'
+  properties: {
+    value: revocationFlag
+  }
+}
+resource appConfigKv_ClientCertRequireClientAuthEku 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:RequireClientAuthEku'
+  properties: {
+    value: string(requireClientAuthEku)
+  }
+}
+resource appConfigKv_ClientCertDeviceIdBindingClaim 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:DeviceIdBindingClaim'
+  properties: {
+    value: deviceIdBindingClaim
+  }
+}
+resource appConfigKv_ClientCertThumbprintToDeviceMap 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ClientCert:ThumbprintToDeviceMap'
+  properties: {
+    value: clientCertThumbprintToDeviceMap
+  }
+}
+resource appConfigKv_ReplayMaxTimestampSkewSeconds 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Replay:MaxTimestampSkewSeconds'
+  properties: {
+    value: string(maxTimestampSkewSeconds)
+  }
+}
+resource appConfigKv_IdempotencyAdminApiEnabled 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Idempotency:AdminApiEnabled'
+  properties: {
+    value: 'true'
+  }
+}
+resource appConfigKv_ActionsAllowedTypes 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Actions:AllowedTypes'
+  properties: {
+    value: 'wipe'
+  }
+}
+
+// --- Per-role: web ---
+resource appConfigKv_AppRole_Web 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'App:Role$web'
+  properties: {
+    value: 'web'
+  }
+}
+resource appConfigKv_ServiceBusClientId_Web 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:clientId$web'
+  properties: {
+    value: uamiWeb.properties.clientId
+  }
+}
+
+// --- Per-role: proc ---
+resource appConfigKv_AppRole_Proc 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'App:Role$proc'
+  properties: {
+    value: 'proc'
+  }
+}
+resource appConfigKv_ServiceBusClientId_Proc 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:clientId$proc'
+  properties: {
+    value: uami.properties.clientId
+  }
+}
+resource appConfigKv_GraphManagedIdentityClientId_Proc 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Graph:ManagedIdentityClientId$proc'
+  properties: {
+    value: uami.properties.clientId
+  }
+}
+
+// --- Per-role: wipe ---
+resource appConfigKv_AppRole_Wipe 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'App:Role$wipe'
+  properties: {
+    value: 'wipe'
+  }
+}
+resource appConfigKv_ServiceBusClientId_Wipe 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:clientId$wipe'
+  properties: {
+    value: uamiWipe.properties.clientId
+  }
+}
+resource appConfigKv_GraphManagedIdentityClientId_Wipe 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Graph:ManagedIdentityClientId$wipe'
+  properties: {
+    value: uamiWipe.properties.clientId
+  }
+}
+resource appConfigKv_IdempotencyAdminApiEnabled_Wipe 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Idempotency:AdminApiEnabled$wipe'
+  properties: {
+    value: 'false'
+  }
+}
+
+// --- Per-role: autopilot ---
+resource appConfigKv_AppRole_Autopilot 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'App:Role$autopilot'
+  properties: {
+    value: 'autopilot'
+  }
+}
+resource appConfigKv_ServiceBusClientId_Autopilot 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:clientId$autopilot'
+  properties: {
+    value: uamiAutopilot.properties.clientId
+  }
+}
+resource appConfigKv_GraphManagedIdentityClientId_Autopilot 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Graph:ManagedIdentityClientId$autopilot'
+  properties: {
+    value: uamiAutopilot.properties.clientId
+  }
+}
+resource appConfigKv_IdempotencyAdminApiEnabled_Autopilot 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Idempotency:AdminApiEnabled$autopilot'
+  properties: {
+    value: 'false'
+  }
+}
+
+// --- Per-role: bitlocker ---
+resource appConfigKv_AppRole_BitLocker 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'App:Role$bitlocker'
+  properties: {
+    value: 'bitlocker'
+  }
+}
+resource appConfigKv_ServiceBusClientId_BitLocker 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:clientId$bitlocker'
+  properties: {
+    value: uamiBitLocker.properties.clientId
+  }
+}
+resource appConfigKv_GraphManagedIdentityClientId_BitLocker 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Graph:ManagedIdentityClientId$bitlocker'
+  properties: {
+    value: uamiBitLocker.properties.clientId
+  }
+}
+resource appConfigKv_IdempotencyAdminApiEnabled_BitLocker 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Idempotency:AdminApiEnabled$bitlocker'
+  properties: {
+    value: 'false'
+  }
+}
+
+// --- Per-role: rename ---
+resource appConfigKv_AppRole_Rename 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'App:Role$rename'
+  properties: {
+    value: 'rename'
+  }
+}
+resource appConfigKv_ServiceBusClientId_Rename 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'ServiceBus:clientId$rename'
+  properties: {
+    value: uamiRename.properties.clientId
+  }
+}
+resource appConfigKv_GraphManagedIdentityClientId_Rename 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Graph:ManagedIdentityClientId$rename'
+  properties: {
+    value: uamiRename.properties.clientId
+  }
+}
+resource appConfigKv_IdempotencyAdminApiEnabled_Rename 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Idempotency:AdminApiEnabled$rename'
+  properties: {
+    value: 'false'
+  }
+}
+resource appConfigKv_RenameEndpoint_Rename 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Rename:Endpoint$rename'
+  properties: {
+    value: renameEndpoint
+  }
+}
+resource appConfigKv_RenameAuthHeaderName_Rename 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Rename:AuthHeaderName$rename'
+  properties: {
+    value: renameAuthHeaderName
+  }
+}
+resource appConfigKv_RenameNewNameJsonPath_Rename 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Rename:NewNameJsonPath$rename'
+  properties: {
+    value: renameNewNameJsonPath
+  }
+}
+resource appConfigKv_RenameOnCollision_Rename 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Rename:OnCollision$rename'
+  properties: {
+    value: renameOnCollision
+  }
+}
+resource appConfigKv_RenameTimeoutSeconds_Rename 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = {
+  parent: appConfig
+  name: 'Rename:TimeoutSeconds$rename'
+  properties: {
+    value: '30'
+  }
+}
+
 resource eventGridAuditTopic 'Microsoft.EventGrid/topics@2022-06-15' = if (enableEventGridAuditStream) {
   name: eventGridTopicName
   location: location
