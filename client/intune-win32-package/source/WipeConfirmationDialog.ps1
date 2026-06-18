@@ -459,6 +459,7 @@ function Start-WipeInlineMonitor {
             if ($terminal) {
                 $timer.Stop()
                 $Form.ProgressCloseBtn.Enabled = $true
+                $Form.OpenLiveProgressBtn.Visible = $false
                 $isError = ($srvState -match 'failed|notSupported')
                 if ($isDenied) {
                     $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(176, 122, 0)
