@@ -198,7 +198,7 @@ function Show-WipeProgressDialog {
                     } elseif ($isError) {
                         $state.ForeColor = [System.Drawing.Color]::FromArgb(168, 0, 0)
                     } else {
-                        $state.ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 50)
+                        $state.ForeColor = [System.Drawing.Color]::FromArgb(0, 90, 35)
                     }
                     $progress.Style = 'Continuous'
                     $progress.Value = 100
