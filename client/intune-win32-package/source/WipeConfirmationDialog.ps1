@@ -35,8 +35,12 @@ function Build-WipeConfirmationForm {
     $bul     = [char]0x2022
     $warnSym = [char]0x26A0
 
+    # Read client version from version.txt (same directory as this script)
+    $versionFile = Join-Path $PSScriptRoot 'version.txt'
+    $clientVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { '?.?.?' }
+
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = 'Conferma reset del dispositivo'
+    $form.Text            = ("Migrazione a Postazione Modern  v{0}" -f $clientVersion)
     $form.Size            = New-Object System.Drawing.Size(640, 560)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
@@ -53,7 +57,7 @@ function Build-WipeConfirmationForm {
     $form.Controls.Add($header)
 
     $hLbl = New-Object System.Windows.Forms.Label
-    $hLbl.Text      = "$warnSym  Reset di fabbrica del dispositivo"
+    $hLbl.Text      = "$warnSym  Migrazione a postazione modern"
     $hLbl.ForeColor = [System.Drawing.Color]::White
     $hLbl.Font      = New-Object System.Drawing.Font('Segoe UI Semibold', 16, [System.Drawing.FontStyle]::Bold)
     $hLbl.AutoSize  = $true
@@ -93,7 +97,7 @@ $bul Assicurati di aver salvato tutto il lavoro in corso e di essere collegato a
     $infoLbl.Location = New-Object System.Drawing.Point(14, 22)
     $infoLbl.Size     = New-Object System.Drawing.Size(556, 70)
     $infoLbl.Font     = New-Object System.Drawing.Font('Consolas', 9)
-    $infoLbl.Text     = "Nome           : $DeviceName`r`nEntra Device   : $EntraDeviceId`r`nIntune Device  : $IntuneDeviceId"
+    $infoLbl.Text     = "Nome           : $DeviceName`r`nEntra Device   : $EntraDeviceId"
     $info.Controls.Add($infoLbl)
 
     $chk = New-Object System.Windows.Forms.CheckBox
@@ -233,6 +237,7 @@ $bul Assicurati di aver salvato tutto il lavoro in corso e di essere collegato a
     $form | Add-Member -NotePropertyName 'ProgressLog'        -NotePropertyValue $p2Log          -Force
     $form | Add-Member -NotePropertyName 'ProgressCloseBtn'   -NotePropertyValue $p2Close        -Force
     $form | Add-Member -NotePropertyName 'OpenLiveProgressBtn' -NotePropertyValue $p2OpenProgress -Force
+    $form | Add-Member -NotePropertyName 'ClientVersion'       -NotePropertyValue $clientVersion   -Force
 
     return $form
 }
@@ -265,7 +270,7 @@ function Switch-WipeFormToProgress {
     $Form.Phase2Panel.Visible = $true
     $Form.AcceptButton = $null
     $Form.CancelButton = $null
-    $Form.Text = 'Esecuzione richiesta di reset'
+    $Form.Text = ("Migrazione a Postazione Modern - Esecuzione  v{0}" -f $Form.ClientVersion)
     $Form.ProgressStatus.Text = $InitialStatus
     [System.Windows.Forms.Application]::DoEvents()
 }
@@ -288,7 +293,7 @@ function Add-WipeFormLog {
     )
     $colors = @{
         info    = [System.Drawing.Color]::FromArgb(20, 20, 20)
-        success = [System.Drawing.Color]::FromArgb(0, 120, 50)
+        success = [System.Drawing.Color]::FromArgb(0, 90, 35)
         warning = [System.Drawing.Color]::FromArgb(176, 122, 0)
         error   = [System.Drawing.Color]::FromArgb(168, 0, 0)
         muted   = [System.Drawing.Color]::FromArgb(110, 110, 110)
@@ -331,7 +336,7 @@ function Complete-WipeForm {
     $Form.ProgressBarCtl.Value = 100
     $Form.ProgressStatus.Text = $FinalStatus
     $Form.ProgressStatus.ForeColor =
-        if ($Success) { [System.Drawing.Color]::FromArgb(0, 120, 50) }
+        if ($Success) { [System.Drawing.Color]::FromArgb(0, 90, 35) }
         else          { [System.Drawing.Color]::FromArgb(168, 0, 0) }
 
     if ($Success -and $OnOpenLiveProgress -and $Form.CorrelationId) {
@@ -370,6 +375,7 @@ function Start-WipeInlineMonitor {
     )
 
     $statusFile = Join-Path $env:ProgramData ("IntuneWipeClient\status\{0}.json" -f $CorrelationId)
+    $latestFile = Join-Path $env:ProgramData "IntuneWipeClient\status\latest.json"
     $deadline   = (Get-Date).AddMinutes([math]::Max(1, $MaxMinutes))
 
     $translate = {
@@ -382,29 +388,57 @@ function Start-WipeInlineMonitor {
             '^notSupported$'      { return 'Operazione non supportata su questo dispositivo' }
             '^removedFromIntune$' { return 'Dispositivo rimosso da Intune (wipe completato)' }
             '^awaiting-graph$'    { return 'In attesa del primo controllo Intune' }
+            '^denied:'            { return ("Richiesta rifiutata: {0}" -f ($s -replace '^denied:', '')) }
+            '^failed:'            { return ("Errore permanente: {0}" -f ($s -replace '^failed:', '')) }
             default               { if ($s) { return $s } else { return 'In attesa...' } }
         }
     }
 
     $state = @{
         LastEffective = ''
+        WarnedNoFile  = $false
     }
 
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 2000
 
+    $noFileWarnAfter = (Get-Date).AddSeconds(15)
+
     $tick = {
         try {
-            if (-not (Test-Path -LiteralPath $statusFile)) {
+            # Try per-correlationId file first, then fall back to latest.json
+            $fileToRead = $null
+            if (Test-Path -LiteralPath $statusFile) {
+                $fileToRead = $statusFile
+            } elseif (Test-Path -LiteralPath $latestFile) {
+                try {
+                    $latestRaw = Get-Content -LiteralPath $latestFile -Raw -ErrorAction Stop
+                    if ($latestRaw) {
+                        $latestObj = $latestRaw | ConvertFrom-Json -ErrorAction Stop
+                        if ($latestObj.correlationId -eq $CorrelationId) {
+                            $fileToRead = $latestFile
+                        }
+                    }
+                } catch { }
+            }
+
+            if (-not $fileToRead) {
+                if (-not $state.WarnedNoFile -and (Get-Date) -ge $noFileWarnAfter) {
+                    $state.WarnedNoFile = $true
+                    Add-WipeFormLog -Form $Form -Message 'Il poller di stato SYSTEM non ha ancora scritto aggiornamenti.' -Kind warning
+                    Add-WipeFormLog -Form $Form -Message 'Verifica che il task \IntuneWipeClient\StatusPoller esista in Task Scheduler.' -Kind warning
+                    Add-WipeFormLog -Form $Form -Message 'Il monitoraggio continua in attesa...' -Kind muted
+                }
                 if ((Get-Date) -ge $deadline) {
-                    Add-WipeFormLog -Form $Form -Message 'Monitor avanzamento: nessun aggiornamento entro la finestra UI; il poller SYSTEM continua in background.' -Kind muted
+                    Add-WipeFormLog -Form $Form -Message 'Monitor avanzamento: nessun aggiornamento entro la finestra UI. Verificare il task StatusPoller.' -Kind warning
                     $timer.Stop()
+                    $Form.ProgressCloseBtn.Enabled = $true
                 }
                 return
             }
 
             $state.FileSeen = $true
-            $raw = Get-Content -LiteralPath $statusFile -Raw -ErrorAction Stop
+            $raw = Get-Content -LiteralPath $fileToRead -Raw -ErrorAction Stop
             if (-not $raw) { return }
             $obj = $raw | ConvertFrom-Json -ErrorAction Stop
 
@@ -420,17 +454,26 @@ function Start-WipeInlineMonitor {
             }
 
             $terminal = ($local -eq 'terminal') -or ($local -eq 'timeout')
+            $isDenied = ($srvState -match '^denied:')
+            if ($isDenied) { $terminal = $true }
             if ($terminal) {
                 $timer.Stop()
+                $Form.ProgressCloseBtn.Enabled = $true
+                $Form.OpenLiveProgressBtn.Visible = $false
                 $isError = ($srvState -match 'failed|notSupported')
-                if ($isError) {
+                if ($isDenied) {
+                    $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(176, 122, 0)
+                    $denyLabel = & $translate $srvState
+                    Set-WipeFormStatus -Form $Form -Text $denyLabel
+                    Add-WipeFormLog -Form $Form -Message $denyLabel -Kind warning
+                } elseif ($isError) {
                     $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(168, 0, 0)
                     Set-WipeFormStatus -Form $Form -Text 'Intune ha segnalato un errore durante il reset.'
                 } elseif ($local -eq 'timeout') {
                     $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(184, 134, 11)
                     Set-WipeFormStatus -Form $Form -Text 'Tempo di monitoraggio scaduto. Il poller SYSTEM continua in background.'
                 } else {
-                    $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 50)
+                    $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(0, 90, 35)
                     Set-WipeFormStatus -Form $Form -Text 'Reset completato.'
                 }
             }
