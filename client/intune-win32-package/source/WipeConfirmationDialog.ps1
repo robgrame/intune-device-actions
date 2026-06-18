@@ -375,6 +375,7 @@ function Start-WipeInlineMonitor {
     )
 
     $statusFile = Join-Path $env:ProgramData ("IntuneWipeClient\status\{0}.json" -f $CorrelationId)
+    $latestFile = Join-Path $env:ProgramData "IntuneWipeClient\status\latest.json"
     $deadline   = (Get-Date).AddMinutes([math]::Max(1, $MaxMinutes))
 
     $translate = {
@@ -387,6 +388,8 @@ function Start-WipeInlineMonitor {
             '^notSupported$'      { return 'Operazione non supportata su questo dispositivo' }
             '^removedFromIntune$' { return 'Dispositivo rimosso da Intune (wipe completato)' }
             '^awaiting-graph$'    { return 'In attesa del primo controllo Intune' }
+            '^denied:'            { return ("Richiesta rifiutata: {0}" -f ($s -replace '^denied:', '')) }
+            '^failed:'            { return ("Errore permanente: {0}" -f ($s -replace '^failed:', '')) }
             default               { if ($s) { return $s } else { return 'In attesa...' } }
         }
     }
@@ -403,7 +406,24 @@ function Start-WipeInlineMonitor {
 
     $tick = {
         try {
-            if (-not (Test-Path -LiteralPath $statusFile)) {
+            # Try per-correlationId file first, then fall back to latest.json
+            $fileToRead = $null
+            if (Test-Path -LiteralPath $statusFile) {
+                $fileToRead = $statusFile
+            } elseif (Test-Path -LiteralPath $latestFile) {
+                # latest.json may belong to a different correlationId — verify
+                try {
+                    $latestRaw = Get-Content -LiteralPath $latestFile -Raw -ErrorAction Stop
+                    if ($latestRaw) {
+                        $latestObj = $latestRaw | ConvertFrom-Json -ErrorAction Stop
+                        if ($latestObj.correlationId -eq $CorrelationId) {
+                            $fileToRead = $latestFile
+                        }
+                    }
+                } catch { }
+            }
+
+            if (-not $fileToRead) {
                 # Early warning if the SYSTEM poller hasn't written the file yet
                 if (-not $state.WarnedNoFile -and (Get-Date) -ge $noFileWarnAfter) {
                     $state.WarnedNoFile = $true
@@ -420,7 +440,7 @@ function Start-WipeInlineMonitor {
             }
 
             $state.FileSeen = $true
-            $raw = Get-Content -LiteralPath $statusFile -Raw -ErrorAction Stop
+            $raw = Get-Content -LiteralPath $fileToRead -Raw -ErrorAction Stop
             if (-not $raw) { return }
             $obj = $raw | ConvertFrom-Json -ErrorAction Stop
 
@@ -436,10 +456,18 @@ function Start-WipeInlineMonitor {
             }
 
             $terminal = ($local -eq 'terminal') -or ($local -eq 'timeout')
+            $isDenied = ($srvState -match '^denied:')
+            if ($isDenied) { $terminal = $true }
             if ($terminal) {
                 $timer.Stop()
+                $Form.ProgressCloseBtn.Enabled = $true
                 $isError = ($srvState -match 'failed|notSupported')
-                if ($isError) {
+                if ($isDenied) {
+                    $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(176, 122, 0)
+                    $denyLabel = & $translate $srvState
+                    Set-WipeFormStatus -Form $Form -Text $denyLabel
+                    Add-WipeFormLog -Form $Form -Message $denyLabel -Kind warning
+                } elseif ($isError) {
                     $Form.ProgressStatus.ForeColor = [System.Drawing.Color]::FromArgb(168, 0, 0)
                     Set-WipeFormStatus -Form $Form -Text 'Intune ha segnalato un errore durante il reset.'
                 } elseif ($local -eq 'timeout') {
