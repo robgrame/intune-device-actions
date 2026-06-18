@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "6804980258749175541"
+      "templateHash": "17463496397502091770"
     }
   },
   "parameters": {
@@ -328,6 +328,13 @@
       "defaultValue": [],
       "metadata": {
         "description": "IPv4 addresses or CIDR ranges of operators / build agents allowed to reach the storage data plane through the public endpoint (e.g. local dev box, GitHub Actions). Empty disables the IP allow-list (only AzureServices bypass remains)."
+      }
+    },
+    "seedAppConfig": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Seed App Configuration key-values via ARM. Disable on first deploy if ARM data-plane proxy returns Forbidden; use Seed-AppConfig.ps1 post-deploy instead."
       }
     },
     "nameSuffix": {
@@ -2041,7 +2048,7 @@
         "name": "standard"
       },
       "properties": {
-        "disableLocalAuth": true,
+        "disableLocalAuth": false,
         "publicNetworkAccess": "Enabled",
         "enablePurgeProtection": false,
         "dataPlaneProxy": {
@@ -2051,6 +2058,7 @@
       }
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Sentinel')]",
@@ -2062,6 +2070,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Audit:TableName')]",
@@ -2073,6 +2082,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Audit:StorageAccount')]",
@@ -2085,6 +2095,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ActionStatus:TableName')]",
@@ -2096,6 +2107,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ActionStatus:PollMaxAgeHours')]",
@@ -2107,6 +2119,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ActionStatusPoller:CronExpression')]",
@@ -2118,6 +2131,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:BlobContainer')]",
@@ -2129,6 +2143,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:StorageAccount')]",
@@ -2141,6 +2156,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AllowForceRearm')]",
@@ -2152,6 +2168,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:MaxActionsPerDevicePerDay')]",
@@ -2163,6 +2180,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:RearmGracePeriodHours')]",
@@ -2174,6 +2192,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'EventGrid:Enabled')]",
@@ -2185,6 +2204,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'EventGrid:AuditTopicEndpoint')]",
@@ -2197,6 +2217,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:fullyQualifiedNamespace')]",
@@ -2209,6 +2230,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:credential')]",
@@ -2220,6 +2242,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:ActionRequestsQueue')]",
@@ -2231,6 +2254,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:ActionDispatchQueue')]",
@@ -2242,6 +2266,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:WipeActionQueue')]",
@@ -2253,6 +2278,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:AutopilotActionQueue')]",
@@ -2264,6 +2290,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:BitLockerActionQueue')]",
@@ -2275,6 +2302,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:RenameActionQueue')]",
@@ -2286,6 +2314,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:TenantId')]",
@@ -2297,6 +2326,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Wipe:AllowedGroupId')]",
@@ -2308,6 +2338,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Wipe:KeepEnrollmentData')]",
@@ -2319,6 +2350,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Wipe:KeepUserData')]",
@@ -2330,6 +2362,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'BitLocker:AllowedGroupId')]",
@@ -2341,6 +2374,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:RequireClientCert')]",
@@ -2352,6 +2386,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:TrustForwardedHeader')]",
@@ -2363,6 +2398,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:TrustedCaThumbprints')]",
@@ -2374,6 +2410,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:TrustedRootCertificates')]",
@@ -2385,6 +2422,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:TrustedIntermediateCertificates')]",
@@ -2396,6 +2434,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:TrustedCaCertificates')]",
@@ -2407,6 +2446,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:AllowedLeafThumbprints')]",
@@ -2418,6 +2458,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:CheckRevocation')]",
@@ -2429,6 +2470,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:RevocationMode')]",
@@ -2440,6 +2482,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:RevocationFlag')]",
@@ -2451,6 +2494,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:RequireClientAuthEku')]",
@@ -2462,6 +2506,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:DeviceIdBindingClaim')]",
@@ -2473,6 +2518,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ClientCert:ThumbprintToDeviceMap')]",
@@ -2484,6 +2530,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Replay:MaxTimestampSkewSeconds')]",
@@ -2495,6 +2542,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AdminApiEnabled')]",
@@ -2506,6 +2554,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Actions:AllowedTypes')]",
@@ -2517,6 +2566,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$web')]",
@@ -2528,6 +2578,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$web')]",
@@ -2540,6 +2591,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$proc')]",
@@ -2551,6 +2603,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$proc')]",
@@ -2563,6 +2616,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:ManagedIdentityClientId$proc')]",
@@ -2575,6 +2629,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$wipe')]",
@@ -2586,6 +2641,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$wipe')]",
@@ -2598,6 +2654,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:ManagedIdentityClientId$wipe')]",
@@ -2610,6 +2667,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AdminApiEnabled$wipe')]",
@@ -2621,6 +2679,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$autopilot')]",
@@ -2632,6 +2691,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$autopilot')]",
@@ -2644,6 +2704,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:ManagedIdentityClientId$autopilot')]",
@@ -2656,6 +2717,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AdminApiEnabled$autopilot')]",
@@ -2667,6 +2729,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$bitlocker')]",
@@ -2678,6 +2741,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$bitlocker')]",
@@ -2690,6 +2754,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:ManagedIdentityClientId$bitlocker')]",
@@ -2702,6 +2767,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AdminApiEnabled$bitlocker')]",
@@ -2713,6 +2779,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'App:Role$rename')]",
@@ -2724,6 +2791,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'ServiceBus:clientId$rename')]",
@@ -2736,6 +2804,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Graph:ManagedIdentityClientId$rename')]",
@@ -2748,6 +2817,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Idempotency:AdminApiEnabled$rename')]",
@@ -2759,6 +2829,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Rename:Endpoint$rename')]",
@@ -2770,6 +2841,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Rename:AuthHeaderName$rename')]",
@@ -2781,6 +2853,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Rename:NewNameJsonPath$rename')]",
@@ -2792,6 +2865,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Rename:OnCollision$rename')]",
@@ -2803,6 +2877,7 @@
       ]
     },
     {
+      "condition": "[parameters('seedAppConfig')]",
       "type": "Microsoft.AppConfiguration/configurationStores/keyValues",
       "apiVersion": "2024-05-01",
       "name": "[format('{0}/{1}', variables('appConfigName'), 'Rename:TimeoutSeconds$rename')]",
