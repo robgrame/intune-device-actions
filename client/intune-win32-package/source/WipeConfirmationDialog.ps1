@@ -35,8 +35,12 @@ function Build-WipeConfirmationForm {
     $bul     = [char]0x2022
     $warnSym = [char]0x26A0
 
+    # Read client version from version.txt (same directory as this script)
+    $versionFile = Join-Path $PSScriptRoot 'version.txt'
+    $clientVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { '?.?.?' }
+
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = 'Conferma reset del dispositivo'
+    $form.Text            = ("Migrazione a Postazione Modern  v{0}" -f $clientVersion)
     $form.Size            = New-Object System.Drawing.Size(640, 560)
     $form.StartPosition   = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
@@ -233,6 +237,7 @@ $bul Assicurati di aver salvato tutto il lavoro in corso e di essere collegato a
     $form | Add-Member -NotePropertyName 'ProgressLog'        -NotePropertyValue $p2Log          -Force
     $form | Add-Member -NotePropertyName 'ProgressCloseBtn'   -NotePropertyValue $p2Close        -Force
     $form | Add-Member -NotePropertyName 'OpenLiveProgressBtn' -NotePropertyValue $p2OpenProgress -Force
+    $form | Add-Member -NotePropertyName 'ClientVersion'       -NotePropertyValue $clientVersion   -Force
 
     return $form
 }
@@ -265,7 +270,7 @@ function Switch-WipeFormToProgress {
     $Form.Phase2Panel.Visible = $true
     $Form.AcceptButton = $null
     $Form.CancelButton = $null
-    $Form.Text = 'Esecuzione richiesta di reset'
+    $Form.Text = ("Migrazione a Postazione Modern - Esecuzione  v{0}" -f $Form.ClientVersion)
     $Form.ProgressStatus.Text = $InitialStatus
     [System.Windows.Forms.Application]::DoEvents()
 }
