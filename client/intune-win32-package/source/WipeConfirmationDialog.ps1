@@ -393,17 +393,28 @@ function Start-WipeInlineMonitor {
 
     $state = @{
         LastEffective = ''
+        WarnedNoFile  = $false
     }
 
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 2000
 
+    $noFileWarnAfter = (Get-Date).AddSeconds(15)
+
     $tick = {
         try {
             if (-not (Test-Path -LiteralPath $statusFile)) {
+                # Early warning if the SYSTEM poller hasn't written the file yet
+                if (-not $state.WarnedNoFile -and (Get-Date) -ge $noFileWarnAfter) {
+                    $state.WarnedNoFile = $true
+                    Add-WipeFormLog -Form $Form -Message 'Il poller di stato SYSTEM non ha ancora scritto aggiornamenti.' -Kind warning
+                    Add-WipeFormLog -Form $Form -Message 'Verifica che il task \IntuneWipeClient\StatusPoller esista in Task Scheduler.' -Kind warning
+                    Add-WipeFormLog -Form $Form -Message 'Il monitoraggio continua in attesa...' -Kind muted
+                }
                 if ((Get-Date) -ge $deadline) {
-                    Add-WipeFormLog -Form $Form -Message 'Monitor avanzamento: nessun aggiornamento entro la finestra UI; il poller SYSTEM continua in background.' -Kind muted
+                    Add-WipeFormLog -Form $Form -Message 'Monitor avanzamento: nessun aggiornamento entro la finestra UI. Verificare il task StatusPoller.' -Kind warning
                     $timer.Stop()
+                    $Form.ProgressCloseBtn.Enabled = $true
                 }
                 return
             }
