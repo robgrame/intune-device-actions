@@ -287,10 +287,12 @@ try {
 
     # Capture stdout to extract the correlation id (and rich error details
     # on failure) from the wipe script output.
+    # NOTE: Write-Host goes to stream 6 (Information) in PS 5.1+; we must
+    # redirect it to success stream to capture correlationId output.
     $wipeFailed = $false
     $out = $null
     try {
-        $out = & $WipeScript @params 2>&1
+        $out = & $WipeScript @params 6>&1 2>&1
     } catch {
         $wipeFailed = $true
         $thrown = $_
@@ -337,7 +339,8 @@ try {
     # Success path: pull correlationId out of the captured stdout.
     $corr = $null
     foreach ($line in $out) {
-        if ($line -match 'correlationId\s*:\s*([0-9a-fA-F]{32}|[0-9a-fA-F-]{36})') {
+        $lineStr = [string]$line
+        if ($lineStr -match 'correlationId\s*:\s*([0-9a-fA-F]{32}|[0-9a-fA-F-]{36})') {
             $corr = $Matches[1]; break
         }
     }
