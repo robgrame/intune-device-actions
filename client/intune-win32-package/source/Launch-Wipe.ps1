@@ -69,12 +69,24 @@ try {
     if (Test-Path $ProgressUiPath) { . $ProgressUiPath }
 
     $progressSettings = [pscustomobject]@{ IntervalSeconds = 5; MaxMinutes = 30 }
-    if ((Get-Command Resolve-ActionStatusMonitoringOptions -ErrorAction SilentlyContinue) -and (Test-Path $ConfigPath)) {
+    # Polling settings: try ProgramData (user-readable) first, then config.json (may be ACL'd to SYSTEM only)
+    $pollingSettingsFile = Join-Path $DataDir 'polling-settings.json'
+    $pollingCfgSource = $null
+    if (Test-Path $pollingSettingsFile) {
         try {
-            $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json -ErrorAction Stop
+            $psCfg = Get-Content -LiteralPath $pollingSettingsFile -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ($psCfg.IntervalSeconds) { $progressSettings.IntervalSeconds = [int]$psCfg.IntervalSeconds }
+            if ($psCfg.MaxMinutes)      { $progressSettings.MaxMinutes = [int]$psCfg.MaxMinutes }
+            $pollingCfgSource = 'polling-settings.json'
+        } catch { }
+    }
+    if (-not $pollingCfgSource -and (Get-Command Resolve-ActionStatusMonitoringOptions -ErrorAction SilentlyContinue) -and (Test-Path $ConfigPath)) {
+        try {
+            $cfg = Get-Content -LiteralPath $ConfigPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
             $progressSettings = Resolve-ActionStatusMonitoringOptions -Config $cfg
+            $pollingCfgSource = 'config.json'
         } catch {
-            Write-Host ("WARN: could not read polling settings from config.json; using defaults. {0}" -f $_.Exception.Message)
+            # config.json is ACL'd to SYSTEM/Admins — expected in USER context
         }
     }
 

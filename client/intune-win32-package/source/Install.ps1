@@ -141,6 +141,19 @@ try {
     Set-Acl -LiteralPath $ConfigPath -AclObject $acl
     Write-Host "  Wrote config.json (restricted ACL)"
 
+    # --- Polling settings (user-readable, no secrets) -------------------------
+    # Write non-sensitive polling settings to ProgramData so the USER-context
+    # launcher can read them without needing access to config.json.
+    $pollingDataDir = Join-Path $env:ProgramData 'IntuneWipeClient'
+    New-Item -ItemType Directory -Force -Path $pollingDataDir | Out-Null
+    $pollingSettingsPath = Join-Path $pollingDataDir 'polling-settings.json'
+    $pollingSettings = [pscustomobject]@{
+        IntervalSeconds = [Math]::Max(1, $StatusPollIntervalSeconds)
+        MaxMinutes      = [Math]::Max(1, $StatusPollMaxMinutes)
+    }
+    $pollingSettings | ConvertTo-Json | Set-Content -LiteralPath $pollingSettingsPath -Encoding utf8
+    Write-Host "  Wrote polling-settings.json (user-readable)"
+
     # --- Shortcuts (Start Menu + Public Desktop, All Users) -----------------
     # Prefer the custom branded icon shipped in <InstallDir>\assets\, fall
     # back to imageres.dll,229 (the Windows 10/11 "Reset this PC" icon) so
