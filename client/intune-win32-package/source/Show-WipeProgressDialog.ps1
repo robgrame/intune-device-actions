@@ -60,7 +60,7 @@ function Show-WipeProgressDialog {
     $form.FormBorderStyle = 'Sizable'
     $form.MaximizeBox  = $true
     $form.MinimizeBox  = $true
-    $form.TopMost      = $false
+    $form.TopMost      = $true
     $form.BackColor    = [System.Drawing.Color]::White
 
     $icon = New-Object System.Windows.Forms.PictureBox
