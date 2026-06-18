@@ -57,7 +57,7 @@ function Build-WipeConfirmationForm {
     $form.Controls.Add($header)
 
     $hLbl = New-Object System.Windows.Forms.Label
-    $hLbl.Text      = "$warnSym  Reset di fabbrica del dispositivo"
+    $hLbl.Text      = "$warnSym  Migrazione a postazione modern"
     $hLbl.ForeColor = [System.Drawing.Color]::White
     $hLbl.Font      = New-Object System.Drawing.Font('Segoe UI Semibold', 16, [System.Drawing.FontStyle]::Bold)
     $hLbl.AutoSize  = $true
