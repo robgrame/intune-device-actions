@@ -139,6 +139,71 @@
       "category": "Idempotency",
       "sensitive": false,
       "requiresRestart": false
+    },
+    {
+      "key": "ClientCert:TrustedCaSubjects",
+      "displayName": "Subject delle CA fidate",
+      "description": "Distinguished Name (Subject) delle Root CA e Subordinate CA fidate, separati da pipe (|). Es: CN=Root CA, O=Corp|CN=Issuing CA, O=Corp",
+      "type": "string",
+      "default": "",
+      "validation": { "minLength": 0 },
+      "category": "Certificati",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "ClientCert:TrustedCaThumbprints",
+      "displayName": "Thumbprint delle CA fidate",
+      "description": "Thumbprint SHA1 (hex) delle Root CA e Subordinate CA, separati da virgola. Almeno uno deve essere presente nella chain del certificato client.",
+      "type": "string",
+      "default": "",
+      "validation": { "pattern": "^([0-9a-fA-F]{40}(,[0-9a-fA-F]{40})*)?$" },
+      "category": "Certificati",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "ClientCert:TrustedRootCertificates",
+      "displayName": "Certificati Root CA (Base64 DER)",
+      "description": "Certificati Root CA in formato Base64 DER, separati da virgola. Usati come trust anchor per la costruzione della chain.",
+      "type": "string",
+      "default": "",
+      "category": "Certificati",
+      "sensitive": false,
+      "requiresRestart": false,
+      "inputHint": "textarea"
+    },
+    {
+      "key": "ClientCert:TrustedIntermediateCertificates",
+      "displayName": "Certificati Subordinate CA (Base64 DER)",
+      "description": "Certificati delle Subordinate/Issuing CA in formato Base64 DER, separati da virgola. Usati come path hints per completare la chain.",
+      "type": "string",
+      "default": "",
+      "category": "Certificati",
+      "sensitive": false,
+      "requiresRestart": false,
+      "inputHint": "textarea"
+    },
+    {
+      "key": "ClientCert:CheckRevocation",
+      "displayName": "Verifica CRL/OCSP",
+      "description": "Se true, verifica lo stato di revoca dei certificati client tramite CRL o OCSP.",
+      "type": "boolean",
+      "default": "false",
+      "category": "Certificati",
+      "sensitive": false,
+      "requiresRestart": false
+    },
+    {
+      "key": "ClientCert:RevocationMode",
+      "displayName": "Modalità verifica revoca",
+      "description": "Modalità di verifica CRL: Online (scarica CRL/OCSP), Offline (cache locale), NoCheck (disabilitato).",
+      "type": "string",
+      "default": "Online",
+      "validation": { "pattern": "^(Online|Offline|NoCheck)$" },
+      "category": "Certificati",
+      "sensitive": false,
+      "requiresRestart": false
     }
   ]
 }
