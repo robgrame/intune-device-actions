@@ -12,6 +12,7 @@ public sealed class ClientCertValidator
     public enum DeviceIdBinding { Disabled, SubjectCN, SanDns, SanUri, Thumbprint, SanDnsLookup, Auto }
 
     private readonly HashSet<string> _trustedCaThumbprints;
+    private readonly HashSet<string> _trustedCaSubjects;
     private readonly HashSet<string> _allowedLeafThumbprints;
     private readonly List<X509Certificate2> _rootStore;          // anchors: CustomTrustStore
     private readonly List<X509Certificate2> _intermediateStore;  // path hints: ExtraStore only
@@ -36,6 +37,11 @@ public sealed class ClientCertValidator
             .Select(NormalizeThumbprint)
             .Where(t => t.Length > 0)
             .ToHashSet();
+
+        _trustedCaSubjects = ParseCsv(cfg["ClientCert:TrustedCaSubjects"], '|')
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         _allowedLeafThumbprints = ParseCsv(cfg["ClientCert:AllowedLeafThumbprints"]
                 ?? cfg["ClientCert:AllowedThumbprints"])
@@ -170,9 +176,9 @@ public sealed class ClientCertValidator
     /// </summary>
     public (bool Ok, X509Certificate2? Cert, string? Reason) Validate(HttpContext ctx)
     {
-        if (_trustedCaThumbprints.Count == 0 && _rootStore.Count == 0)
+        if (_trustedCaThumbprints.Count == 0 && _trustedCaSubjects.Count == 0 && _rootStore.Count == 0)
         {
-            _log.LogError("ClientCertValidator misconfigured: no TrustedCaThumbprints, no TrustedRootCertificates, and no legacy TrustedCaCertificates. Failing closed.");
+            _log.LogError("ClientCertValidator misconfigured: no TrustedCaThumbprints, no TrustedCaSubjects, no TrustedRootCertificates, and no legacy TrustedCaCertificates. Failing closed.");
             return (false, null, "client certificate trust anchor not configured");
         }
 
@@ -254,6 +260,18 @@ public sealed class ClientCertValidator
 
             if (!_trustedCaThumbprints.Overlaps(chainThumbs))
                 return (false, cert, "no trusted CA thumbprint found in the certificate chain");
+        }
+
+        if (_trustedCaSubjects.Count > 0)
+        {
+            var chainSubjects = chain.ChainElements
+                .Cast<X509ChainElement>()
+                .Skip(1) // exclude leaf
+                .Select(e => e.Certificate.Subject ?? string.Empty)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (!_trustedCaSubjects.Overlaps(chainSubjects))
+                return (false, cert, "no trusted CA subject found in the certificate chain");
         }
 
         return (true, cert, null);
@@ -372,6 +390,12 @@ public sealed class ClientCertValidator
     private static IEnumerable<string> ParseCsv(string? value)
         => (value ?? string.Empty)
             .Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0);
+
+    private static IEnumerable<string> ParseCsv(string? value, char separator)
+        => (value ?? string.Empty)
+            .Split(separator, StringSplitOptions.RemoveEmptyEntries)
             .Select(s => s.Trim())
             .Where(s => s.Length > 0);
 
