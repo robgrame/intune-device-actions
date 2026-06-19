@@ -704,23 +704,32 @@ function Invoke-PortalDeploy {
                 $appSettings = & az webapp config appsettings list -g $ResourceGroup -n $portalApp -o json --only-show-errors 2>$null
                 if ($LASTEXITCODE -eq 0 -and $appSettings) {
                     $items = $appSettings | ConvertFrom-Json
-                    if (-not $tenant) { $tenant = ($items | Where-Object { $_.name -eq 'Entra__TenantId' } | Select-Object -First 1).value }
-                    if (-not $client) { $client = ($items | Where-Object { $_.name -eq 'Entra__ClientId' } | Select-Object -First 1).value }
+                    # Try both naming conventions: Entra__ (new) and AzureAd__ (current)
+                    if (-not $tenant) {
+                        $tenant = ($items | Where-Object { $_.name -eq 'Entra__TenantId' -or $_.name -eq 'AzureAd__TenantId' } | Select-Object -First 1).value
+                    }
+                    if (-not $client) {
+                        $client = ($items | Where-Object { $_.name -eq 'Entra__ClientId' -or $_.name -eq 'AzureAd__ClientId' } | Select-Object -First 1).value
+                    }
                     if (-not $secret) {
-                        $secretRaw = ($items | Where-Object { $_.name -eq 'Entra__ClientSecret' } | Select-Object -First 1).value
+                        $secretRaw = ($items | Where-Object { $_.name -eq 'Entra__ClientSecret' -or $_.name -eq 'AzureAd__ClientSecret' } | Select-Object -First 1).value
                         if ($secretRaw) { $secret = ConvertTo-SecureString $secretRaw -AsPlainText -Force }
                     }
                 }
             }
         }
 
-        if (-not $tenant -or -not $client -or -not $secret) {
-            throw "When -SkipAppRegistration is set, provide -EntraTenantId/-EntraClientId/-EntraClientSecret or ensure existing portal app settings contain Entra__TenantId/Entra__ClientId/Entra__ClientSecret."
+        # If we have tenant+client but no secret, do code-only deploy (skip infra).
+        if ($tenant -and $client -and -not $secret) {
+            Write-Warn2 "No ClientSecret found; portal deploy will skip infra (code-only)."
+            $portalArgs.SkipInfra = $true
+        } elseif (-not $tenant -or -not $client -or -not $secret) {
+            throw "When -SkipAppRegistration is set, provide -EntraTenantId/-EntraClientId/-EntraClientSecret or ensure existing portal app settings contain Entra__/AzureAd__ TenantId/ClientId/ClientSecret."
+        } else {
+            $portalArgs.EntraTenantId = $tenant
+            $portalArgs.EntraClientId = $client
+            $portalArgs.EntraClientSecret = $secret
         }
-
-        $portalArgs.EntraTenantId = $tenant
-        $portalArgs.EntraClientId = $client
-        $portalArgs.EntraClientSecret = $secret
     }
     if ($script:NameSuffixOverridden) { $portalArgs.NameSuffix = $NameSuffix }
     if ($AssignUserUpn) {
