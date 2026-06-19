@@ -255,6 +255,7 @@ public sealed class ActionRequestFunction
             ClientCertThumbprint = cert?.Thumbprint,
             RequestedAt = DateTimeOffset.UtcNow,
             ForceRearm = forceRearm,
+            CallerUpn = body.CallerUpn,
             // Opaque pass-through: forward any extra top-level JSON properties
             // (e.g. "autopilot" for autopilot-register) to the downstream
             // capability runner without the Shared core knowing their shape.
@@ -303,6 +304,7 @@ public sealed class ActionRequestFunction
             [AuditEvents.Prop.EntraDeviceId]  = msg.EntraDeviceId,
             [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
             [AuditEvents.Prop.CertThumbprint] = msg.ClientCertThumbprint ?? "",
+            [AuditEvents.Prop.CallerUpn]      = msg.CallerUpn ?? "",
         };
         if (forceRearm) acceptProps[AuditEvents.Prop.ForceRearm] = "true";
         // If the header was set but not allowed by config, leave a breadcrumb so

@@ -94,6 +94,7 @@ $body = @{
     deviceName     = $deviceName
     entraDeviceId  = $entraId
     intuneDeviceId = $enrollmentId   # legacy field name; backend resolves the real id via EntraDeviceId
+    callerUpn      = try { ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) } catch { $null }
     autopilot      = $autopilot
 } | ConvertTo-Json -Compress -Depth 4
 

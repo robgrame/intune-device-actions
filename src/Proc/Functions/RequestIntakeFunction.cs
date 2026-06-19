@@ -114,6 +114,7 @@ public sealed class RequestIntakeFunction
             DeviceName      = msg.DeviceName,
             EntraDeviceId   = msg.EntraDeviceId,
             IntuneDeviceId  = msg.IntuneDeviceId,
+            CallerUpn       = msg.CallerUpn,
             RequestedAt     = msg.RequestedAt,
             // Default to "let the queue retry me" on failure. Security-critical
             // actions (wipe) should leave this on; opt-out best-effort actions

@@ -42,6 +42,12 @@ public sealed class ActionDispatchMessage
     /// <summary>Intune device id of the target device.</summary>
     public string IntuneDeviceId { get; set; } = string.Empty;
 
+    /// <summary>
+    /// UPN of the user who triggered the action (e.g. the logged-in user on
+    /// the device). Null when the client did not supply it.
+    /// </summary>
+    public string? CallerUpn { get; set; }
+
     /// <summary>When the original HTTP request was accepted.</summary>
     public DateTimeOffset RequestedAt { get; set; } = DateTimeOffset.UtcNow;
 

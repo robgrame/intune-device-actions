@@ -119,6 +119,7 @@ public static class AuditEvents
 
         // Inbound request envelope
         public const string CallerIp          = "callerIp";
+        public const string CallerUpn         = "callerUpn";
         public const string UserAgent         = "userAgent";
         public const string RequestSize       = "requestSize";
         public const string ContentType       = "contentType";

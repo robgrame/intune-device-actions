@@ -59,6 +59,7 @@ public sealed class ActionDispatchEnqueuer
             [AuditEvents.Prop.DeviceName]     = message.DeviceName,
             [AuditEvents.Prop.EntraDeviceId]  = message.EntraDeviceId,
             [AuditEvents.Prop.IntuneDeviceId] = message.IntuneDeviceId,
+            [AuditEvents.Prop.CallerUpn]      = message.CallerUpn ?? "",
             [AuditEvents.Prop.SchemaVersion]  = message.SchemaVersion,
         });
 

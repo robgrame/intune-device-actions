@@ -27,6 +27,7 @@ public sealed class ActionRequestMessage
     [JsonPropertyName("correlationId")]    public string CorrelationId { get; set; } = string.Empty;
     [JsonPropertyName("clientCertThumbprint")] public string? ClientCertThumbprint { get; set; }
     [JsonPropertyName("requestedAt")]      public DateTimeOffset RequestedAt { get; set; } = DateTimeOffset.UtcNow;
+    [JsonPropertyName("callerUpn")]        public string? CallerUpn { get; set; }
 
     /// <summary>
     /// If true AND the worker has <c>Idempotency:AllowForceRearm=true</c>, the
@@ -71,6 +72,7 @@ public sealed class ActionRequestMessage
             "clientCertThumbprint",
             "requestedAt",
             "forceRearm",
+            "callerUpn",
         };
 
     /// <summary>

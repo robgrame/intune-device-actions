@@ -29,6 +29,15 @@ public sealed class ActionRequest
     public string? IntuneDeviceId { get; set; }
 
     /// <summary>
+    /// UPN of the user who triggered the action (e.g. the logged-in user on
+    /// the device). Optional: clients that cannot determine the caller may
+    /// omit this field. When present, it flows end-to-end through the pipeline
+    /// and is included in all audit events for accountability.
+    /// </summary>
+    [JsonPropertyName("callerUpn")]
+    public string? CallerUpn { get; set; }
+
+    /// <summary>
     /// Opaque bag of any additional top-level JSON properties on the request
     /// body. Captures per-capability payloads (e.g. <c>autopilot</c> for the
     /// autopilot-register action) without leaking capability-specific types
