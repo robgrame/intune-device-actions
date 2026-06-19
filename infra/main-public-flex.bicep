@@ -256,6 +256,7 @@ var appConfigName   = toLower('${namePrefix}-appcfg${sep}${suffix}')
 // Per-Flex-app deployment package containers (Flex Consumption requirement).
 var procDeployContainer = 'app-package-proc'
 var wipeDeployContainer = 'app-package-wipe'
+var webDeployContainer  = 'app-package-web'
 var autopilotDeployContainer = 'app-package-autopilot'
 var bitlockerDeployContainer = 'app-package-bitlocker'
 var renameDeployContainer = 'app-package-rename'
@@ -296,6 +297,16 @@ resource storageWeb 'Microsoft.Storage/storageAccounts@2023-05-01' = {
       virtualNetworkRules: []
     }
   }
+}
+
+resource blobSvcWeb 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: storageWeb
+  name: 'default'
+}
+resource webDeployBlobContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobSvcWeb
+  name: webDeployContainer
+  properties: { publicAccess: 'None' }
 }
 
 resource storageProc 'Microsoft.Storage/storageAccounts@2023-05-01' = {
@@ -508,9 +519,9 @@ resource planWeb 'Microsoft.Web/serverfarms@2023-12-01' = {
   name: planWebName
   location: location
   tags:     tags
-  sku: { name: 'EP1', tier: 'ElasticPremium' }
-  kind: 'elastic'
-  properties: { reserved: true, maximumElasticWorkerCount: 5 }
+  sku: { tier: 'FlexConsumption', name: 'FC1' }
+  kind: 'functionapp'
+  properties: { reserved: true }
 }
 
 // Proc + Wipe move to Flex Consumption (FC1) for scale-to-zero + per-second
@@ -553,29 +564,37 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
     httpsOnly: true
     clientCertEnabled: true
     clientCertMode: 'Required'
-    // SECURITY: no clientCertExclusionPaths — every route (including the
-    // operator-only /api/actions/ledger admin surface) must present a valid
-    // client certificate. The admin surface additionally requires the caller
-    // thumbprint to be in Idempotency:AdminCertThumbprints (see
-    // ActionLedgerAdminFunction). The previous configuration excluded the
-    // ledger path from mTLS, leaving function-key-only auth on a destructive
-    // surface — fixed for banking-grade compliance (separation of duties).
     keyVaultReferenceIdentity: uamiWeb.id
-    // Public variant: NO VNet integration. Storage is reachable directly via
-    // its public endpoint (publicNetworkAccess='Enabled',
-    // networkAcls.defaultAction='Allow'). All outbound (Storage / Graph /
-    // Service Bus / App Config / App Insights) leaves on App Service public
-    // IPs. Use main.bicep if you require Private Endpoints, NAT Gateway with
-    // stable SNAT, and full VNet isolation.
+    functionAppConfig: {
+      deployment: {
+        storage: {
+          type: 'blobContainer'
+          value: '${storageWeb.properties.primaryEndpoints.blob}${webDeployContainer}'
+          authentication: {
+            type: 'UserAssignedIdentity'
+            userAssignedIdentityResourceId: uamiWeb.id
+          }
+        }
+      }
+      scaleAndConcurrency: {
+        maximumInstanceCount: 40
+        instanceMemoryMB: 2048
+        alwaysReady: [
+          { name: 'function:actionrequest',     instanceCount: 1 }
+          { name: 'function:actionstatus',      instanceCount: 1 }
+          { name: 'function:schedulemanifest',  instanceCount: 1 }
+          { name: 'function:dashboard_data',    instanceCount: 1 }
+        ]
+      }
+      runtime: {
+        name: 'dotnet-isolated'
+        version: '10.0'
+      }
+    }
     siteConfig: {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
-      linuxFxVersion: 'DOTNET-ISOLATED|10.0'
-      scmIpSecurityRestrictionsUseMain: true
       appSettings: [
-        { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
-        { name: 'FUNCTIONS_WORKER_RUNTIME',    value: 'dotnet-isolated' }
-        { name: 'WEBSITE_RUN_FROM_PACKAGE',    value: '1' }
         { name: 'AzureWebJobsStorage__accountName', value: storageWeb.name }
         { name: 'AzureWebJobsStorage__credential',  value: 'managedidentity' }
         { name: 'AzureWebJobsStorage__clientId',    value: uamiWeb.properties.clientId }
@@ -585,23 +604,19 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'App__Role', value: 'web' }
         { name: 'EventGrid__Enabled', value: string(enableEventGridAuditStream) }
         { name: 'EventGrid__AuditTopicEndpoint', value: enableEventGridAuditStream ? eventGridAuditTopic!.properties.endpoint : '' }
-        // Service Bus (MI auth, namespace-scoped FQDN, Sender on action-requests only).
         { name: 'ServiceBus__fullyQualifiedNamespace', value: '${sbNamespace.name}.servicebus.windows.net' }
         { name: 'ServiceBus__credential',              value: 'managedidentity' }
         { name: 'ServiceBus__clientId',                value: uamiWeb.properties.clientId }
         { name: 'ServiceBus__ActionRequestsQueue',     value: actionRequestsQueueName }
-        // Audit + action status tables on the proc storage account.
         { name: 'Audit__StorageAccount',     value: storageProc.name }
         { name: 'Audit__TableName',          value: auditTableName }
         { name: 'ActionStatus__TableName',   value: actionStatusTableName }
-        // Idempotency ledger access (web reads/resets via admin endpoints).
         { name: 'Idempotency__StorageAccount',          value: storageProc.name }
         { name: 'Idempotency__BlobContainer',           value: ledgerContainerName }
         { name: 'Idempotency__AllowForceRearm',         value: string(idempotencyAllowForceRearm) }
         { name: 'Idempotency__AdminApiEnabled',         value: string(idempotencyAdminApiEnabled) }
         { name: 'Idempotency__MaxActionsPerDevicePerDay', value: string(idempotencyMaxActionsPerDay) }
         { name: 'Idempotency__RearmGracePeriodHours',   value: string(idempotencyRearmGracePeriodHours) }
-        // GraphWipeService is pulled in transitively via the admin endpoint resolver.
         { name: 'Wipe__AllowedGroupId',     value: allowedGroupId }
         { name: 'Wipe__KeepEnrollmentData', value: string(keepEnrollmentData) }
         { name: 'Wipe__KeepUserData',       value: string(keepUserData) }
@@ -622,16 +637,13 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
       ]
     }
   }
-  // Force role assignments to be created (and start propagating) BEFORE the
-  // Function App is provisioned. Mitigates the cold-boot RBAC race where the
-  // app tries to read AppConfig / send to SB before its UAMI has the role.
-  // NOTE: still pair with a 60-120s wait + app restart in Phase D.
   dependsOn: [
     raWebBlob
     raWebTable
     raWebTableOnProc
     raWebLedger
     raWebSbSendRequests
+    raWebDeploy
     raAppConfigWeb
     raEventGridWeb
   ]
@@ -943,6 +955,11 @@ resource raWipeTableOnProc 'Microsoft.Authorization/roleAssignments@2022-04-01' 
 }
 
 // ── Flex Consumption deployment-container access (per-app, container-scoped) ─
+resource raWebDeploy 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(webDeployBlobContainer.id, uamiWeb.id, 'flex-deploy')
+  scope: webDeployBlobContainer
+  properties: { roleDefinitionId: blobDataContributor, principalId: uamiWeb.properties.principalId, principalType: 'ServicePrincipal' }
+}
 resource raProcDeploy 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(procDeployBlobContainer.id, uami.id, 'flex-deploy')
   scope: procDeployBlobContainer

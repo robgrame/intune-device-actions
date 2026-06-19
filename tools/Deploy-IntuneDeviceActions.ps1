@@ -45,6 +45,10 @@
                             isolation (storage / Service Bus reachable on
                             the public Internet, still RBAC-protected). Use
                             for low-cost / quick-start deployments.
+      flex               — infra\main-public-flex.bicep: same as public but
+                            ALL Function Apps (including Web) use Flex
+                            Consumption (FC1) with Always Ready. Lowest cost
+                            with warm instances.
 
 .PARAMETER NameSuffix
     Overrides the disambiguation suffix appended to globally-unique resource
@@ -166,7 +170,7 @@ param(
     # Forwarded to bicep as the 'tags' object parameter when non-empty.
     [hashtable]$Tags         = @{},
     [string]$ParametersFile,
-    [ValidateSet('hardened','public')]
+    [ValidateSet('hardened','public','flex')]
     [string]$NetworkProfile = 'public',
     [switch]$SkipPrereqInstall,
     [switch]$SkipPublish,
@@ -203,6 +207,9 @@ $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $InfraDir   = Join-Path $RepoRoot 'infra'
 if ($NetworkProfile -eq 'public') {
     $BicepFile  = Join-Path $InfraDir 'main-public.bicep'
+    $DefaultPF  = Join-Path $InfraDir 'main-public.parameters.json'
+} elseif ($NetworkProfile -eq 'flex') {
+    $BicepFile  = Join-Path $InfraDir 'main-public-flex.bicep'
     $DefaultPF  = Join-Path $InfraDir 'main-public.parameters.json'
 } else {
     $BicepFile  = Join-Path $InfraDir 'main.bicep'
@@ -697,23 +704,32 @@ function Invoke-PortalDeploy {
                 $appSettings = & az webapp config appsettings list -g $ResourceGroup -n $portalApp -o json --only-show-errors 2>$null
                 if ($LASTEXITCODE -eq 0 -and $appSettings) {
                     $items = $appSettings | ConvertFrom-Json
-                    if (-not $tenant) { $tenant = ($items | Where-Object { $_.name -eq 'Entra__TenantId' } | Select-Object -First 1).value }
-                    if (-not $client) { $client = ($items | Where-Object { $_.name -eq 'Entra__ClientId' } | Select-Object -First 1).value }
+                    # Try both naming conventions: Entra__ (new) and AzureAd__ (current)
+                    if (-not $tenant) {
+                        $tenant = ($items | Where-Object { $_.name -eq 'Entra__TenantId' -or $_.name -eq 'AzureAd__TenantId' } | Select-Object -First 1).value
+                    }
+                    if (-not $client) {
+                        $client = ($items | Where-Object { $_.name -eq 'Entra__ClientId' -or $_.name -eq 'AzureAd__ClientId' } | Select-Object -First 1).value
+                    }
                     if (-not $secret) {
-                        $secretRaw = ($items | Where-Object { $_.name -eq 'Entra__ClientSecret' } | Select-Object -First 1).value
+                        $secretRaw = ($items | Where-Object { $_.name -eq 'Entra__ClientSecret' -or $_.name -eq 'AzureAd__ClientSecret' } | Select-Object -First 1).value
                         if ($secretRaw) { $secret = ConvertTo-SecureString $secretRaw -AsPlainText -Force }
                     }
                 }
             }
         }
 
-        if (-not $tenant -or -not $client -or -not $secret) {
-            throw "When -SkipAppRegistration is set, provide -EntraTenantId/-EntraClientId/-EntraClientSecret or ensure existing portal app settings contain Entra__TenantId/Entra__ClientId/Entra__ClientSecret."
+        # If we have tenant+client but no secret, do code-only deploy (skip infra).
+        if ($tenant -and $client -and -not $secret) {
+            Write-Warn2 "No ClientSecret found; portal deploy will skip infra (code-only)."
+            $portalArgs.SkipInfra = $true
+        } elseif (-not $tenant -or -not $client -or -not $secret) {
+            throw "When -SkipAppRegistration is set, provide -EntraTenantId/-EntraClientId/-EntraClientSecret or ensure existing portal app settings contain Entra__/AzureAd__ TenantId/ClientId/ClientSecret."
+        } else {
+            $portalArgs.EntraTenantId = $tenant
+            $portalArgs.EntraClientId = $client
+            $portalArgs.EntraClientSecret = $secret
         }
-
-        $portalArgs.EntraTenantId = $tenant
-        $portalArgs.EntraClientId = $client
-        $portalArgs.EntraClientSecret = $secret
     }
     if ($script:NameSuffixOverridden) { $portalArgs.NameSuffix = $NameSuffix }
     if ($AssignUserUpn) {
@@ -831,8 +847,9 @@ function Show-PostDeployNotes {
     Write-Host '4) End-to-end test:' -ForegroundColor White
     $webApp  = Get-FunctionAppByRole 'web'
     if ($webApp) {
-        $webHost = (& az functionapp show -g $ResourceGroup -n $webApp `
-            --query defaultHostName -o tsv --only-show-errors).Trim()
+        $webHostRaw = & az functionapp show -g $ResourceGroup -n $webApp `
+            --query defaultHostName -o tsv --only-show-errors 2>$null
+        $webHost = if ($webHostRaw) { $webHostRaw.Trim() } else { "$webApp.azurewebsites.net" }
         Write-Host "     client\Invoke-DeviceWipe.ps1 -ApiUrl https://$webHost/api/actions ..." -ForegroundColor Gray
     }
     if ($DeployPortal) {
