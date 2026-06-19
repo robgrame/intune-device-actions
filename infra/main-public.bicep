@@ -1740,6 +1740,14 @@ resource raAppConfigPortal 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   properties: { roleDefinitionId: appConfigDataOwner, principalId: portalPrincipalId, principalType: 'ServicePrincipal' }
 }
 
+// Portal UAMI needs Table Data Contributor on the wipe storage account to
+// manage schedule waves (wipeschedulewaves / wipeschedulemembers tables).
+resource raStorageWipeTablePortal 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(portalPrincipalId)) {
+  name: guid(storageWipe.id, portalPrincipalId, 'table-contributor')
+  scope: storageWipe
+  properties: { roleDefinitionId: tableDataContributor, principalId: portalPrincipalId, principalType: 'ServicePrincipal' }
+}
+
 resource raAppConfigWeb 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(appConfig.id, uamiWeb.id, 'appcfg-reader')
   scope: appConfig
