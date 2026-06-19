@@ -1,15 +1,16 @@
 <#
 .SYNOPSIS
     Proactive Remediation - Detect script.
-    Polls the IntuneDeviceActions API /api/schedule/me endpoint to determine
-    whether this device belongs to an active wave (startDate <= now).
+    Polls the IntuneDeviceActions API /api/schedule/me?actionType=wipe endpoint
+    to determine whether this device belongs to an active wipe wave (isImmediate=true).
 
 .DESCRIPTION
     Runs as SYSTEM via Intune Proactive Remediation on a periodic schedule.
-    - Calls /api/schedule/me with the device's client certificate.
-    - If the response contains an active wave (startDate in the past), exits 1
-      (non-compliant) so Intune triggers the Remediate script.
-    - If no active wave or startDate is in the future, exits 0 (compliant).
+    - Calls /api/schedule/me?actionType=wipe with the device's client certificate.
+    - The server returns a DeviceScheduleSnapshot (200) or 204 (no wave).
+    - If isImmediate is true (wave has fired), exits 1 (non-compliant) so
+      Intune triggers the Remediate script that creates the desktop shortcut.
+    - If 204 or isImmediate is false, exits 0 (compliant).
 
     The schedule manifest caches locally to avoid repeated calls on every run.
 
@@ -23,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 # --- Configuration (override via env vars or hardcode for your tenant) -------
 $ApiBaseUrl    = $env:INTUNE_ACTIONS_API_URL
 if (-not $ApiBaseUrl) { $ApiBaseUrl = 'https://devact-web-dev.azurewebsites.net' }
-$SchedulePath  = '/api/schedule/me'
+$SchedulePath  = '/api/schedule/me?actionType=wipe'
 $CacheDir      = Join-Path $env:ProgramData 'IntuneWipeClient'
 $CacheFile     = Join-Path $CacheDir 'wave-schedule.json'
 $CacheTtlHours = 4
@@ -65,17 +66,24 @@ if (Test-Path $CacheFile) {
 
 # --- Poll API or read cache --------------------------------------------------
 if ($useCache) {
-    $manifest = Get-Content $CacheFile -Raw | ConvertFrom-Json
+    $raw = Get-Content $CacheFile -Raw
+    $manifest = if ($raw) { $raw | ConvertFrom-Json } else { $null }
 } else {
     try {
         $uri = "$ApiBaseUrl$SchedulePath"
         $response = Invoke-RestMethod -Uri $uri -Certificate $cert -Method GET -TimeoutSec 30
-        $manifest = $response
-        $manifest | ConvertTo-Json -Depth 10 | Set-Content -Path $CacheFile -Encoding UTF8
+        $manifest = $response  # $null on 204 No Content
+        if ($manifest) {
+            $manifest | ConvertTo-Json -Depth 10 | Set-Content -Path $CacheFile -Encoding UTF8
+        } else {
+            # 204 - no wave; clear stale cache
+            if (Test-Path $CacheFile) { Remove-Item $CacheFile -Force }
+        }
     } catch {
         Write-Host "API call failed: $($_.Exception.Message). Using stale cache or skipping."
         if (Test-Path $CacheFile) {
-            $manifest = Get-Content $CacheFile -Raw | ConvertFrom-Json
+            $raw = Get-Content $CacheFile -Raw
+            $manifest = if ($raw) { $raw | ConvertFrom-Json } else { $null }
         } else {
             Write-Host "No cache available. Compliant (skip)."
             exit 0
@@ -84,26 +92,19 @@ if ($useCache) {
 }
 
 # --- Evaluate wave activation ------------------------------------------------
-$now = Get-Date
+# The server returns a single DeviceScheduleSnapshot JSON object with:
+#   waveId, name, actionType, scheduledAtUtc, status, isImmediate, description, generatedAtUtc
+# If no wave applies, the server returns 204 (empty response / $null manifest).
 
-# The manifest contains scheduled actions; look for a wipe wave with startDate <= now
-$activeWave = $null
-if ($manifest.waves) {
-    $activeWave = $manifest.waves |
-        Where-Object { $_.startDate -and [DateTime]::Parse($_.startDate) -le $now } |
-        Sort-Object { [DateTime]::Parse($_.startDate) } -Descending |
-        Select-Object -First 1
-} elseif ($manifest.startDate) {
-    # Simple format: single schedule entry
-    if ([DateTime]::Parse($manifest.startDate) -le $now) {
-        $activeWave = $manifest
-    }
+if (-not $manifest) {
+    Write-Host "No scheduled wave for this device (204). Compliant."
+    exit 0
 }
 
-if ($activeWave) {
-    Write-Host "Active wave found (startDate: $($activeWave.startDate)). Non-compliant - remediation needed."
+if ($manifest.isImmediate -eq $true) {
+    Write-Host "Active wave '$($manifest.name)' (scheduledAtUtc: $($manifest.scheduledAtUtc), waveId: $($manifest.waveId)). Non-compliant - remediation needed."
     exit 1
 } else {
-    Write-Host "No active wave for this device. Compliant."
+    Write-Host "Wave '$($manifest.name)' scheduled for $($manifest.scheduledAtUtc) - not yet active. Compliant."
     exit 0
 }

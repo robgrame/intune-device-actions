@@ -1,13 +1,21 @@
 # Wave-based Desktop Shortcut (Proactive Remediation)
 
 Questa Proactive Remediation di Intune mostra l'icona sul desktop dell'utente
-**solo quando il device appartiene a una wave attiva** (startDate raggiunta).
+**solo quando il device appartiene a una wave wipe attiva** (la wave ha fired,
+cioe' `isImmediate=true` nella risposta del server).
+
+## Architettura
+
+Non esiste infrastruttura server dedicata. La feature sfrutta il
+**WipeScheduleProvider** gia' presente: il client interroga
+`GET /api/schedule/me?actionType=wipe` e valuta il campo `isImmediate`
+della `DeviceScheduleSnapshot` restituita.
 
 ## Componenti
 
 | File | Contesto | Scopo |
 |------|----------|-------|
-| `Detect.ps1` | SYSTEM | Polling periodico su `/api/schedule/me` per verificare se il device e' in una wave attiva |
+| `Detect.ps1` | SYSTEM | Polling periodico su `/api/schedule/me?actionType=wipe` per verificare se il device e' in una wave attiva |
 | `Remediate.ps1` | SYSTEM | Crea lo shortcut sul Public Desktop + scrive flag |
 
 ## Flusso
@@ -16,10 +24,11 @@ Questa Proactive Remediation di Intune mostra l'icona sul desktop dell'utente
 [Intune Proactive Remediation - ogni N ore]
     |
     v
-Detect.ps1 --> GET /api/schedule/me (mTLS)
+Detect.ps1 --> GET /api/schedule/me?actionType=wipe (mTLS)
     |
-    |-- Nessuna wave attiva --> exit 0 (compliant, noop)
-    |-- Wave attiva (startDate <= now) --> exit 1 (non-compliant)
+    |-- 204 No Content (nessuna wave) --> exit 0 (compliant, noop)
+    |-- 200 + isImmediate=false       --> exit 0 (wave futura, noop)
+    |-- 200 + isImmediate=true        --> exit 1 (non-compliant)
          |
          v
     Remediate.ps1 --> Crea shortcut sul Public Desktop
@@ -29,6 +38,23 @@ Detect.ps1 --> GET /api/schedule/me (mTLS)
     [Prossimo ciclo Detect.ps1]
     |-- Flag esiste --> exit 0 (compliant, shortcut gia' presente)
 ```
+
+## Risposta server (DeviceScheduleSnapshot)
+
+```json
+{
+  "waveId": "a1b2c3d4-...",
+  "name": "Wave 1 - Pilot",
+  "actionType": "wipe",
+  "scheduledAtUtc": "2026-07-01T08:00:00Z",
+  "status": "scheduled",
+  "isImmediate": true,
+  "description": "...",
+  "generatedAtUtc": "2026-06-19T14:00:00Z"
+}
+```
+
+Se il device non e' in nessuna wave, il server risponde `204 No Content`.
 
 ## Configurazione
 
