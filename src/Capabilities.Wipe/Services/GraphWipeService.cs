@@ -32,6 +32,8 @@ public sealed class GraphWipeService
     private readonly bool _keepEnrollment;
     private readonly bool _keepUserData;
     private readonly string _allowedGroupId;
+    private readonly string? _allowedUserGroupId;
+    private readonly GatingMode _gatingMode;
     private readonly int _syncFallbackDelaySeconds;
     private readonly int _rebootFallbackDelaySeconds;
     private readonly int _syncFallbackMaxAttempts;
@@ -45,6 +47,19 @@ public sealed class GraphWipeService
         _keepUserData = bool.TryParse(cfg["Wipe:KeepUserData"], out var ku) && ku;
         _allowedGroupId = cfg["Wipe:AllowedGroupId"]
             ?? throw new InvalidOperationException("Wipe:AllowedGroupId must be configured");
+        _allowedUserGroupId = cfg["Wipe:AllowedUserGroupId"];
+        _gatingMode = Enum.TryParse<GatingMode>(cfg["Wipe:GatingMode"], ignoreCase: true, out var gm)
+                      && Enum.IsDefined(typeof(GatingMode), gm)
+            ? gm : GatingMode.DeviceOnly;
+
+        // Validate: if gating mode requires user group, it must be configured.
+        if (_gatingMode is GatingMode.UserOnly or GatingMode.Both
+            && string.IsNullOrWhiteSpace(_allowedUserGroupId))
+        {
+            throw new InvalidOperationException(
+                $"Wipe:GatingMode is '{_gatingMode}' but Wipe:AllowedUserGroupId is not configured. " +
+                "Either set AllowedUserGroupId or change GatingMode to DeviceOnly or Either.");
+        }
 
         // Post-wipe fallback nudges. Default: syncDevice 60s after wipe, then
         // rebootNow 60s after the sync. Set either to 0 to disable that step.
@@ -67,6 +82,8 @@ public sealed class GraphWipeService
     public bool KeepEnrollmentData         => _keepEnrollment;
     public bool KeepUserData               => _keepUserData;
     public string AllowedGroupId           => _allowedGroupId;
+    public string? AllowedUserGroupId      => _allowedUserGroupId;
+    public GatingMode ActiveGatingMode     => _gatingMode;
 
     /// <summary>
     /// Resolves the directory object id of an Entra device by its deviceId (azureADDeviceId).
@@ -96,6 +113,31 @@ public sealed class GraphWipeService
             .PostAsCheckMemberGroupsPostResponseAsync(body, cancellationToken: ct);
         var matches = result?.Value ?? new List<string>();
         return matches.Contains(_allowedGroupId, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Checks if the caller (by UPN) is a member (direct or transitive) of the
+    /// allowed user group (<c>Wipe:AllowedUserGroupId</c>).
+    /// Returns <c>false</c> if no user group is configured (caller cannot pass
+    /// a gate that does not exist — <c>Either</c> mode degenerates to device-only).
+    /// </summary>
+    public async Task<bool> IsUserInAllowedGroupAsync(string? callerUpn, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(_allowedUserGroupId))
+            return false; // no user group configured = user gate cannot pass
+
+        if (string.IsNullOrWhiteSpace(callerUpn))
+            return false; // UPN required when user gating is active
+
+        var body = new Microsoft.Graph.Users.Item.CheckMemberGroups.CheckMemberGroupsPostRequestBody
+        {
+            GroupIds = new List<string> { _allowedUserGroupId }
+        };
+        var result = await _graph.Users[callerUpn]
+            .CheckMemberGroups
+            .PostAsCheckMemberGroupsPostResponseAsync(body, cancellationToken: ct);
+        var matches = result?.Value ?? new List<string>();
+        return matches.Contains(_allowedUserGroupId, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
