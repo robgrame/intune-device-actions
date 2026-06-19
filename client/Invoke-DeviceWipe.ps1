@@ -145,7 +145,7 @@ $body = @{
     deviceName     = $deviceName
     entraDeviceId  = $entraId
     intuneDeviceId = $enrollmentId   # legacy field name; backend uses it only for audit, resolves real id via EntraDeviceId
-    callerUpn      = try { ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) } catch { $null }
+    callerUpn      = try { (whoami /upn 2>$null)?.Trim() } catch { $null }
 } | ConvertTo-Json -Compress
 
 $headers = @{

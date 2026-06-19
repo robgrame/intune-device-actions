@@ -95,7 +95,7 @@ $body = [ordered]@{
 }
 if ($IntuneDeviceId) { $body.intuneDeviceId = $IntuneDeviceId }
 if ($EntraDeviceId)  { $body.entraDeviceId  = $EntraDeviceId }
-$body.callerUpn = try { ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) } catch { $null }
+$body.callerUpn = try { (whoami /upn 2>$null)?.Trim() } catch { $null }
 
 $json = $body | ConvertTo-Json -Depth 6 -Compress
 Write-Verbose "POST $ApiBaseUrl"

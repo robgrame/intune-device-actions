@@ -11,6 +11,9 @@
   <Folder Name="/Capabilities.Rename/">
     <Project Path="Capabilities.Rename/IntuneDeviceActions.Capabilities.Rename.csproj" />
   </Folder>
+  <Folder Name="/Capabilities.Wipe.Tests/">
+    <Project Path="Capabilities.Wipe.Tests/IntuneDeviceActions.Capabilities.Wipe.Tests.csproj" />
+  </Folder>
   <Folder Name="/Capabilities.Wipe/">
     <Project Path="Capabilities.Wipe/IntuneDeviceActions.Capabilities.Wipe.csproj" />
   </Folder>

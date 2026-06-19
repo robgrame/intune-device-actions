@@ -183,19 +183,22 @@ public sealed class WipeActionRunner : IActionRunner
 
         // 2) Group membership gating (device + user, governed by GatingMode)
         var gatingMode = _graph.ActiveGatingMode;
-        var callerUpn = msg.CallerUpn ?? envelope.CallerUpn;
+        var callerUpn = !string.IsNullOrWhiteSpace(msg.CallerUpn) ? msg.CallerUpn.Trim()
+                      : !string.IsNullOrWhiteSpace(envelope.CallerUpn) ? envelope.CallerUpn.Trim()
+                      : null;
 
         bool deviceInGroup = false;
         bool userInGroup = false;
-        bool needDeviceCheck = gatingMode is GatingMode.DeviceOnly or GatingMode.Both or GatingMode.Either;
-        bool needUserCheck   = gatingMode is GatingMode.UserOnly or GatingMode.Both or GatingMode.Either;
+        bool deviceCheckDone = false;
+        bool userCheckDone = false;
 
         // 2a) Device group check (when required by gating mode)
-        if (needDeviceCheck)
+        if (gatingMode is GatingMode.DeviceOnly or GatingMode.Both or GatingMode.Either)
         {
             try
             {
                 deviceInGroup = await _graph.IsDeviceInAllowedGroupAsync(deviceObjId, ct);
+                deviceCheckDone = true;
             }
             catch (Exception ex) when (GraphWipeService.Classify(ex) == GraphWipeService.GraphErrorKind.Transient)
             {
@@ -204,23 +207,36 @@ public sealed class WipeActionRunner : IActionRunner
             }
             catch (Exception ex)
             {
-                _audit.TrackEvent(AuditEvents.DeniedGroupCheckFailed, ex, new Dictionary<string, string>
+                // In Either mode, device check failure is non-fatal — fall through to user check
+                if (gatingMode == GatingMode.Either)
                 {
-                    [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
-                    [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
-                    [AuditEvents.Prop.ActionType]    = Type,
-                });
-                await _statusTracker.RecordTerminalAsync(msg, Type, "denied:group-check-failed", ct);
-                return;
+                    _log.LogWarning(ex, "Device group check failed in Either mode; falling through to user check");
+                }
+                else
+                {
+                    _audit.TrackEvent(AuditEvents.DeniedGroupCheckFailed, ex, new Dictionary<string, string>
+                    {
+                        [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
+                        [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+                        [AuditEvents.Prop.ActionType]    = Type,
+                    });
+                    await _statusTracker.RecordTerminalAsync(msg, Type, "denied:group-check-failed", ct);
+                    return;
+                }
             }
+
+            // Short-circuit: in Either mode, if device passes, skip user check
+            if (gatingMode == GatingMode.Either && deviceInGroup)
+                goto gateAllowed;
         }
 
         // 2b) User group check (when required by gating mode)
-        if (needUserCheck)
+        if (gatingMode is GatingMode.UserOnly or GatingMode.Both or GatingMode.Either)
         {
             try
             {
                 userInGroup = await _graph.IsUserInAllowedGroupAsync(callerUpn, ct);
+                userCheckDone = true;
             }
             catch (Exception ex) when (GraphWipeService.Classify(ex) == GraphWipeService.GraphErrorKind.Transient)
             {
@@ -229,6 +245,12 @@ public sealed class WipeActionRunner : IActionRunner
             }
             catch (Exception ex)
             {
+                // In Either mode, user check failure is non-fatal if device already passed
+                if (gatingMode == GatingMode.Either && deviceInGroup)
+                {
+                    _log.LogWarning(ex, "User group check failed in Either mode but device passed; allowing");
+                    goto gateAllowed;
+                }
                 _audit.TrackEvent(AuditEvents.DeniedGroupCheckFailed, ex, new Dictionary<string, string>
                 {
                     [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
@@ -242,40 +264,44 @@ public sealed class WipeActionRunner : IActionRunner
         }
 
         // 2c) Evaluate combined gate result based on gating mode
-        bool gatePass = gatingMode switch
         {
-            GatingMode.DeviceOnly => deviceInGroup,
-            GatingMode.UserOnly   => userInGroup,
-            GatingMode.Both       => deviceInGroup && userInGroup,
-            GatingMode.Either     => deviceInGroup || userInGroup,
-            _                     => deviceInGroup, // fallback = DeviceOnly
-        };
-
-        if (!gatePass)
-        {
-            var denyReason = gatingMode switch
+            bool gatePass = gatingMode switch
             {
-                GatingMode.UserOnly => "denied:user-not-in-allowed-group",
-                GatingMode.Both when !deviceInGroup && !userInGroup => "denied:neither-device-nor-user-in-group",
-                GatingMode.Both when !deviceInGroup => "denied:device-not-in-allowed-group",
-                GatingMode.Both when !userInGroup   => "denied:user-not-in-allowed-group",
-                GatingMode.Either => "denied:neither-device-nor-user-in-group",
-                _ => "denied:not-in-allowed-group",
+                GatingMode.DeviceOnly => deviceInGroup,
+                GatingMode.UserOnly   => userInGroup,
+                GatingMode.Both       => deviceInGroup && userInGroup,
+                GatingMode.Either     => deviceInGroup || userInGroup,
+                _                     => deviceInGroup, // fallback = DeviceOnly
             };
-            _audit.TrackEvent(AuditEvents.DeniedNotInAllowedGroup, new Dictionary<string, string>
+
+            if (!gatePass)
             {
-                [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
-                [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
-                [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
-                [AuditEvents.Prop.CallerUpn]     = callerUpn ?? "",
-                [AuditEvents.Prop.ActionType]    = Type,
-                ["gatingMode"]                   = gatingMode.ToString(),
-                ["deviceInGroup"]                = deviceInGroup.ToString(),
-                ["userInGroup"]                  = userInGroup.ToString(),
-            }, LogLevel.Warning);
-            await _statusTracker.RecordTerminalAsync(msg, Type, denyReason, ct);
-            return;
+                var denyReason = gatingMode switch
+                {
+                    GatingMode.UserOnly => "denied:user-not-in-allowed-group",
+                    GatingMode.Both when !deviceInGroup && !userInGroup => "denied:neither-device-nor-user-in-group",
+                    GatingMode.Both when !deviceInGroup => "denied:device-not-in-allowed-group",
+                    GatingMode.Both when !userInGroup   => "denied:user-not-in-allowed-group",
+                    GatingMode.Either => "denied:neither-device-nor-user-in-group",
+                    _ => "denied:not-in-allowed-group",
+                };
+                _audit.TrackEvent(AuditEvents.DeniedNotInAllowedGroup, new Dictionary<string, string>
+                {
+                    [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
+                    [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
+                    [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
+                    [AuditEvents.Prop.CallerUpn]     = callerUpn ?? "",
+                    [AuditEvents.Prop.ActionType]    = Type,
+                    ["gatingMode"]                   = gatingMode.ToString(),
+                    ["deviceInGroup"]                = deviceInGroup.ToString(),
+                    ["userInGroup"]                  = userInGroup.ToString(),
+                }, LogLevel.Warning);
+                await _statusTracker.RecordTerminalAsync(msg, Type, denyReason, ct);
+                return;
+            }
         }
+
+        gateAllowed:
         _audit.TrackEvent(WipeAuditEvents.ValidationGroupAllowed, new Dictionary<string, string>
         {
             [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
