@@ -45,6 +45,10 @@
                             isolation (storage / Service Bus reachable on
                             the public Internet, still RBAC-protected). Use
                             for low-cost / quick-start deployments.
+      flex               — infra\main-public-flex.bicep: same as public but
+                            ALL Function Apps (including Web) use Flex
+                            Consumption (FC1) with Always Ready. Lowest cost
+                            with warm instances.
 
 .PARAMETER NameSuffix
     Overrides the disambiguation suffix appended to globally-unique resource
@@ -166,7 +170,7 @@ param(
     # Forwarded to bicep as the 'tags' object parameter when non-empty.
     [hashtable]$Tags         = @{},
     [string]$ParametersFile,
-    [ValidateSet('hardened','public')]
+    [ValidateSet('hardened','public','flex')]
     [string]$NetworkProfile = 'public',
     [switch]$SkipPrereqInstall,
     [switch]$SkipPublish,
@@ -203,6 +207,9 @@ $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $InfraDir   = Join-Path $RepoRoot 'infra'
 if ($NetworkProfile -eq 'public') {
     $BicepFile  = Join-Path $InfraDir 'main-public.bicep'
+    $DefaultPF  = Join-Path $InfraDir 'main-public.parameters.json'
+} elseif ($NetworkProfile -eq 'flex') {
+    $BicepFile  = Join-Path $InfraDir 'main-public-flex.bicep'
     $DefaultPF  = Join-Path $InfraDir 'main-public.parameters.json'
 } else {
     $BicepFile  = Join-Path $InfraDir 'main.bicep'
