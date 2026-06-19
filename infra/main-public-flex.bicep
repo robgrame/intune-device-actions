@@ -2393,3 +2393,6 @@ output wipeDeployContainer string = wipeDeployContainer
 output automationAccountName string = enableRunbookVariant ? automationAccount.name : ''
 output runbookName           string = enableRunbookVariant ? runbookName : ''
 output automationPrincipalId string = enableRunbookVariant ? automationAccount.identity.principalId : ''
+
+output aiName             string = ai.name
+output aiConnectionString string = ai.properties.ConnectionString
