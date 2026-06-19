@@ -198,7 +198,8 @@ public sealed class WipeScheduleStore
 
     /// <summary>
     /// Returns the next imminent schedule entry for <paramref name="entraDeviceId"/>,
-    /// or null if the device is not enrolled in any client-visible wave.
+    /// or null if the device is not enrolled in any client-visible wave
+    /// (individual membership only — group-based waves are resolved by the provider).
     /// Implemented as a cross-partition scan on the members table filtered by
     /// RowKey, then per-membership wave resolution. Acceptable for &lt;1000
     /// waves; for larger volumes introduce a reverse-index table.
@@ -216,7 +217,6 @@ public sealed class WipeScheduleStore
         {
             memberships.Add(m);
         }
-        if (memberships.Count == 0) return null;
 
         var candidates = new List<WipeScheduleWave>();
         foreach (var m in memberships)
@@ -227,15 +227,38 @@ public sealed class WipeScheduleStore
             if (!WaveStatus.ClientVisible.Contains(wave.Status)) continue;
             candidates.Add(wave);
         }
+
+        return PickBestCandidate(candidates);
+    }
+
+    /// <summary>
+    /// Returns all client-visible waves that use Entra group membership
+    /// (EntraGroupId is not null/empty). Used by the provider to check if
+    /// the device belongs to any of these groups via Graph.
+    /// </summary>
+    public async Task<IReadOnlyList<WipeScheduleWave>> GetGroupBasedWavesAsync(CancellationToken ct = default)
+    {
+        await EnsureTablesAsync(ct).ConfigureAwait(false);
+        var list = new List<WipeScheduleWave>();
+        await foreach (var w in _waves.QueryAsync<WipeScheduleWave>(
+            $"PartitionKey eq '{WipeScheduleWave.DefaultPartition}'",
+            cancellationToken: ct))
+        {
+            if (string.IsNullOrWhiteSpace(w.EntraGroupId)) continue;
+            if (!WaveStatus.ClientVisible.Contains(w.Status)) continue;
+            list.Add(w);
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Given a list of candidate waves, pick the best one (next future, or most recent past).
+    /// Returns null if candidates is empty.
+    /// </summary>
+    internal static DeviceScheduleSnapshot? PickBestCandidate(IReadOnlyList<WipeScheduleWave> candidates)
+    {
         if (candidates.Count == 0) return null;
 
-        // Prioritise the next IMMINENT FUTURE wave over any past wave (a past
-        // wave with status still 'scheduled'/'executing' is almost always a
-        // stale row the operator forgot to mark completed/canceled — if a
-        // newer future wave exists for the same device, that's the operator's
-        // current intent and must take precedence). Only when no future wave
-        // exists do we fall back to the most-recent past wave (which the
-        // runner won't gate on, so the wipe proceeds anyway).
         var now = DateTimeOffset.UtcNow;
         var future = candidates.Where(c => c.ScheduledAtUtc > now).ToList();
         WipeScheduleWave next;
@@ -246,11 +269,9 @@ public sealed class WipeScheduleStore
         }
         else
         {
-            // All candidates are in the past — pick the most recent so the
-            // client at least sees a snapshot, but isImmediate=true and the
-            // runner gate won't defer.
-            candidates.Sort((a, b) => b.ScheduledAtUtc.CompareTo(a.ScheduledAtUtc));
-            next = candidates[0];
+            var past = candidates.ToList();
+            past.Sort((a, b) => b.ScheduledAtUtc.CompareTo(a.ScheduledAtUtc));
+            next = past[0];
         }
 
         return new DeviceScheduleSnapshot

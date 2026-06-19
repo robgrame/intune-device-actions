@@ -736,6 +736,12 @@ function Invoke-PortalDeploy {
         $portalArgs.AssignUserUpn = $AssignUserUpn
         $portalArgs.AssignRole = $AssignRole
     }
+    # Auto-detect App Insights for the portal.
+    $aiName = (& az monitor app-insights component list -g $ResourceGroup --query "[0].name" -o tsv --only-show-errors 2>$null)
+    if ($aiName) {
+        $portalArgs.AppInsightsName = $aiName.Trim()
+        Write-Host "    AI:            $($aiName.Trim())"
+    }
 
     Write-Host "    portal script: $portalScript"
     Write-Host "    LAW:           $law"

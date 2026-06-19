@@ -48,6 +48,13 @@ public sealed class WipeScheduleWave : ITableEntity
     public string? UpdatedBy { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
 
+    /// <summary>
+    /// Optional Entra group id (object id). When set, wave membership is
+    /// determined by group membership instead of (or in addition to) the
+    /// individual device rows in the members table.
+    /// </summary>
+    public string? EntraGroupId { get; set; }
+
     /// <summary>Convenience accessor for the wave id (parsed from RowKey).</summary>
     public Guid WaveId =>
         Guid.TryParse(RowKey, out var g) ? g : Guid.Empty;
