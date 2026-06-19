@@ -9,6 +9,11 @@
     Menu shortcut for the end user, and writes a detection registry key
     Intune Win32 detection can probe.
 
+    NOTE: The Public Desktop shortcut is NOT created here. It is deployed
+    via wave-gated Proactive Remediation (wave-desktop-shortcut) which
+    polls /api/schedule/me and creates the shortcut only when the device
+    belongs to an active wave.
+
     Intended to be invoked by the Intune Win32 install command, e.g.:
 
       powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 `
@@ -154,7 +159,12 @@ try {
     $pollingSettings | ConvertTo-Json | Set-Content -LiteralPath $pollingSettingsPath -Encoding utf8
     Write-Host "  Wrote polling-settings.json (user-readable)"
 
-    # --- Shortcuts (Start Menu + Public Desktop, All Users) -----------------
+    # --- Shortcuts (Start Menu only, All Users) --------------------------------
+    # The Public Desktop shortcut is NO LONGER created here. It is wave-gated:
+    # the Intune Proactive Remediation (wave-desktop-shortcut) polls
+    # /api/schedule/me?actionType=wipe and creates the desktop shortcut only
+    # when the device belongs to an active wave (isImmediate=true).
+    #
     # Prefer the custom branded icon shipped in <InstallDir>\assets\, fall
     # back to imageres.dll,229 (the Windows 10/11 "Reset this PC" icon) so
     # the shortcut never ends up with the generic PowerShell icon if the
@@ -168,29 +178,38 @@ try {
 
     $allUsersStart  = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'
     $publicDesktop  = Join-Path $env:PUBLIC      'Desktop'
-    foreach ($folder in @($allUsersStart, $publicDesktop)) {
-        if (-not (Test-Path -LiteralPath $folder)) {
-            New-Item -ItemType Directory -Force -Path $folder | Out-Null
+
+    # Start Menu shortcut (always created)
+    if (-not (Test-Path -LiteralPath $allUsersStart)) {
+        New-Item -ItemType Directory -Force -Path $allUsersStart | Out-Null
+    }
+    foreach ($legacy in $LegacyShortcutNames) {
+        if ([string]::IsNullOrWhiteSpace($legacy) -or $legacy -eq $ShortcutName) { continue }
+        $legacyPath = Join-Path $allUsersStart ("{0}.lnk" -f $legacy)
+        if (Test-Path -LiteralPath $legacyPath) {
+            Remove-Item -LiteralPath $legacyPath -Force -ErrorAction SilentlyContinue
+            Write-Host "  Removed legacy shortcut: $legacyPath"
         }
-        # Clean up legacy shortcut names (renames across versions) so the
-        # device ends up with a single, current shortcut after upgrade.
-        foreach ($legacy in $LegacyShortcutNames) {
-            if ([string]::IsNullOrWhiteSpace($legacy) -or $legacy -eq $ShortcutName) { continue }
-            $legacyPath = Join-Path $folder ("{0}.lnk" -f $legacy)
-            if (Test-Path -LiteralPath $legacyPath) {
-                Remove-Item -LiteralPath $legacyPath -Force -ErrorAction SilentlyContinue
-                Write-Host "  Removed legacy shortcut: $legacyPath"
-            }
+    }
+    $lnkPath = Join-Path $allUsersStart ("{0}.lnk" -f $ShortcutName)
+    $lnk = $wsh.CreateShortcut($lnkPath)
+    $lnk.TargetPath       = $shortcutTarget
+    $lnk.Arguments        = $shortcutArgs
+    $lnk.WorkingDirectory = $InstallDir
+    $lnk.IconLocation     = $iconLocation
+    $lnk.Description      = $shortcutDesc
+    $lnk.Save()
+    Write-Host "  Created Start Menu shortcut: $lnkPath"
+
+    # Public Desktop: remove any pre-existing shortcut from older versions
+    # (desktop shortcut is now wave-gated via Proactive Remediation).
+    foreach ($legacy in @($ShortcutName) + $LegacyShortcutNames) {
+        if ([string]::IsNullOrWhiteSpace($legacy)) { continue }
+        $legacyPath = Join-Path $publicDesktop ("{0}.lnk" -f $legacy)
+        if (Test-Path -LiteralPath $legacyPath) {
+            Remove-Item -LiteralPath $legacyPath -Force -ErrorAction SilentlyContinue
+            Write-Host "  Removed desktop shortcut (now wave-gated): $legacyPath"
         }
-        $lnkPath = Join-Path $folder ("{0}.lnk" -f $ShortcutName)
-        $lnk = $wsh.CreateShortcut($lnkPath)
-        $lnk.TargetPath       = $shortcutTarget
-        $lnk.Arguments        = $shortcutArgs
-        $lnk.WorkingDirectory = $InstallDir
-        $lnk.IconLocation     = $iconLocation
-        $lnk.Description      = $shortcutDesc
-        $lnk.Save()
-        Write-Host "  Created shortcut: $lnkPath"
     }
 
     # --- Detection registry key (write to 64-bit hive explicitly) ----------
