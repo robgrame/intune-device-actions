@@ -847,8 +847,9 @@ function Show-PostDeployNotes {
     Write-Host '4) End-to-end test:' -ForegroundColor White
     $webApp  = Get-FunctionAppByRole 'web'
     if ($webApp) {
-        $webHost = (& az functionapp show -g $ResourceGroup -n $webApp `
-            --query defaultHostName -o tsv --only-show-errors).Trim()
+        $webHostRaw = & az functionapp show -g $ResourceGroup -n $webApp `
+            --query defaultHostName -o tsv --only-show-errors 2>$null
+        $webHost = if ($webHostRaw) { $webHostRaw.Trim() } else { "$webApp.azurewebsites.net" }
         Write-Host "     client\Invoke-DeviceWipe.ps1 -ApiUrl https://$webHost/api/actions ..." -ForegroundColor Gray
     }
     if ($DeployPortal) {
