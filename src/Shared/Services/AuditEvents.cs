@@ -96,6 +96,7 @@ public static class AuditEvents
     public const string ScheduleReturned  = "action.schedule.returned";   // 200 with a snapshot
     public const string ScheduleEmpty     = "action.schedule.empty";      // 204 — no provider had a snapshot
     public const string ScheduleGated     = "action.schedule.gated";      // runner deferred because wave not yet due
+    public const string ScheduleGateDenied = "action.schedule.gate-denied"; // action denied: not enrolled in wave or other gate failure
     public const string ScheduleProviderError = "action.schedule.provider-error";
 
     /// <summary>
@@ -175,5 +176,6 @@ public static class AuditEvents
         public const string ScheduleScheduledAtUtc     = "scheduleScheduledAtUtc";
         public const string ScheduleSecondsUntilFire   = "scheduleSecondsUntilFire";
         public const string ScheduleProviderType       = "scheduleProviderType";
+        public const string ScheduleGateReason         = "scheduleGateReason";  // reason for denial (e.g., "not-enrolled-in-wave")
     }
 }
