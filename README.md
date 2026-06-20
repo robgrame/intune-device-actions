@@ -932,6 +932,9 @@ customEvents
 >
 > Mappa eventi e semantica del **gating centralizzato** in
 > [`docs/action-gating-map.md`](docs/action-gating-map.md).
+>
+> Catalogo canonico dei **reason code** in
+> [`docs/reason-code-catalog.md`](docs/reason-code-catalog.md).
 
 ## Licenza
 
