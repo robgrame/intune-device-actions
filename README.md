@@ -929,6 +929,9 @@ customEvents
 > Vista **sintetica per stakeholder** (cosa manca / normativa / costo infra,
 > senza effort né phasing) in
 > [`docs/security-gaps-pending.md`](docs/security-gaps-pending.md).
+>
+> Mappa eventi e semantica del **gating centralizzato** in
+> [`docs/action-gating-map.md`](docs/action-gating-map.md).
 
 ## Licenza
 
