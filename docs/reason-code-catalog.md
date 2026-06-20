@@ -17,26 +17,29 @@ Reason codes are grouped by family:
 
 ## Core mapping
 
-| Family | Code | Meaning | Typical event | UI text |
+> **Event vs reason**: gate denials (wave, device group, user group, group-check
+> failures) all emit the single event `action.schedule.gate-denied`; the value
+> below appears in the `scheduleGateReason` property. A couple of pre-gate
+> resolution failures additionally emit a dedicated `action.denied.*` event
+> (noted in the table).
+
+| Family | Code | Meaning | Emitted as | UI text |
 |---|---|---|---|---|
-| denied | `denied:not-enrolled-in-wave` | Device is outside the allowed wave | `action.schedule.gate-denied` | Device fuori dalla wave corrente |
-| denied | `denied:device-not-in-allowed-group` | Device is not in the allowed Entra group | `action.denied.device-not-in-allowed-group` | Device non nel gruppo autorizzato |
-| denied | `denied:user-not-in-allowed-group` | Caller user is not in the allowed Entra group | `action.denied.user-not-in-allowed-group` | Utente non nel gruppo autorizzato |
-| denied | `denied:device-not-in-entra` | Device binding / Entra lookup failed | `action.denied.device-not-in-entra` | Device non registrato in Entra ID |
-| denied | `denied:ownership-mismatch` | Certificate/device ownership mismatch | `action.denied.ownership-mismatch` | Il certificato non corrisponde al device |
-| denied | `denied:rate-limited` | Request rejected by throttling | `action.denied.rate-limited` | Troppe richieste, riprova più tardi |
-| denied | `denied:device-resolve-failed` | Device lookup failed before dispatch | `action.denied.device-resolve-failed` | Risoluzione device fallita |
-| denied | `denied:managed-device-resolve-failed` | Managed device lookup failed | `action.denied.managed-device-resolve-failed` | Device gestito non trovato |
-| denied | `denied:already-issued` | Same request already issued | `action.denied.already-issued` | Azione già emessa |
-| denied | `denied:in-progress-elsewhere` | Another operation is already running | `action.denied.in-progress-elsewhere` | Azione già in corso |
-| denied | `denied:missing-hardware-hash` | Hardware hash is missing | `action.denied.missing-hardware-hash` | Hardware hash mancante |
-| denied | `denied:missing-serial` | Device serial is missing | `action.denied.missing-serial` | Seriale mancante |
-| denied | `denied:name-collision` | Requested name collides with another device | `action.denied.name-collision` | Collisione nome device |
-| deferred | `deferred:wave-not-open` | The wave exists but is not open yet | `action.schedule.gated` | Fuori dalla wave corrente |
-| deferred | `deferred:maintenance-window` | Execution is deferred by maintenance policy | `action.schedule.gated` | Finestra di manutenzione non attiva |
-| failed | `failed:graph-error` | Graph call failed | `action.failed` | Errore durante l'esecuzione |
-| failed | `failed:timeout` | Execution timed out | `action.poll-timeout` | Timeout di esecuzione |
-| failed | `failed:transient-retry-exhausted` | Retries were exhausted | `action.failed` | Ritentativi esauriti |
+| denied | `denied:not-enrolled-in-wave` | Device is outside the allowed wave | `action.schedule.gate-denied` (reason) | Device fuori dalla wave corrente |
+| denied | `denied:device-not-in-allowed-group` | Device is not in the allowed Entra group | `action.schedule.gate-denied` (reason) | Device non nel gruppo autorizzato |
+| denied | `denied:user-not-in-allowed-group` | Caller user is not in the allowed Entra group | `action.schedule.gate-denied` (reason) | Utente non nel gruppo autorizzato |
+| denied | `denied:group-check-failed` | Device group check threw (fail-closed) | `action.schedule.gate-denied` (reason) | Verifica gruppo fallita |
+| denied | `denied:user-group-check-failed` | User group check threw (fail-closed) | `action.schedule.gate-denied` (reason) | Verifica gruppo utente fallita |
+| denied | `denied:device-resolve-failed` | Device object id resolution failed | `action.denied.device-resolve-failed` + `action.schedule.gate-denied` | Risoluzione device fallita |
+| denied | `denied:device-not-in-entra` | Entra device lookup returned empty | `action.denied.device-not-in-entra` | Device non registrato in Entra ID |
+| deferred | (schedule defer) | Wave exists but is not yet due | `action.schedule.gated` (+ `scheduleScheduledAtUtc`) | Fuori dalla wave corrente, riprova più tardi |
+| failed | (graph error) | Capability execution failed | `action.failed` | Errore durante l'esecuzione |
+| failed | (timeout) | Execution timed out | `action.poll-timeout` | Timeout di esecuzione |
+
+> Legacy: `BitLockerRotateRunner` still performs its own group gating and emits
+> `action.denied.not-in-allowed-group` with reason `denied:not-in-allowed-group`
+> — it has NOT been migrated to the central gate pipeline yet (see rubber-duck
+> finding). New capabilities must use the central gates, not a private path.
 
 ## UI guidance
 

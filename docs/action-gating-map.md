@@ -29,7 +29,7 @@ flowchart LR
   B -->|Denied| D[Terminal deny]
   B -->|Deferred| E[Schedule gated / retry later]
   C --> F[action.completed / action.failed]
-  D --> G[action.denied.* / action.schedule.gate-denied]
+  D --> G[action.schedule.gate-denied + scheduleGateReason]
   E --> H[action.schedule.gated]
 ```
 
@@ -38,18 +38,29 @@ Capability runners must never re-implement group or wave checks.
 
 ## Event catalog
 
+> **Important**: every gate denial (schedule/wave, device group, user group,
+> device resolution) emits the **same** event `action.schedule.gate-denied`.
+> The actual cause travels in the `scheduleGateReason` property, NOT in the
+> event name. Do not assume a distinct `action.denied.<reason>` event for each
+> gate — see the reason-code catalog for the reason values.
+
 | Event | Meaning | Terminal? | Notes |
 |---|---|---:|---|
 | `action.request.received` | Request entered the system | No | Intake boundary |
 | `action.request.accepted` | Request passed intake and was queued | No | Pre-dispatch |
-| `action.gate.passed` | Central gate allowed the request | No | Internal pipeline signal |
-| `action.schedule.gate-denied` | Request is outside the allowed wave | Yes | Counts as denied |
+| `action.dispatch.received` | Dispatcher consumed the envelope | No | Internal pipeline signal |
+| `action.schedule.gate-denied` | A gate denied the request (reason in `scheduleGateReason`) | Yes | Counts as denied |
 | `action.schedule.gated` | Request is deferred by schedule policy | No | Not a failure |
-| `action.denied.device-not-in-allowed-group` | Device group gate denied the request | Yes | Counts as denied |
-| `action.denied.user-not-in-allowed-group` | User group gate denied the request | Yes | Counts as denied |
+| `action.denied.device-resolve-failed` | Device object id resolution failed pre-gate | Yes | Emitted by the dispatcher pre-gate path |
+| `action.denied.device-not-in-entra` | Entra device lookup returned empty pre-gate | Yes | Emitted by the dispatcher pre-gate path |
 | `action.completed` | Capability finished successfully | Yes | Normal terminal success |
 | `action.failed` | Capability failed permanently | Yes | Normal terminal failure |
 | `action.poll-timeout` | Poller could not observe a terminal state | Yes | Operational timeout |
+
+> Note: a few `action.denied.*` events (e.g. `action.denied.device-resolve-failed`,
+> `action.denied.device-not-in-entra`) are still emitted directly by the
+> dispatcher's pre-gate device-resolution path. Group/wave denials decided by
+> the gate pipeline always surface as `action.schedule.gate-denied`.
 
 ## Semantics
 
