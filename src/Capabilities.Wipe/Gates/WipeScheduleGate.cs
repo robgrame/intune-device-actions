@@ -2,6 +2,7 @@ using IntuneDeviceActions.Gates;
 using IntuneDeviceActions.Capabilities.Wipe.Schedule;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Graph;
 
 namespace IntuneDeviceActions.Capabilities.Wipe.Gates;
 
@@ -10,18 +11,26 @@ namespace IntuneDeviceActions.Capabilities.Wipe.Gates;
 /// - Devices enrolled in future waves are deferred
 /// - Devices not enrolled in any active wave are denied
 /// - Otherwise pass
+///
+/// Wave enrollment is the UNION of individual device rows AND the device's
+/// membership in a wave's Entra group (group membership is a sufficient
+/// condition). The Graph client — when registered on the dispatcher host —
+/// resolves group membership at enforcement time.
 /// </summary>
 public sealed class WipeScheduleGate : IActionGate
 {
     public string Name => "WipeScheduleGate";
 
     private readonly WipeScheduleStore? _store;
+    private readonly GraphServiceClient? _graph;
     private readonly GateErrorPolicy _errorPolicy;
     private readonly ILogger<WipeScheduleGate> _log;
 
-    public WipeScheduleGate(WipeScheduleStore? store, IConfiguration cfg, ILogger<WipeScheduleGate> log)
+    public WipeScheduleGate(WipeScheduleStore? store, IConfiguration cfg, ILogger<WipeScheduleGate> log,
+        GraphServiceClient? graph = null)
     {
         _store = store;
+        _graph = graph;
         _errorPolicy = cfg.ReadGateErrorPolicy();
         _log = log;
     }
@@ -42,8 +51,8 @@ public sealed class WipeScheduleGate : IActionGate
 
         try
         {
-            // Check if device is enrolled in any wave.
-            var (defer, scheduledAtUtc) = await _store.ShouldDeferWipeAsync(context.EntraDeviceId, ct);
+            // Check if device is enrolled in any wave (individual rows OR Entra group).
+            var (defer, scheduledAtUtc) = await _store.ShouldDeferWipeAsync(context.EntraDeviceId, _graph, ct);
 
             if (defer && scheduledAtUtc is { } when_)
             {

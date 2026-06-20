@@ -146,6 +146,58 @@ capability-specific checks (ownership, payload validation, idempotency).
 > which Autopilot hardware does not yet have, so every registration would be
 > denied with `denied:device-not-in-entra`.
 
+### Wave membership: individual rows OR Entra group (sufficient condition)
+
+The wipe schedule gate (`WipeScheduleGate`) decides whether a device is enrolled
+in a wave. A wave can declare its membership two ways, and **either one is
+sufficient** — they are unioned, never intersected:
+
+| Membership source | How it is stored | How it is resolved at gate time |
+|---|---|---|
+| **Individual device** | a row in the wave's members table (`RowKey = entraDeviceId`) | cross-partition table scan by RowKey |
+| **Entra group** | `WipeScheduleWave.EntraGroupId` on the wave | Graph `checkMemberGroups` against the device's directory object, in real time |
+
+So for a wave configured with **both** an Entra group **and** individually-added
+devices, the gate considers the **union**: a device passes the wave check if it
+is in the members table **OR** it belongs to the wave's Entra group. Group
+membership alone enrolls the device even with no individual row; an individual
+row alone enrolls it even if it is not in any group. A wave matched through both
+paths is de-duplicated by wave id.
+
+> **Operator guidance**: adding a device to a wave's Entra group is equivalent
+> to adding it individually — both grant enrollment. Removing the individual row
+> does **not** revoke enrollment if the device is still in the group, and vice
+> versa. To exclude a device entirely, remove it from **both** the member list
+> and the wave's Entra group.
+
+This union is computed in one place — `WipeScheduleStore.GetScheduleForDeviceAsync`
+— and shared by **both** the enforcement gate (Proc) and the advisory
+`GET /api/schedule/me` endpoint (Web), so the client preview and the server
+decision can never disagree. The only behavioural difference is error handling:
+Graph failures **propagate** on the enforcement path (so `Actions:GateErrorPolicy`
+applies — `fail-closed` by default) but are **swallowed to null** on the advisory
+read path (a failing provider must not break the aggregator).
+
+#### Relationship to the classic group gate
+
+Per-wave `EntraGroupId` is **not** the same thing as the capability-wide
+`<Section>:AllowedGroupId` consumed by `DeviceGroupMembershipGate`. They are two
+independent gates in the pipeline (evaluated in order: `WipeScheduleGate` →
+`DeviceGroupMembershipGate` → `UserGroupMembershipGate`):
+
+| | Per-wave `EntraGroupId` | `Wipe:AllowedGroupId` (classic) |
+|---|---|---|
+| Scope | one wave | the whole capability |
+| Gate | `WipeScheduleGate` | `DeviceGroupMembershipGate` |
+| Role | **enrolls** a device into a specific wave (temporal "when") | **allowlists** which devices may ever be wiped (authorization "whether") |
+| Effect of membership | sufficient to be *in the wave* | required to *pass the allowlist* |
+
+A device must satisfy **both** gates to proceed: it has to be enrolled in an
+active wave (via individual row or wave group) **and** — if `Wipe:AllowedGroupId`
+is configured — be a member of the capability allowlist group. The two are
+ANDed because they answer different questions; only the wave's two membership
+sources are ORed.
+
 ### Runbook-backed variants
 
 Runbook executors (Azure Automation) run **downstream** of this same dispatcher,

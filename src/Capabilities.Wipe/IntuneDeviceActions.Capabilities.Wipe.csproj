@@ -9,6 +9,11 @@
   <ItemGroup>
     <ProjectReference Include="..\Shared\IntuneDeviceActions.Shared.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>IntuneDeviceActions.Capabilities.Wipe.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
   <!--
     NB: Microsoft.Graph, Azure.Identity, Service Bus, AppInsights packages are
     inherited transitively from Shared.csproj — keep this csproj minimal so

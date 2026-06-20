@@ -2,6 +2,8 @@ using Azure;
 using Azure.Data.Tables;
 using IntuneDeviceActions.Schedule;
 using Microsoft.Extensions.Logging;
+using Microsoft.Graph;
+using Microsoft.Graph.Devices.Item.CheckMemberGroups;
 
 namespace IntuneDeviceActions.Capabilities.Wipe.Schedule;
 
@@ -198,18 +200,55 @@ public sealed class WipeScheduleStore
 
     /// <summary>
     /// Returns the next imminent schedule entry for <paramref name="entraDeviceId"/>,
-    /// or null if the device is not enrolled in any client-visible wave
-    /// (individual membership only — group-based waves are resolved by the provider).
-    /// Implemented as a cross-partition scan on the members table filtered by
-    /// RowKey, then per-membership wave resolution. Acceptable for &lt;1000
-    /// waves; for larger volumes introduce a reverse-index table.
+    /// considering ONLY individual (members-table) membership. Group-based waves
+    /// are resolved by the <paramref name="graph"/>-aware overload. Kept for the
+    /// advisory read path; prefer the overload that also resolves group waves.
+    /// </summary>
+    public Task<DeviceScheduleSnapshot?> GetScheduleForDeviceAsync(
+        Guid entraDeviceId, CancellationToken ct = default)
+        => GetScheduleForDeviceAsync(entraDeviceId, graph: null, ct);
+
+    /// <summary>
+    /// Returns the next imminent schedule entry for <paramref name="entraDeviceId"/>,
+    /// or null if the device is not enrolled in any client-visible wave.
+    /// <para>
+    /// Membership is the UNION of two sufficient conditions:
+    /// <list type="bullet">
+    ///   <item><b>Individual</b> — a row in the members table (cross-partition
+    ///   scan by RowKey).</item>
+    ///   <item><b>Group-based</b> — the device belongs to a wave's
+    ///   <see cref="WipeScheduleWave.EntraGroupId"/>, resolved in real time via
+    ///   Graph <c>checkMemberGroups</c> when <paramref name="graph"/> is supplied.
+    ///   Group membership is <i>sufficient</i>: a device in the wave's group is
+    ///   enrolled even without an individual row.</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// Graph failures are intentionally NOT swallowed here so the enforcement
+    /// caller (<c>WipeScheduleGate</c>) can apply its fail-closed/open policy.
+    /// The advisory provider wraps this call and degrades to null on error.
+    /// </para>
+    /// Acceptable for &lt;1000 waves; for larger volumes introduce a reverse-index
+    /// table.
     /// </summary>
     public async Task<DeviceScheduleSnapshot?> GetScheduleForDeviceAsync(
-        Guid entraDeviceId, CancellationToken ct = default)
+        Guid entraDeviceId, GraphServiceClient? graph, CancellationToken ct = default)
     {
         if (entraDeviceId == Guid.Empty) return null;
         await EnsureTablesAsync(ct).ConfigureAwait(false);
 
+        var individual = await CollectIndividualWavesAsync(entraDeviceId, ct).ConfigureAwait(false);
+        var group = graph is null
+            ? new List<WipeScheduleWave>()
+            : await CollectGroupWavesAsync(entraDeviceId, graph, ct).ConfigureAwait(false);
+
+        return PickBestCandidate(MergeWaveCandidates(individual, group));
+    }
+
+    /// <summary>Collects client-visible waves the device joins via an individual member row.</summary>
+    private async Task<List<WipeScheduleWave>> CollectIndividualWavesAsync(
+        Guid entraDeviceId, CancellationToken ct)
+    {
         var rk = entraDeviceId.ToString("D").ToLowerInvariant();
         var memberships = new List<WipeScheduleWaveMember>();
         await foreach (var m in _members.QueryAsync<WipeScheduleWaveMember>(
@@ -227,8 +266,60 @@ public sealed class WipeScheduleStore
             if (!WaveStatus.ClientVisible.Contains(wave.Status)) continue;
             candidates.Add(wave);
         }
+        return candidates;
+    }
 
-        return PickBestCandidate(candidates);
+    /// <summary>
+    /// Collects client-visible group-based waves whose Entra group contains the
+    /// device, resolved via Graph <c>checkMemberGroups</c>. Graph exceptions
+    /// propagate to the caller (see <see cref="GetScheduleForDeviceAsync(Guid, GraphServiceClient?, CancellationToken)"/>).
+    /// </summary>
+    private async Task<List<WipeScheduleWave>> CollectGroupWavesAsync(
+        Guid entraDeviceId, GraphServiceClient graph, CancellationToken ct)
+    {
+        var groupWaves = await GetGroupBasedWavesAsync(ct).ConfigureAwait(false);
+        if (groupWaves.Count == 0) return new List<WipeScheduleWave>();
+
+        // Resolve entraDeviceId → directory object id (needed for checkMemberGroups).
+        var page = await graph.Devices.GetAsync(cfg =>
+        {
+            cfg.QueryParameters.Filter = $"deviceId eq '{entraDeviceId}'";
+            cfg.QueryParameters.Select = new[] { "id" };
+            cfg.QueryParameters.Top = 1;
+        }, ct).ConfigureAwait(false);
+        var objectId = page?.Value?.FirstOrDefault()?.Id;
+        if (string.IsNullOrEmpty(objectId)) return new List<WipeScheduleWave>();
+
+        var groupIds = groupWaves
+            .Select(w => w.EntraGroupId!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var body = new CheckMemberGroupsPostRequestBody { GroupIds = groupIds };
+        var result = await graph.Devices[objectId]
+            .CheckMemberGroups
+            .PostAsCheckMemberGroupsPostResponseAsync(body, cancellationToken: ct)
+            .ConfigureAwait(false);
+        var matchedGroups = result?.Value ?? new List<string>();
+        if (matchedGroups.Count == 0) return new List<WipeScheduleWave>();
+
+        return groupWaves
+            .Where(w => matchedGroups.Contains(w.EntraGroupId!, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Unions individual and group wave candidates, de-duplicated by wave id (a
+    /// device may match the same wave both via an individual row and its Entra
+    /// group).
+    /// </summary>
+    internal static List<WipeScheduleWave> MergeWaveCandidates(
+        IReadOnlyList<WipeScheduleWave> individual, IReadOnlyList<WipeScheduleWave> group)
+    {
+        var byId = new Dictionary<string, WipeScheduleWave>(StringComparer.OrdinalIgnoreCase);
+        foreach (var w in individual) byId[w.RowKey] = w;
+        foreach (var w in group) byId[w.RowKey] = w;
+        return byId.Values.ToList();
     }
 
     /// <summary>
@@ -294,10 +385,20 @@ public sealed class WipeScheduleStore
     /// already fired. Returns <c>(true, scheduledAtUtc)</c> when the wipe
     /// must be deferred. Defense-in-depth companion to client-side gating.
     /// </summary>
-    public async Task<(bool Defer, DateTimeOffset? ScheduledAtUtc)> ShouldDeferWipeAsync(
+    public Task<(bool Defer, DateTimeOffset? ScheduledAtUtc)> ShouldDeferWipeAsync(
         Guid entraDeviceId, CancellationToken ct = default)
+        => ShouldDeferWipeAsync(entraDeviceId, graph: null, ct);
+
+    /// <summary>
+    /// Group-aware overload of <see cref="ShouldDeferWipeAsync(Guid, CancellationToken)"/>:
+    /// when <paramref name="graph"/> is supplied, wave enrollment also considers
+    /// the device's membership in a wave's Entra group (sufficient condition).
+    /// Graph failures propagate so the gate can apply its error policy.
+    /// </summary>
+    public async Task<(bool Defer, DateTimeOffset? ScheduledAtUtc)> ShouldDeferWipeAsync(
+        Guid entraDeviceId, GraphServiceClient? graph, CancellationToken ct = default)
     {
-        var snap = await GetScheduleForDeviceAsync(entraDeviceId, ct).ConfigureAwait(false);
+        var snap = await GetScheduleForDeviceAsync(entraDeviceId, graph, ct).ConfigureAwait(false);
         if (snap is null) return (false, null);
         if (snap.IsImmediate) return (false, snap.ScheduledAtUtc);
         return (true, snap.ScheduledAtUtc);
