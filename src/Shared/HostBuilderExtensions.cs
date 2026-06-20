@@ -95,6 +95,7 @@ public static class HostBuilderExtensions
 
         services.AddSingleton<AuditService>();
         services.AddSingleton<IAuditEventPublisher, EventGridAuditEventPublisher>();
+        services.AddSingleton(typeof(Gates.IGraphGroupMembershipService), typeof(GraphGroupMembershipService));
 
         services.AddSingleton<TokenCredential>(sp =>
         {
