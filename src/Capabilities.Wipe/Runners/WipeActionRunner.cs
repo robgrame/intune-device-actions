@@ -1,7 +1,6 @@
 using System.Text.Json;
 using IntuneDeviceActions.Actions;
 using IntuneDeviceActions.Capabilities.Wipe.Audit;
-using IntuneDeviceActions.Capabilities.Wipe.Schedule;
 using IntuneDeviceActions.Capabilities.Wipe.Services;
 using IntuneDeviceActions.Models;
 using IntuneDeviceActions.Services;
@@ -16,11 +15,7 @@ namespace IntuneDeviceActions.Capabilities.Wipe.Runners;
 /// <remarks>
 /// Steps:
 /// <list type="number">
-///   <item><b>(Step 0)</b> if a <see cref="WipeScheduleStore"/> is registered,
-///         enforce capability-side temporal gating — defer wipes whose wave
-///         hasn't fired yet (defense-in-depth alongside client-side gating);</item>
 ///   <item>resolve Entra directory object id;</item>
-///   <item>check membership of the allowed Entra group;</item>
 ///   <item>validate Intune↔Entra mapping (ownership);</item>
 ///   <item>reserve an idempotency ledger entry — skip if an action was already issued;</item>
 ///   <item>call Graph wipe; mark ledger Issued/Failed accordingly;</item>
@@ -37,18 +32,15 @@ public sealed class WipeActionRunner : IActionRunner
     private readonly ActionIdempotencyService _ledger;
     private readonly AuditService _audit;
     private readonly ActionStatusTracker _statusTracker;
-    private readonly WipeScheduleStore? _scheduleStore;
     private readonly ILogger<WipeActionRunner> _log;
 
     public WipeActionRunner(GraphWipeService graph, ActionIdempotencyService ledger,
-        AuditService audit, ActionStatusTracker statusTracker, ILogger<WipeActionRunner> log,
-        WipeScheduleStore? scheduleStore = null)
+        AuditService audit, ActionStatusTracker statusTracker, ILogger<WipeActionRunner> log)
     {
         _graph = graph;
         _ledger = ledger;
         _audit = audit;
         _statusTracker = statusTracker;
-        _scheduleStore = scheduleStore;
         _log = log;
     }
 
@@ -73,69 +65,6 @@ public sealed class WipeActionRunner : IActionRunner
         });
 
         _log.LogInformation("Running wipe action for {Device}", msg.DeviceName);
-
-        // Step 0) Capability-side temporal gate. The portal allows operators
-        // to schedule wipe waves; the client polls /api/schedule/me and
-        // gates locally, but a malicious / tampered client could still POST
-        // /api/actions early. Defense-in-depth: if the device is enrolled
-        // in a wave whose ScheduledAtUtc is still in the future, defer
-        // (no Graph call, no ledger reservation, NO status row — so the
-        // wipe stays issuable once the wave fires).
-        if (_scheduleStore is not null && Guid.TryParse(msg.EntraDeviceId, out var gatedDeviceId))
-        {
-            try
-            {
-                var (defer, scheduledAtUtc) = await _scheduleStore.ShouldDeferWipeAsync(gatedDeviceId, ct);
-                if (defer && scheduledAtUtc is { } when_)
-                {
-                    var secondsUntilFire = (long)Math.Max(0, (when_ - DateTimeOffset.UtcNow).TotalSeconds);
-                    _audit.TrackEvent(AuditEvents.ScheduleGated, new Dictionary<string, string>
-                    {
-                        [AuditEvents.Prop.CorrelationId]            = msg.CorrelationId,
-                        [AuditEvents.Prop.DeviceName]               = msg.DeviceName,
-                        [AuditEvents.Prop.EntraDeviceId]            = msg.EntraDeviceId,
-                        [AuditEvents.Prop.ActionType]               = Type,
-                        [AuditEvents.Prop.ScheduleScheduledAtUtc]   = when_.ToString("O"),
-                        [AuditEvents.Prop.ScheduleSecondsUntilFire] = secondsUntilFire.ToString(),
-                    }, LogLevel.Information);
-                    _log.LogInformation(
-                        "Wipe deferred by capability-side schedule gate: device {Device} is enrolled in a wave that fires at {When} ({Seconds}s from now).",
-                        msg.DeviceName, when_, secondsUntilFire);
-                    // Intentionally do NOT call RecordTerminalAsync — this is
-                    // not a terminal denial. The Graph wipe simply hasn't
-                    // happened yet and will be reissued when the wave fires
-                    // (or when the client re-POSTs after the gate opens).
-                    //
-                    // KNOWN GAP (rubber-duck #3): the SB message that
-                    // delivered this envelope is consumed on `return` — if
-                    // the client never re-POSTs (uninstalled, network gone,
-                    // user logged out for good), this wave-membership is
-                    // silently lost. The mitigations today are:
-                    //   * the portal keeps the wave row visible to operators
-                    //     so they can re-issue manually, and
-                    //   * the client polls /api/schedule/me on every cycle
-                    //     and re-POSTs once the gate opens.
-                    // TODO: when we add the future scheduler (Step F in the
-                    // plan) it can re-enqueue gated waves automatically at
-                    // ScheduledAtUtc, removing the dependence on the client.
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                // Schedule lookup must never break the wipe path. Log and
-                // continue — failing open is the safe behaviour here
-                // (operator intent is "this device IS wipeable, just maybe
-                // not yet"; the client gate is the primary mechanism).
-                _audit.TrackEvent(WipeAuditEvents.ScheduleGateLookupFailed, ex, new Dictionary<string, string>
-                {
-                    [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
-                    [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
-                    [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
-                }, LogLevel.Warning);
-                _log.LogWarning(ex, "Wipe schedule gate lookup failed; proceeding without gating.");
-            }
-        }
 
         // 1) Resolve Entra directory object id
         string? deviceObjId;
@@ -181,140 +110,7 @@ public sealed class WipeActionRunner : IActionRunner
             [WipeAuditEvents.Prop.DeviceObjectId] = deviceObjId,
         });
 
-        // 2) Group membership gating (device + user, governed by GatingMode)
-        var gatingMode = _graph.ActiveGatingMode;
-        var callerUpn = !string.IsNullOrWhiteSpace(msg.CallerUpn) ? msg.CallerUpn.Trim()
-                      : !string.IsNullOrWhiteSpace(envelope.CallerUpn) ? envelope.CallerUpn.Trim()
-                      : null;
-
-        bool deviceInGroup = false;
-        bool userInGroup = false;
-        bool deviceCheckDone = false;
-        bool userCheckDone = false;
-
-        // 2a) Device group check (when required by gating mode)
-        if (gatingMode is GatingMode.DeviceOnly or GatingMode.Both or GatingMode.Either)
-        {
-            try
-            {
-                deviceInGroup = await _graph.IsDeviceInAllowedGroupAsync(deviceObjId, ct);
-                deviceCheckDone = true;
-            }
-            catch (Exception ex) when (GraphWipeService.Classify(ex) == GraphWipeService.GraphErrorKind.Transient)
-            {
-                _log.LogWarning(ex, "Transient error on device group check - will retry");
-                throw;
-            }
-            catch (Exception ex)
-            {
-                // In Either mode, device check failure is non-fatal — fall through to user check
-                if (gatingMode == GatingMode.Either)
-                {
-                    _log.LogWarning(ex, "Device group check failed in Either mode; falling through to user check");
-                }
-                else
-                {
-                    _audit.TrackEvent(AuditEvents.DeniedGroupCheckFailed, ex, new Dictionary<string, string>
-                    {
-                        [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
-                        [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
-                        [AuditEvents.Prop.ActionType]    = Type,
-                    });
-                    await _statusTracker.RecordTerminalAsync(msg, Type, "denied:group-check-failed", ct);
-                    return;
-                }
-            }
-
-            // Short-circuit: in Either mode, if device passes, skip user check
-            if (gatingMode == GatingMode.Either && deviceInGroup)
-                goto gateAllowed;
-        }
-
-        // 2b) User group check (when required by gating mode)
-        if (gatingMode is GatingMode.UserOnly or GatingMode.Both or GatingMode.Either)
-        {
-            try
-            {
-                userInGroup = await _graph.IsUserInAllowedGroupAsync(callerUpn, ct);
-                userCheckDone = true;
-            }
-            catch (Exception ex) when (GraphWipeService.Classify(ex) == GraphWipeService.GraphErrorKind.Transient)
-            {
-                _log.LogWarning(ex, "Transient error on user group check - will retry");
-                throw;
-            }
-            catch (Exception ex)
-            {
-                // In Either mode, user check failure is non-fatal if device already passed
-                if (gatingMode == GatingMode.Either && deviceInGroup)
-                {
-                    _log.LogWarning(ex, "User group check failed in Either mode but device passed; allowing");
-                    goto gateAllowed;
-                }
-                _audit.TrackEvent(AuditEvents.DeniedGroupCheckFailed, ex, new Dictionary<string, string>
-                {
-                    [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
-                    [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
-                    [AuditEvents.Prop.CallerUpn]     = callerUpn ?? "",
-                    [AuditEvents.Prop.ActionType]    = Type,
-                });
-                await _statusTracker.RecordTerminalAsync(msg, Type, "denied:user-group-check-failed", ct);
-                return;
-            }
-        }
-
-        // 2c) Evaluate combined gate result based on gating mode
-        {
-            bool gatePass = gatingMode switch
-            {
-                GatingMode.DeviceOnly => deviceInGroup,
-                GatingMode.UserOnly   => userInGroup,
-                GatingMode.Both       => deviceInGroup && userInGroup,
-                GatingMode.Either     => deviceInGroup || userInGroup,
-                _                     => deviceInGroup, // fallback = DeviceOnly
-            };
-
-            if (!gatePass)
-            {
-                var denyReason = gatingMode switch
-                {
-                    GatingMode.UserOnly => "denied:user-not-in-allowed-group",
-                    GatingMode.Both when !deviceInGroup && !userInGroup => "denied:neither-device-nor-user-in-group",
-                    GatingMode.Both when !deviceInGroup => "denied:device-not-in-allowed-group",
-                    GatingMode.Both when !userInGroup   => "denied:user-not-in-allowed-group",
-                    GatingMode.Either => "denied:neither-device-nor-user-in-group",
-                    _ => "denied:not-in-allowed-group",
-                };
-                _audit.TrackEvent(AuditEvents.DeniedNotInAllowedGroup, new Dictionary<string, string>
-                {
-                    [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
-                    [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
-                    [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
-                    [AuditEvents.Prop.CallerUpn]     = callerUpn ?? "",
-                    [AuditEvents.Prop.ActionType]    = Type,
-                    ["gatingMode"]                   = gatingMode.ToString(),
-                    ["deviceInGroup"]                = deviceInGroup.ToString(),
-                    ["userInGroup"]                  = userInGroup.ToString(),
-                }, LogLevel.Warning);
-                await _statusTracker.RecordTerminalAsync(msg, Type, denyReason, ct);
-                return;
-            }
-        }
-
-        gateAllowed:
-        _audit.TrackEvent(WipeAuditEvents.ValidationGroupAllowed, new Dictionary<string, string>
-        {
-            [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
-            [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
-            [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
-            [AuditEvents.Prop.CallerUpn]     = callerUpn ?? "",
-            [WipeAuditEvents.Prop.DeviceObjectId] = deviceObjId,
-            [WipeAuditEvents.Prop.AllowedGroupId] = _graph.AllowedGroupId,
-            ["allowedUserGroupId"]            = _graph.AllowedUserGroupId ?? "",
-            ["gatingMode"]                   = gatingMode.ToString(),
-        });
-
-        // 3) Ownership: resolve managedDevice via Graph filter by azureADDeviceId (server-authoritative)
+        // 2) Ownership: resolve managedDevice via Graph filter by azureADDeviceId (server-authoritative)
         string? managedId;
         try
         {

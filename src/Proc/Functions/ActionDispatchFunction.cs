@@ -1,8 +1,13 @@
 using System.Text.Json;
 using IntuneDeviceActions.Actions;
+using IntuneDeviceActions.Gates;
+using IntuneDeviceActions.Models;
 using IntuneDeviceActions.Services;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Graph;
+using Microsoft.Graph.Models.ODataErrors;
 
 namespace IntuneDeviceActions.Functions;
 
@@ -27,12 +32,27 @@ namespace IntuneDeviceActions.Functions;
 public sealed class ActionDispatchFunction
 {
     private readonly ActionRunnerRegistry _registry;
+    private readonly ActionGateOrchestrator _gates;
+    private readonly ActionStatusTracker _statusTracker;
+    private readonly GraphServiceClient _graph;
+    private readonly IConfiguration _cfg;
     private readonly AuditService _audit;
     private readonly ILogger<ActionDispatchFunction> _log;
 
-    public ActionDispatchFunction(ActionRunnerRegistry registry, AuditService audit, ILogger<ActionDispatchFunction> log)
+    public ActionDispatchFunction(
+        ActionRunnerRegistry registry,
+        ActionGateOrchestrator gates,
+        ActionStatusTracker statusTracker,
+        GraphServiceClient graph,
+        IConfiguration cfg,
+        AuditService audit,
+        ILogger<ActionDispatchFunction> log)
     {
         _registry = registry;
+        _gates = gates;
+        _statusTracker = statusTracker;
+        _graph = graph;
+        _cfg = cfg;
         _audit = audit;
         _log = log;
     }
@@ -75,6 +95,7 @@ public sealed class ActionDispatchFunction
             [AuditEvents.Prop.DeviceName]     = env.DeviceName,
             [AuditEvents.Prop.SchemaVersion]  = env.SchemaVersion,
         });
+        var statusMsg = BuildStatusMessage(env);
 
         var runner = _registry.Resolve(env.ActionType);
         _log.LogDebug("ActionDispatch runner resolution: type={ActionType} runner={Runner} knownTypes=[{Known}]",
@@ -91,9 +112,123 @@ public sealed class ActionDispatchFunction
             return;
         }
 
+        var allowedDeviceGroupId = GetActionConfig(env.ActionType, "AllowedGroupId");
+        var allowedUserGroupId = GetActionConfig(env.ActionType, "AllowedUserGroupId");
+        var gatingMode = NormalizeGatingMode(GetActionConfig(env.ActionType, "GatingMode"));
+
+        var shouldRunGates = string.Equals(env.ActionType, "wipe", StringComparison.OrdinalIgnoreCase)
+                             || !string.IsNullOrWhiteSpace(allowedDeviceGroupId)
+                             || !string.IsNullOrWhiteSpace(allowedUserGroupId);
+
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
+            if (shouldRunGates)
+            {
+                if (!Guid.TryParse(env.EntraDeviceId, out var entraDeviceId))
+                {
+                    _audit.TrackEvent(AuditEvents.ScheduleGateDenied, new Dictionary<string, string>
+                    {
+                        [AuditEvents.Prop.CorrelationId] = env.CorrelationId,
+                        [AuditEvents.Prop.ActionType] = env.ActionType,
+                        [AuditEvents.Prop.DeviceName] = env.DeviceName,
+                        [AuditEvents.Prop.EntraDeviceId] = env.EntraDeviceId ?? string.Empty,
+                        [AuditEvents.Prop.ScheduleGateReason] = "denied:device-resolve-failed",
+                    }, LogLevel.Warning);
+                    await _statusTracker.RecordTerminalAsync(statusMsg, env.ActionType, "denied:device-resolve-failed", ct);
+                    return;
+                }
+
+                string deviceObjectId = string.Empty;
+                var needsDeviceObjectResolution = !string.IsNullOrWhiteSpace(allowedDeviceGroupId)
+                                                  && !string.Equals(gatingMode, "UserOnly", StringComparison.OrdinalIgnoreCase);
+
+                if (needsDeviceObjectResolution)
+                {
+                    try
+                    {
+                        deviceObjectId = await ResolveDeviceObjectIdAsync(env.EntraDeviceId, ct);
+                    }
+                    catch (Exception ex) when (IsTransient(ex))
+                    {
+                        _log.LogWarning(ex, "Transient gate preflight error resolving device object id for {Device}", env.DeviceName);
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        _audit.TrackEvent(AuditEvents.DeniedDeviceResolveFailed, ex, new Dictionary<string, string>
+                        {
+                            [AuditEvents.Prop.CorrelationId] = env.CorrelationId,
+                            [AuditEvents.Prop.EntraDeviceId] = env.EntraDeviceId,
+                            [AuditEvents.Prop.DeviceName] = env.DeviceName,
+                            [AuditEvents.Prop.ActionType] = env.ActionType,
+                        });
+                        await _statusTracker.RecordTerminalAsync(statusMsg, env.ActionType, "denied:device-resolve-failed", ct);
+                        return;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(deviceObjectId))
+                    {
+                        _audit.TrackEvent(AuditEvents.DeniedDeviceNotInEntra, new Dictionary<string, string>
+                        {
+                            [AuditEvents.Prop.CorrelationId] = env.CorrelationId,
+                            [AuditEvents.Prop.EntraDeviceId] = env.EntraDeviceId,
+                            [AuditEvents.Prop.DeviceName] = env.DeviceName,
+                            [AuditEvents.Prop.ActionType] = env.ActionType,
+                        }, LogLevel.Warning);
+                        await _statusTracker.RecordTerminalAsync(statusMsg, env.ActionType, "denied:device-not-in-entra", ct);
+                        return;
+                    }
+                }
+
+                var gateResult = await _gates.RunAsync(new ActionGateContext
+                {
+                    EntraDeviceId = entraDeviceId,
+                    DeviceObjectId = deviceObjectId,
+                    DeviceName = env.DeviceName,
+                    ActionType = env.ActionType,
+                    CallerUpn = statusMsg.CallerUpn ?? env.CallerUpn,
+                    CorrelationId = env.CorrelationId,
+                    AllowedDeviceGroupId = allowedDeviceGroupId,
+                    AllowedUserGroupId = allowedUserGroupId,
+                    GatingMode = gatingMode,
+                }, ct);
+
+                if (gateResult.Status == ActionGateStatus.Deferred)
+                {
+                    var props = new Dictionary<string, string>
+                    {
+                        [AuditEvents.Prop.CorrelationId] = env.CorrelationId,
+                        [AuditEvents.Prop.DeviceName] = env.DeviceName,
+                        [AuditEvents.Prop.EntraDeviceId] = env.EntraDeviceId,
+                        [AuditEvents.Prop.ActionType] = env.ActionType,
+                    };
+                    if (gateResult.AvailableAtUtc is { } whenUtc)
+                    {
+                        props[AuditEvents.Prop.ScheduleScheduledAtUtc] = whenUtc.ToString("O");
+                        props[AuditEvents.Prop.ScheduleSecondsUntilFire] = Math.Max(0, (long)(whenUtc - DateTimeOffset.UtcNow).TotalSeconds).ToString();
+                    }
+                    _audit.TrackEvent(AuditEvents.ScheduleGated, props, LogLevel.Information);
+                    return;
+                }
+
+                if (gateResult.Status == ActionGateStatus.Denied)
+                {
+                    var reason = gateResult.DenialReason ?? "denied:unknown";
+                    _audit.TrackEvent(AuditEvents.ScheduleGateDenied, new Dictionary<string, string>
+                    {
+                        [AuditEvents.Prop.CorrelationId] = env.CorrelationId,
+                        [AuditEvents.Prop.ActionType] = env.ActionType,
+                        [AuditEvents.Prop.DeviceName] = env.DeviceName,
+                        [AuditEvents.Prop.EntraDeviceId] = env.EntraDeviceId,
+                        [AuditEvents.Prop.CallerUpn] = statusMsg.CallerUpn ?? env.CallerUpn ?? string.Empty,
+                        [AuditEvents.Prop.ScheduleGateReason] = reason,
+                    }, LogLevel.Warning);
+                    await _statusTracker.RecordTerminalAsync(statusMsg, env.ActionType, reason, ct);
+                    return;
+                }
+            }
+
             _log.LogDebug("ActionDispatch invoking runner {Runner} for corr={Corr}", runner.GetType().Name, env.CorrelationId);
             await runner.RunAsync(env, ct);
             sw.Stop();
@@ -125,5 +260,86 @@ public sealed class ActionDispatchFunction
             }
             // else: best-effort runner; swallow so we don't poison the queue
         }
+    }
+
+    private static ActionRequestMessage BuildStatusMessage(ActionDispatchMessage env)
+    {
+        ActionRequestMessage? msg = null;
+        try
+        {
+            if (env.Payload.ValueKind != JsonValueKind.Undefined)
+            {
+                msg = env.Payload.Deserialize<ActionRequestMessage>(ActionDispatchEnqueuer.JsonOptions);
+            }
+        }
+        catch
+        {
+            // fall back to the envelope fields below
+        }
+
+        msg ??= new ActionRequestMessage();
+
+        if (string.IsNullOrWhiteSpace(msg.ActionType)) msg.ActionType = env.ActionType;
+        if (string.IsNullOrWhiteSpace(msg.CorrelationId)) msg.CorrelationId = env.CorrelationId;
+        if (string.IsNullOrWhiteSpace(msg.DeviceName)) msg.DeviceName = env.DeviceName;
+        if (string.IsNullOrWhiteSpace(msg.EntraDeviceId)) msg.EntraDeviceId = env.EntraDeviceId;
+        if (string.IsNullOrWhiteSpace(msg.IntuneDeviceId)) msg.IntuneDeviceId = env.IntuneDeviceId;
+        if (string.IsNullOrWhiteSpace(msg.CallerUpn)) msg.CallerUpn = env.CallerUpn;
+
+        return msg;
+    }
+
+    private static string NormalizeGatingMode(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "DeviceOnly";
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "deviceonly" => "DeviceOnly",
+            "useronly" => "UserOnly",
+            "both" => "Both",
+            "either" => "Either",
+            _ => "DeviceOnly",
+        };
+    }
+
+    private static bool IsTransient(Exception ex)
+    {
+        if (ex is HttpRequestException or OperationCanceledException or TimeoutException)
+        {
+            return true;
+        }
+
+        if (ex is ODataError odata)
+        {
+            return odata.ResponseStatusCode == 429 || odata.ResponseStatusCode >= 500;
+        }
+
+        return false;
+    }
+
+    private async Task<string> ResolveDeviceObjectIdAsync(string entraDeviceId, CancellationToken ct)
+    {
+        var page = await _graph.Devices.GetAsync(req =>
+        {
+            req.QueryParameters.Filter = $"deviceId eq '{entraDeviceId}'";
+            req.QueryParameters.Select = new[] { "id" };
+            req.QueryParameters.Top = 1;
+        }, ct);
+
+        return page?.Value?.FirstOrDefault()?.Id ?? string.Empty;
+    }
+
+    private string? GetActionConfig(string actionType, string key)
+    {
+        var section = actionType.ToLowerInvariant() switch
+        {
+            "wipe" => "Wipe",
+            "bitlocker-rotate" => "BitLocker",
+            "autopilot-register" => "Autopilot",
+            "device-rename" => "Rename",
+            _ => actionType,
+        };
+
+        return _cfg[$"{section}:{key}"];
     }
 }

@@ -2,7 +2,9 @@ using IntuneDeviceActions;
 using IntuneDeviceActions.Capabilities.Autopilot;
 using IntuneDeviceActions.Capabilities.BitLocker;
 using IntuneDeviceActions.Capabilities.Rename;
+using IntuneDeviceActions.Capabilities.Wipe.Gates;
 using IntuneDeviceActions.Capabilities.Wipe;
+using IntuneDeviceActions.Gates;
 using IntuneDeviceActions.Middleware;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -30,6 +32,7 @@ var host = new HostBuilder()
         //   AddWipeProbe:      WipeActionStatusProbe so the poller can probe "wipe" rows.
         services.AddWipeForwarding();
         services.AddWipeProbe();
+        services.AddWipeScheduleStore();
 
         // BitLocker capability — proc role only forwards (does NOT execute).
         //   AddBitLockerForwarding: BitLockerActionSender + BitLockerForwardingRunner (bitlocker-action queue)
@@ -50,6 +53,14 @@ var host = new HostBuilder()
         // so the rename runner records a terminal "issued" status synchronously
         // right after the Graph call succeeds rather than leaving a pending row.
         services.AddRenameForwarding();
+
+        // Cross-cutting action gates (run in dispatcher before invoking any runner).
+        // Order matters: first defer by schedule (when configured), then enforce
+        // device/user group membership.
+        services.AddSingleton<IActionGate, WipeScheduleGate>();
+        services.AddSingleton<IActionGate, DeviceGroupMembershipGate>();
+        services.AddSingleton<IActionGate, UserGroupMembershipGate>();
+        services.AddSingleton<ActionGateOrchestrator>();
     })
     .Build();
 
