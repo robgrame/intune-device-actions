@@ -116,7 +116,7 @@ public sealed class ActionDispatchFunction
         var allowedUserGroupId = GetActionConfig(env.ActionType, "AllowedUserGroupId");
         var gatingMode = NormalizeGatingMode(GetActionConfig(env.ActionType, "GatingMode"));
 
-        var shouldRunGates = string.Equals(env.ActionType, "wipe", StringComparison.OrdinalIgnoreCase)
+        var shouldRunGates = IsGatedType(env.ActionType)
                              || !string.IsNullOrWhiteSpace(allowedDeviceGroupId)
                              || !string.IsNullOrWhiteSpace(allowedUserGroupId);
 
@@ -329,16 +329,41 @@ public sealed class ActionDispatchFunction
         return page?.Value?.FirstOrDefault()?.Id ?? string.Empty;
     }
 
+    /// <summary>
+    /// Decides whether the gate pipeline should run for an action type that has no
+    /// device/user group configured (e.g. a schedule-only gate). Driven by the
+    /// <c>Actions:GatedTypes</c> CSV so enabling gating for a new capability is an
+    /// App Configuration change, not a code change. Defaults to <c>wipe</c> when the
+    /// key is absent so existing behaviour is preserved with zero config.
+    /// </summary>
+    private bool IsGatedType(string actionType)
+    {
+        var raw = _cfg["Actions:GatedTypes"];
+        var types = string.IsNullOrWhiteSpace(raw)
+            ? new[] { "wipe" }
+            : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return types.Any(t => string.Equals(t, actionType, StringComparison.OrdinalIgnoreCase));
+    }
+
     private string? GetActionConfig(string actionType, string key)
     {
-        var section = actionType.ToLowerInvariant() switch
+        // Capability-agnostic section resolution: an explicit alias
+        // (Actions:ConfigSection:<actionType>) wins, then the built-in convenience
+        // map, then the action type itself (IConfiguration is case-insensitive, so
+        // a capability whose section name matches its action type needs no alias).
+        var section = _cfg[$"Actions:ConfigSection:{actionType}"];
+        if (string.IsNullOrWhiteSpace(section))
         {
-            "wipe" => "Wipe",
-            "bitlocker-rotate" => "BitLocker",
-            "autopilot-register" => "Autopilot",
-            "device-rename" => "Rename",
-            _ => actionType,
-        };
+            section = actionType.ToLowerInvariant() switch
+            {
+                "wipe" => "Wipe",
+                "bitlocker-rotate" => "BitLocker",
+                "autopilot-register" => "Autopilot",
+                "device-rename" => "Rename",
+                _ => actionType,
+            };
+        }
 
         return _cfg[$"{section}:{key}"];
     }

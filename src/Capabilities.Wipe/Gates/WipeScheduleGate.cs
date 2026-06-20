@@ -1,5 +1,6 @@
 using IntuneDeviceActions.Gates;
 using IntuneDeviceActions.Capabilities.Wipe.Schedule;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace IntuneDeviceActions.Capabilities.Wipe.Gates;
@@ -15,11 +16,13 @@ public sealed class WipeScheduleGate : IActionGate
     public string Name => "WipeScheduleGate";
 
     private readonly WipeScheduleStore? _store;
+    private readonly GateErrorPolicy _errorPolicy;
     private readonly ILogger<WipeScheduleGate> _log;
 
-    public WipeScheduleGate(WipeScheduleStore? store, ILogger<WipeScheduleGate> log)
+    public WipeScheduleGate(WipeScheduleStore? store, IConfiguration cfg, ILogger<WipeScheduleGate> log)
     {
         _store = store;
+        _errorPolicy = cfg.ReadGateErrorPolicy();
         _log = log;
     }
 
@@ -66,11 +69,20 @@ public sealed class WipeScheduleGate : IActionGate
         }
         catch (Exception ex)
         {
-            // Schedule lookup failure is non-fatal; fail open (operator intent is "this device IS wipeable").
-            // The client gate and ledger remain as defense-in-depth.
-            _log.LogWarning(ex, "Wipe schedule gate lookup failed for device {Device}; proceeding without gate.",
+            // Schedule lookup failure on a *destructive* action: apply the configured policy.
+            // Default (FailClosed) refuses the wipe on uncertainty; operators can opt into
+            // FailOpen (Actions:GateErrorPolicy=fail-open) when the client gate + ledger are
+            // trusted as defense-in-depth and availability is preferred over caution.
+            if (_errorPolicy == GateErrorPolicy.FailOpen)
+            {
+                _log.LogWarning(ex, "Wipe schedule gate lookup failed for device {Device}; failing open (policy=FailOpen).",
+                    context.DeviceName);
+                return ActionGateResult.Pass();
+            }
+
+            _log.LogError(ex, "Wipe schedule gate lookup failed for device {Device}; failing closed (policy=FailClosed).",
                 context.DeviceName);
-            return ActionGateResult.Pass();
+            return ActionGateResult.Denied("denied:schedule-lookup-failed");
         }
     }
 }

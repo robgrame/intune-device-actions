@@ -32,14 +32,22 @@ Reason codes are grouped by family:
 | denied | `denied:user-group-check-failed` | User group check threw (fail-closed) | `action.schedule.gate-denied` (reason) | Verifica gruppo utente fallita |
 | denied | `denied:device-resolve-failed` | Device object id resolution failed | `action.denied.device-resolve-failed` + `action.schedule.gate-denied` | Risoluzione device fallita |
 | denied | `denied:device-not-in-entra` | Entra device lookup returned empty | `action.denied.device-not-in-entra` | Device non registrato in Entra ID |
+| denied | `denied:schedule-lookup-failed` | Schedule store errored and policy is fail-closed | `action.schedule.gate-denied` (reason) | Verifica wave non disponibile |
+| denied | `denied:gate-error` | A gate threw unexpectedly and policy is fail-closed | `action.schedule.gate-denied` (reason) | Controllo di policy non disponibile |
 | deferred | (schedule defer) | Wave exists but is not yet due | `action.schedule.gated` (+ `scheduleScheduledAtUtc`) | Fuori dalla wave corrente, riprova più tardi |
 | failed | (graph error) | Capability execution failed | `action.failed` | Errore durante l'esecuzione |
 | failed | (timeout) | Execution timed out | `action.poll-timeout` | Timeout di esecuzione |
 
-> Legacy: `BitLockerRotateRunner` still performs its own group gating and emits
-> `action.denied.not-in-allowed-group` with reason `denied:not-in-allowed-group`
-> — it has NOT been migrated to the central gate pipeline yet (see rubber-duck
-> finding). New capabilities must use the central gates, not a private path.
+> **Fail-open vs fail-closed**: the two `*-failed`/`gate-error` rows are only
+> emitted when `Actions:GateErrorPolicy` is `fail-closed` (the default). Set it to
+> `fail-open` to allow the action through on gate errors instead (favours
+> availability over safety; not recommended for destructive actions).
+
+> BitLocker note: `bitlocker-rotate` is now gated by the central
+> `DeviceGroupMembershipGate` like wipe, so device-group denials surface as
+> `denied:device-not-in-allowed-group` via `action.schedule.gate-denied`. The
+> capability no longer emits its own `action.denied.not-in-allowed-group`.
+> (The PowerShell runbook *demo* variant still uses the legacy event.)
 
 ## UI guidance
 

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace IntuneDeviceActions.Gates;
@@ -9,11 +10,13 @@ namespace IntuneDeviceActions.Gates;
 public sealed class ActionGateOrchestrator
 {
     private readonly IReadOnlyList<IActionGate> _gates;
+    private readonly GateErrorPolicy _errorPolicy;
     private readonly ILogger<ActionGateOrchestrator> _log;
 
-    public ActionGateOrchestrator(IEnumerable<IActionGate> gates, ILogger<ActionGateOrchestrator> log)
+    public ActionGateOrchestrator(IEnumerable<IActionGate> gates, IConfiguration cfg, ILogger<ActionGateOrchestrator> log)
     {
         _gates = gates.ToList().AsReadOnly();
+        _errorPolicy = cfg.ReadGateErrorPolicy();
         _log = log;
     }
 
@@ -44,9 +47,15 @@ public sealed class ActionGateOrchestrator
             }
             catch (Exception ex)
             {
-                // Unexpected gate error — fail open (log and allow)
-                _log.LogError(ex, "Gate {GateName} raised unexpected error for device {Device}; failing open", gate.Name, context.DeviceName);
-                continue;
+                // Unexpected gate error — apply the configured policy.
+                if (_errorPolicy == GateErrorPolicy.FailOpen)
+                {
+                    _log.LogError(ex, "Gate {GateName} raised unexpected error for device {Device}; failing open (policy=FailOpen)", gate.Name, context.DeviceName);
+                    continue;
+                }
+
+                _log.LogError(ex, "Gate {GateName} raised unexpected error for device {Device}; failing closed (policy=FailClosed)", gate.Name, context.DeviceName);
+                return ActionGateResult.Denied("denied:gate-error");
             }
 
             switch (result.Status)

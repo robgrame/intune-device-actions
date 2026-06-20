@@ -18,7 +18,9 @@ namespace IntuneDeviceActions.Capabilities.BitLocker.Runners;
 /// destructive payload and the post-wipe nudges:
 /// <list type="number">
 ///   <item>resolve Entra directory object id;</item>
-///   <item>check membership of the allowed Entra group (<c>BitLocker:AllowedGroupId</c>);</item>
+///   <item>group membership is enforced centrally by the dispatcher
+///         (<c>DeviceGroupMembershipGate</c> reading <c>BitLocker:AllowedGroupId</c>),
+///         not re-checked here;</item>
 ///   <item>validate Intune↔Entra mapping (ownership);</item>
 ///   <item>reserve an idempotency ledger entry — skip if already issued / rate-limited;</item>
 ///   <item>call Graph rotateBitLockerKeys; mark ledger Issued/Failed accordingly;</item>
@@ -105,41 +107,9 @@ public sealed class BitLockerRotateRunner : IActionRunner
             return;
         }
 
-        // 2) Group membership check
-        bool inGroup;
-        try
-        {
-            inGroup = await _graph.IsDeviceInAllowedGroupAsync(deviceObjId, ct);
-        }
-        catch (Exception ex) when (GraphErrorClassifier.Classify(ex) == GraphErrorClassifier.GraphErrorKind.Transient)
-        {
-            _log.LogWarning(ex, "Transient error on group check — will retry");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _audit.TrackEvent(AuditEvents.DeniedGroupCheckFailed, ex, new Dictionary<string, string>
-            {
-                [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
-                [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
-                [AuditEvents.Prop.ActionType]    = Type,
-            });
-            await _statusTracker.RecordTerminalAsync(msg, Type, "denied:group-check-failed", ct);
-            return;
-        }
-
-        if (!inGroup)
-        {
-            _audit.TrackEvent(AuditEvents.DeniedNotInAllowedGroup, new Dictionary<string, string>
-            {
-                [AuditEvents.Prop.CorrelationId] = msg.CorrelationId,
-                [AuditEvents.Prop.DeviceName]    = msg.DeviceName,
-                [AuditEvents.Prop.EntraDeviceId] = msg.EntraDeviceId,
-                [AuditEvents.Prop.ActionType]    = Type,
-            }, LogLevel.Warning);
-            await _statusTracker.RecordTerminalAsync(msg, Type, "denied:not-in-allowed-group", ct);
-            return;
-        }
+        // 2) Group membership is enforced centrally by the dispatcher's
+        // DeviceGroupMembershipGate (reads BitLocker:AllowedGroupId), so the executor
+        // no longer re-checks it here — avoids a redundant Graph call and double audit.
 
         // 3) Ownership: resolve managedDevice via Graph (server-authoritative)
         string? managedId;

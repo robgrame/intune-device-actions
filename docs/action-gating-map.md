@@ -80,6 +80,8 @@ Typical reasons:
 - device not in the allowed group
 - user not in the allowed group
 - device binding / identity mismatch
+- a gate errored while the policy is fail-closed (`denied:gate-error`,
+  `denied:schedule-lookup-failed`)
 
 ### Deferred
 
@@ -106,6 +108,25 @@ later" than to "blocked".
 - do not rely only on `action.denied.*`
 - always include the schedule gate event explicitly
 - query by exact event name when the distinction matters
+
+## Configuration
+
+The gating pipeline is driven entirely from App Configuration so that enabling a
+capability or changing failure posture never requires a code change:
+
+| Key | Default | Purpose |
+|---|---|---|
+| `Actions:GatedTypes` | `wipe` | CSV of action types that run the gate pipeline even without group config (e.g. schedule-only gates). Add a new capability's type here to gate it — no dispatcher edit. |
+| `Actions:ConfigSection:<actionType>` | built-in map | Overrides the config section a capability reads its `AllowedGroupId` / `GatingMode` from. Defaults: `wipe→Wipe`, `bitlocker-rotate→BitLocker`, `autopilot-register→Autopilot`, `device-rename→Rename`; otherwise the action type itself. |
+| `Actions:GateErrorPolicy` | `fail-closed` | Behaviour when a gate errors unexpectedly (or the schedule store is unavailable). `fail-closed` denies the action (safe for destructive actions); `fail-open` lets it through (availability over safety). |
+| `<Section>:AllowedGroupId` | — | Entra group id for the device-membership gate. |
+| `<Section>:AllowedUserGroupId` | — | Entra group id for the caller-membership gate. |
+| `<Section>:GatingMode` | `DeviceOnly` | `DeviceOnly` / `UserOnly` / `Both` / `Either`. |
+
+> **Capability-agnostic invariant**: the dispatcher no longer hardcodes any
+> capability name. A new gated capability `foo` needs only (a) its
+> `IActionGate`/runner registered in `Proc/Program.cs` (composition root), and
+> (b) the App Config keys above — never an edit to `ActionDispatchFunction`.
 
 ## Reference implementation
 
