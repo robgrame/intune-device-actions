@@ -23,14 +23,14 @@ componente core:
 ```
 HTTP front-end → Service Bus / dispatcher (invariato)
        ↓
-   ActionDispatchFunction (router invariato)
+   ActionDispatchFunction (router + gate centrale: group/wave)
        ↓
    RunbookWebhookRunner (singolo generico, registrato N volte
    automaticamente al boot leggendo App Config
    RunbookBridge:Routes:<actionType>=<webhook>)
        ↓ POST webhook
    Invoke-<Capability>.runbook.ps1 + RunbookCore.ps1
-       → resolve / group / ownership / idempotency / Graph / audit
+       → resolve / ownership / idempotency / Graph / audit
 ```
 
 ## Parità funzionale con le Function
@@ -44,9 +44,15 @@ identico al runner di riferimento:
    Permanent (4xx → audit + terminal status). **Non eseguito** per
    `autopilot-register` — è intenzionale, lo stesso vale per il runner .NET
    perché Autopilot deve funzionare su hardware non ancora hybrid-joined.
-2. **Group membership check** via `checkMemberGroups` contro l'`AllowedGroupId`
-   (variabile Automation; per BitLocker fallback su `BitLockerAllowedGroupId`).
-   **Non eseguito** per `autopilot-register`.
+2. **Group membership gate** — **centralizzato nel dispatcher Proc**, non più
+   eseguito nel runbook. Il `DeviceGroupMembershipGate` gira *prima* del POST
+   al webhook usando `<Section>:AllowedGroupId` da **App Configuration** (la
+   variante `-runbook` eredita la config-section della capability base: es.
+   `bitlocker-rotate-runbook` → sezione `BitLocker`). **Requisito di deploy**:
+   per gatare un runbook configurare `Wipe:AllowedGroupId` /
+   `BitLocker:AllowedGroupId` in App Config (le Automation Variables
+   `AllowedGroupId`/`BitLockerAllowedGroupId` NON sono più l'autorità di
+   gating). **Non applicabile** a `autopilot-register`.
 3. **Ownership validation** risolvendo `managedDevices` via
    `azureADDeviceId` (fail-closed su 0 o ≥2 match). **Non eseguito** per
    `autopilot-register`.
@@ -80,10 +86,12 @@ identico al runner di riferimento:
 Tutti i path "denied:\*" granulari sono replicati con lo stesso evento audit
 e lo stesso `LastState` sulla actionstatus table:
 `denied:device-resolve-failed`, `denied:device-not-in-entra`,
-`denied:group-check-failed`, `denied:not-in-allowed-group`,
 `denied:managed-device-resolve-failed`, `denied:ownership-mismatch`,
 `denied:rate-limited`, `denied:already-issued`,
 `denied:in-progress-elsewhere`, `denied:missing-hardware-hash` (Autopilot).
+I path di gruppo (`denied:group-check-failed`, `denied:not-in-allowed-group`)
+sono ora emessi dal **gate centrale del dispatcher** (`action.schedule.gate-denied`),
+non più dal runbook.
 
 ### Differenze esplicite rispetto al runner .NET
 

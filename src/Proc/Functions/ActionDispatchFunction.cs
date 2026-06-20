@@ -355,13 +355,23 @@ public sealed class ActionDispatchFunction
         var section = _cfg[$"Actions:ConfigSection:{actionType}"];
         if (string.IsNullOrWhiteSpace(section))
         {
-            section = actionType.ToLowerInvariant() switch
+            // Runbook-backed variants (e.g. "wipe-runbook", "bitlocker-rotate-runbook")
+            // inherit their base capability's config section so the central gate
+            // enforces the same group policy as the Function variant. The runbooks
+            // run downstream of this dispatcher, so group gating lives here, not in
+            // the runbook body.
+            const string runbookSuffix = "-runbook";
+            var baseType = actionType.EndsWith(runbookSuffix, StringComparison.OrdinalIgnoreCase)
+                ? actionType[..^runbookSuffix.Length]
+                : actionType;
+
+            section = baseType.ToLowerInvariant() switch
             {
                 "wipe" => "Wipe",
                 "bitlocker-rotate" => "BitLocker",
                 "autopilot-register" => "Autopilot",
                 "device-rename" => "Rename",
-                _ => actionType,
+                _ => baseType,
             };
         }
 

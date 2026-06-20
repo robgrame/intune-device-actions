@@ -146,6 +146,21 @@ capability-specific checks (ownership, payload validation, idempotency).
 > which Autopilot hardware does not yet have, so every registration would be
 > denied with `denied:device-not-in-entra`.
 
+### Runbook-backed variants
+
+Runbook executors (Azure Automation) run **downstream** of this same dispatcher,
+so group/wave gating is centralized identically — the runbook body no longer
+checks group membership. A runbook actionType carrying a `-runbook` suffix
+(e.g. `wipe-runbook`, `bitlocker-rotate-runbook`) inherits its base capability's
+config section in `GetActionConfig`, so the central gate enforces
+`Wipe:AllowedGroupId` / `BitLocker:AllowedGroupId` from App Configuration.
+
+> **Deployment requirement**: when attaching a runbook-backed capability via
+> `RunbookBridge:Routes:<actionType>`, configure the base capability's
+> `<Section>:AllowedGroupId` in App Configuration to enable group gating. The
+> legacy Automation Variables `AllowedGroupId` / `BitLockerAllowedGroupId` are
+> no longer the gating authority.
+
 ## Reference implementation
 
 - `src/Proc/Functions/ActionDispatchFunction.cs`

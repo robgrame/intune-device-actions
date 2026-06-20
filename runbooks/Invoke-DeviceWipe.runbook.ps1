@@ -96,29 +96,13 @@ if (-not $deviceObjId) {
     return
 }
 
-# ─── 2) Group membership check ─────────────────────────────────────────────
-if (-not $ctx.AllowedGroupId) {
-    Write-RbcAudit -EventName $script:RbcAudit.DeniedGroupCheckFailed -Context $ctx -Level 'Error' -Props @{
-        reason = "AllowedGroupId Automation Variable not set"
-    }
-    Write-RbcTerminalStatus -Context $ctx -State 'denied:group-check-failed'
-    return
-}
-try {
-    $inGroup = Test-RbcDeviceInAllowedGroup -DeviceObjectId $deviceObjId -AllowedGroupId $ctx.AllowedGroupId
-} catch [RbcGraphError] {
-    if ($_.Exception.Kind -eq 'Transient') { throw }
-    Write-RbcAudit -EventName $script:RbcAudit.DeniedGroupCheckFailed -Context $ctx -Level 'Error' -Exception $_.Exception
-    Write-RbcTerminalStatus -Context $ctx -State 'denied:group-check-failed'
-    return
-}
-if (-not $inGroup) {
-    Write-RbcAudit -EventName $script:RbcAudit.DeniedNotInAllowedGroup -Context $ctx -Level 'Warning'
-    Write-RbcTerminalStatus -Context $ctx -State 'denied:not-in-allowed-group'
-    return
-}
+# 2) Group membership gate is CENTRALIZED in the Proc dispatcher.
+#    The dispatcher runs the DeviceGroupMembershipGate before invoking this
+#    runbook's webhook, using the capability's "<Section>:AllowedGroupId" App
+#    Configuration value (the "-runbook" actionType inherits the base section).
+#    Do NOT re-check group membership here; that would double-gate.
 
-# ─── 3) Ownership: managedDevice resolve (server-authoritative) ────────────
+# 3) Ownership: managedDevice resolve (server-authoritative)
 try {
     $managedId = Resolve-RbcManagedDeviceId -EntraDeviceId $ctx.EntraDeviceId
 } catch [RbcGraphError] {
