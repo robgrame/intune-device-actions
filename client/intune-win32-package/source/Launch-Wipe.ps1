@@ -51,6 +51,24 @@ function Show-Message {
         [System.Windows.Forms.MessageBoxButtons]::OK, $Icon) | Out-Null
 }
 
+function Get-WipeGateReasonText {
+    param([string]$Reason)
+    switch -Regex ($Reason) {
+        '^denied:not-enrolled-in-wave$'          { return 'Il dispositivo non risulta nella wave attiva per questa operazione.' }
+        '^denied:device-not-in-allowed-group$'   { return 'Il dispositivo non appartiene al gruppo autorizzato.' }
+        '^denied:user-not-in-allowed-group$'     { return 'L''utente corrente non appartiene al gruppo autorizzato.' }
+        '^denied:neither-device-nor-user-in-group$' { return 'Né dispositivo né utente appartengono ai gruppi autorizzati.' }
+        '^denied:group-check-failed$'            { return 'Impossibile verificare l''appartenenza ai gruppi autorizzati.' }
+        '^denied:user-group-check-failed$'       { return 'Impossibile verificare il gruppo utente autorizzato.' }
+        '^denied:device-resolve-failed$'         { return 'Impossibile risolvere il dispositivo in Entra ID.' }
+        '^denied:device-not-in-entra$'           { return 'Il dispositivo non risulta presente in Entra ID.' }
+        '^denied:managed-device-resolve-failed$' { return 'Impossibile risolvere il dispositivo gestito in Intune.' }
+        '^denied:ownership-mismatch$'            { return 'Il dispositivo non risulta coerente tra Entra e Intune.' }
+        '^denied:rate-limited$'                  { return 'Operazione temporaneamente bloccata dal limite di sicurezza.' }
+        default                                  { return $null }
+    }
+}
+
 try {
     if (-not (Test-Path $DialogPath)) {
         throw "Dialog script not found at '$DialogPath'. Reinstall the client."
@@ -283,15 +301,24 @@ try {
                 $msg   = if ($result.message)       { [string]$result.message }       else { 'Errore non specificato dal server.' }
                 $kind  = if ($result.kind)          { [string]$result.kind }          else { '' }
                 $http  = if ($result.httpStatusCode){ [string]$result.httpStatusCode } else { '' }
+                $serverStatus = if ($result.serverStatus) { [string]$result.serverStatus } else { '' }
+                $gateReason = if ($serverStatus) { Get-WipeGateReasonText -Reason $serverStatus } else { $null }
                 Add-WipeFormLog -Form $form -Message 'Richiesta FALLITA.' -Kind error
                 if ($http) { Add-WipeFormLog -Form $form -Message ("HTTP : {0}" -f $http) -Kind error }
                 if ($kind) { Add-WipeFormLog -Form $form -Message ("Kind : {0}" -f $kind) -Kind muted }
+                if ($serverStatus) { Add-WipeFormLog -Form $form -Message ("ServerStatus : {0}" -f $serverStatus) -Kind muted }
+                if ($gateReason) { Add-WipeFormLog -Form $form -Message ("Motivo: {0}" -f $gateReason) -Kind warning }
                 Add-WipeFormLog -Form $form -Message ("Message : {0}" -f $msg) -Kind error
                 if ($corr) {
                     Set-WipeFormCorrelationId -Form $form -CorrelationId $corr
                     Add-WipeFormLog -Form $form -Message ("CorrelationId : {0}" -f $corr) -Kind muted
                 }
-                Complete-WipeForm -Form $form -Success $false -FinalStatus 'Richiesta di reset rifiutata dal server.'
+                $finalStatus = if ($gateReason) {
+                    "Richiesta rifiutata dal server. $gateReason"
+                } else {
+                    'Richiesta di reset rifiutata dal server.'
+                }
+                Complete-WipeForm -Form $form -Success $false -FinalStatus $finalStatus
                 $script:exitCode = 1
                 return
             }

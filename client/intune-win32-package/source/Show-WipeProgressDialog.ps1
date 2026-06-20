@@ -47,6 +47,11 @@ function Show-WipeProgressDialog {
             '^notSupported$'      { return 'Operazione non supportata su questo dispositivo' }
             '^removedFromIntune$' { return 'Dispositivo rimosso da Intune (wipe completato)' }
             '^awaiting-graph$'    { return 'In attesa del primo controllo Intune' }
+            '^denied:not-enrolled-in-wave$'          { return 'NEGATO: dispositivo non incluso nella wave attiva' }
+            '^denied:device-not-in-allowed-group$'   { return 'NEGATO: dispositivo fuori dal gruppo autorizzato' }
+            '^denied:user-not-in-allowed-group$'     { return 'NEGATO: utente non autorizzato dal gruppo' }
+            '^denied:neither-device-nor-user-in-group$' { return 'NEGATO: né dispositivo né utente autorizzati' }
+            '^denied:rate-limited$'                  { return 'NEGATO: limite di sicurezza raggiunto' }
             '^denied:'            { return ('NEGATO: {0}' -f ($State -replace '^denied:', '')) }
             default               { if ($State) { return $State } else { return 'In attesa...' } }
         }

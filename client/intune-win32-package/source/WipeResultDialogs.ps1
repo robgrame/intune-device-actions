@@ -51,6 +51,18 @@ function Format-WipeErrorDetails {
     if ($Result.serverCorrelationId -and $Result.serverCorrelationId -ne $Result.correlationId) {
         $lines.Add(('ServerCorrId  : {0}' -f $Result.serverCorrelationId))
     }
+
+    function Get-WipeDeniedReasonText {
+        param([string]$Reason)
+        switch -Regex ($Reason) {
+            '^denied:not-enrolled-in-wave$'          { return 'Il dispositivo non risulta nella wave attiva.' }
+            '^denied:device-not-in-allowed-group$'   { return 'Il dispositivo non appartiene al gruppo autorizzato.' }
+            '^denied:user-not-in-allowed-group$'     { return 'L''utente corrente non appartiene al gruppo autorizzato.' }
+            '^denied:neither-device-nor-user-in-group$' { return 'Né dispositivo né utente appartengono ai gruppi autorizzati.' }
+            '^denied:rate-limited$'                  { return 'Operazione bloccata temporaneamente dal limite di sicurezza.' }
+            default                                  { return $null }
+        }
+    }
     if ($Result.kind)                { $lines.Add(('ErrorKind     : {0}' -f $Result.kind)) }
     if ($Result.httpStatusCode)      { $lines.Add(('HttpStatus    : {0} {1}' -f $Result.httpStatusCode, $Result.httpStatusReason)) }
     if ($Result.serverStatus)        { $lines.Add(('ServerStatus  : {0}' -f $Result.serverStatus)) }
@@ -183,6 +195,13 @@ function Show-WipeErrorDialog {
         $summary = [string]$Result.serverMessage
     } elseif ($Result.message) {
         $summary = [string]$Result.message
+    }
+    if ($Result.serverStatus -and ([string]$Result.serverStatus -match '^denied:')) {
+        $mapped = Get-WipeDeniedReasonText -Reason ([string]$Result.serverStatus)
+        if ($mapped) {
+            $summary = $mapped
+        }
+        $advice = "Contatta l'IT helpdesk fornendo il codice di correlazione e il motivo del rifiuto."
     }
 
     $corrText = $null
