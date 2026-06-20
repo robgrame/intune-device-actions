@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
-using Microsoft.Graph.Devices.Item.CheckMemberGroups;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Kiota.Abstractions;
 using Microsoft.Kiota.Abstractions.Serialization;
@@ -32,15 +31,18 @@ public sealed class GraphBitLockerService
 {
     private readonly GraphServiceClient _graph;
     private readonly ILogger<GraphBitLockerService> _log;
-    private readonly string _allowedGroupId;
     private readonly string _rotateEndpoint;
 
     public GraphBitLockerService(GraphServiceClient graph, IConfiguration cfg, ILogger<GraphBitLockerService> log)
     {
         _graph = graph;
         _log = log;
-        _allowedGroupId = cfg["BitLocker:AllowedGroupId"]
-            ?? throw new InvalidOperationException("BitLocker:AllowedGroupId must be configured");
+
+        // Required so the central DeviceGroupMembershipGate (in the dispatcher)
+        // always has a group to enforce for bitlocker-rotate. The executor no
+        // longer re-checks membership itself — this is a deployment invariant.
+        if (string.IsNullOrWhiteSpace(cfg["BitLocker:AllowedGroupId"]))
+            throw new InvalidOperationException("BitLocker:AllowedGroupId must be configured");
 
         // {0} is the (URL-escaped) managedDevice id. Default targets the v1.0
         // action surface; override to beta if the tenant requires it.
@@ -67,17 +69,6 @@ public sealed class GraphBitLockerService
         var matches = page?.Value ?? new List<Microsoft.Graph.Models.Device>();
         if (matches.Count != 1) return null;
         return matches[0].Id;
-    }
-
-    /// <summary>Checks membership of the configured BitLocker allow-list group.</summary>
-    public async Task<bool> IsDeviceInAllowedGroupAsync(string deviceObjectId, CancellationToken ct)
-    {
-        var body = new CheckMemberGroupsPostRequestBody { GroupIds = new List<string> { _allowedGroupId } };
-        var result = await _graph.Devices[deviceObjectId]
-            .CheckMemberGroups
-            .PostAsCheckMemberGroupsPostResponseAsync(body, cancellationToken: ct);
-        var matches = result?.Value ?? new List<string>();
-        return matches.Contains(_allowedGroupId, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>

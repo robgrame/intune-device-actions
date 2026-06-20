@@ -128,6 +128,24 @@ capability or changing failure posture never requires a code change:
 > `IActionGate`/runner registered in `Proc/Program.cs` (composition root), and
 > (b) the App Config keys above — never an edit to `ActionDispatchFunction`.
 
+### Per-capability gating posture
+
+Cross-cutting group/wave gating lives **only** in the dispatcher pipeline. No
+capability runner re-implements it; runners perform only their own privileged,
+capability-specific checks (ownership, payload validation, idempotency).
+
+| Capability | Central group/wave gate | Runner-side checks (privileged) |
+|---|---|---|
+| `wipe` | Schedule (wave) + device/user group gate (`Wipe:*`) | device-resolve, ownership, ledger, post-wipe nudges |
+| `bitlocker-rotate` | Device group gate (`BitLocker:AllowedGroupId`, required) | device-resolve, ownership, ledger |
+| `device-rename` | Optional device/user group gate (set `Rename:AllowedGroupId` to enable) | serial/intuneId validation, CMDB lookup, collision check, ledger |
+| `autopilot-register` | **None by design** — runs on fresh hardware with no Entra device object | hardware-hash payload validation, ledger |
+
+> **Do not** set `Autopilot:AllowedGroupId` (or add `autopilot-register` to
+> `Actions:GatedTypes`): the device-group gate resolves the Entra device object,
+> which Autopilot hardware does not yet have, so every registration would be
+> denied with `denied:device-not-in-entra`.
+
 ## Reference implementation
 
 - `src/Proc/Functions/ActionDispatchFunction.cs`
