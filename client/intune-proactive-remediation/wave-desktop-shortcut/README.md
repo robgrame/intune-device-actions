@@ -78,7 +78,7 @@ Se il device non e' in nessuna wave, il server risponde `204 No Content`.
 
 In `Remediate.ps1` modificare:
 - `$ShortcutTarget` / `$ShortcutArgs` - comando da lanciare (default: `powershell.exe -File "<ProgramFiles64>\\IntuneWipeClient\\Launch-Wipe.ps1"`)
-- `$ShortcutIcon` - percorso dell'icona (.ico)
+- `$ShortcutIcon` - percorso dell'icona (.ico), default: `%ProgramFiles%\IntuneWipeClient\assets\IntuneWipeClient.ico`
 - `$ShortcutName` - nome del file .lnk
 - `$ShortcutDesc` - tooltip
 
