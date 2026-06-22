@@ -3,7 +3,7 @@ using Azure.Data.Tables;
 using IntuneDeviceActions.Schedule;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
-using Microsoft.Graph.Devices.Item.CheckMemberGroups;
+using Microsoft.Graph.Models;
 
 namespace IntuneDeviceActions.Capabilities.Wipe.Schedule;
 
@@ -271,8 +271,18 @@ public sealed class WipeScheduleStore
 
     /// <summary>
     /// Collects client-visible group-based waves whose Entra group contains the
-    /// device, resolved via Graph <c>checkMemberGroups</c>. Graph exceptions
-    /// propagate to the caller (see <see cref="GetScheduleForDeviceAsync(Guid, GraphServiceClient?, CancellationToken)"/>).
+    /// device, resolved via the device's <c>transitiveMemberOf</c> navigation.
+    /// <para>
+    /// We deliberately do NOT use <c>checkMemberGroups</c>/<c>getMemberGroups</c>
+    /// here: those directory action methods are unreliable for <b>device</b>
+    /// objects (they frequently return an empty set even when the device is a
+    /// direct member of the group), so group-based waves would silently never
+    /// resolve. The <c>transitiveMemberOf</c> navigation is the reliable
+    /// device-membership path and only needs directory read
+    /// (<c>Device.Read.All</c> + <c>GroupMember.Read.All</c>).
+    /// </para>
+    /// Graph exceptions propagate to the caller (see
+    /// <see cref="GetScheduleForDeviceAsync(Guid, GraphServiceClient?, CancellationToken)"/>).
     /// </summary>
     private async Task<List<WipeScheduleWave>> CollectGroupWavesAsync(
         Guid entraDeviceId, GraphServiceClient graph, CancellationToken ct)
@@ -280,7 +290,7 @@ public sealed class WipeScheduleStore
         var groupWaves = await GetGroupBasedWavesAsync(ct).ConfigureAwait(false);
         if (groupWaves.Count == 0) return new List<WipeScheduleWave>();
 
-        // Resolve entraDeviceId → directory object id (needed for checkMemberGroups).
+        // Resolve entraDeviceId → directory object id (transitiveMemberOf is keyed by object id).
         var page = await graph.Devices.GetAsync(cfg =>
         {
             cfg.QueryParameters.Filter = $"deviceId eq '{entraDeviceId}'";
@@ -290,21 +300,32 @@ public sealed class WipeScheduleStore
         var objectId = page?.Value?.FirstOrDefault()?.Id;
         if (string.IsNullOrEmpty(objectId)) return new List<WipeScheduleWave>();
 
-        var groupIds = groupWaves
-            .Select(w => w.EntraGroupId!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        // Enumerate the device's transitive group memberships (id only) and
+        // intersect with the candidate wave groups in memory. A device's group
+        // count is small, so a single page (Top=999) almost always suffices; we
+        // still page for correctness.
+        var memberOfGroupIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var response = await graph.Devices[objectId].TransitiveMemberOf.GraphGroup.GetAsync(cfg =>
+        {
+            cfg.QueryParameters.Select = new[] { "id" };
+            cfg.QueryParameters.Top = 999;
+        }, ct).ConfigureAwait(false);
 
-        var body = new CheckMemberGroupsPostRequestBody { GroupIds = groupIds };
-        var result = await graph.Devices[objectId]
-            .CheckMemberGroups
-            .PostAsCheckMemberGroupsPostResponseAsync(body, cancellationToken: ct)
-            .ConfigureAwait(false);
-        var matchedGroups = result?.Value ?? new List<string>();
-        if (matchedGroups.Count == 0) return new List<WipeScheduleWave>();
+        if (response is not null)
+        {
+            var iterator = PageIterator<Group, GroupCollectionResponse>.CreatePageIterator(
+                graph, response, g =>
+                {
+                    if (!string.IsNullOrEmpty(g.Id)) memberOfGroupIds.Add(g.Id);
+                    return true;
+                });
+            await iterator.IterateAsync(ct).ConfigureAwait(false);
+        }
+
+        if (memberOfGroupIds.Count == 0) return new List<WipeScheduleWave>();
 
         return groupWaves
-            .Where(w => matchedGroups.Contains(w.EntraGroupId!, StringComparer.OrdinalIgnoreCase))
+            .Where(w => memberOfGroupIds.Contains(w.EntraGroupId!))
             .ToList();
     }
 
