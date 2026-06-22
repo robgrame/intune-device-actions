@@ -37,7 +37,7 @@ $ExpectedFunctionKey = '__REPLACE_WITH_REAL_FUNCTION_KEY__'
 # from a previously-set env var — will be left untouched).
 $ExpectedCertThumbprint  = ''
 $ExpectedCertSubjectLike = ''
-$ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*'
+$ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*;*MSLABS-ADCS*'
 # =============================================================================
 
 $UrlVarName     = 'INTUNE_WIPE_API_URL'

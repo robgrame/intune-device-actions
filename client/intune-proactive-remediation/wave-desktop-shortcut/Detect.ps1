@@ -35,6 +35,8 @@ if ($ApiBaseUrl -match '/api/actions$') {
     $ApiBaseUrl = $ApiBaseUrl.Substring(0, $ApiBaseUrl.Length - '/api/actions'.Length)
 }
 $SchedulePath  = '/api/schedule/me?actionType=wipe'
+$FunctionKey = $env:INTUNE_ACTIONS_FUNCTION_KEY
+if (-not $FunctionKey) { $FunctionKey = $env:INTUNE_WIPE_FUNCTION_KEY }
 $CertThumbprint = $env:INTUNE_ACTIONS_CERT_THUMBPRINT
 if (-not $CertThumbprint) { $CertThumbprint = $env:INTUNE_WIPE_CERT_THUMBPRINT }
 $CertSubjectLike = $env:INTUNE_ACTIONS_CERT_SUBJECT_LIKE
@@ -61,6 +63,11 @@ function Write-Log {
 }
 
 Write-Log "Detect started. ApiBaseUrl='$ApiBaseUrl'"
+if ($FunctionKey) {
+    Write-Log "Using function key from environment (length=$($FunctionKey.Trim().Length))."
+} else {
+    Write-Log "Function key missing in environment (INTUNE_ACTIONS_FUNCTION_KEY / INTUNE_WIPE_FUNCTION_KEY). API call may return 401."
+}
 
 # --- If shortcut was already created, we're compliant (no need to remediate again)
 if (Test-Path $ShortcutFlag) {
@@ -161,7 +168,9 @@ if ($useCache) {
 } else {
     try {
     $uri = "$ApiBaseUrl$SchedulePath"
-    $response = Invoke-RestMethod -Uri $uri -Certificate $cert -Method GET -TimeoutSec 30
+    $headers = @{}
+    if ($FunctionKey) { $headers['x-functions-key'] = $FunctionKey }
+    $response = Invoke-RestMethod -Uri $uri -Certificate $cert -Headers $headers -Method GET -TimeoutSec 30
     $manifest = $response  # $null on 204 No Content
         if ($manifest) {
             $manifest | ConvertTo-Json -Depth 10 | Set-Content -Path $CacheFile -Encoding UTF8

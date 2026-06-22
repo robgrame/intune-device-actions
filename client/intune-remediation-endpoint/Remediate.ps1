@@ -29,7 +29,7 @@ $ExpectedFunctionKey = '__REPLACE_WITH_REAL_FUNCTION_KEY__'
 # cert in Cert:\LocalMachine\My. Leave any of these EMPTY ('') to opt out
 # of pinning that selector via env var.
 $ExpectedCertThumbprint  = ''
-$ExpectedCertSubjectLike = '*Microsoft Intune MDM Device CA*'
+$ExpectedCertSubjectLike = ''
 $ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*;*MSLABS-ADCS*'
 # =============================================================================
 

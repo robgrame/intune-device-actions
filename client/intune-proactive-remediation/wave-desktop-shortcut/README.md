@@ -63,13 +63,14 @@ Se il device non e' in nessuna wave, il server risponde `204 No Content`.
 | Variabile | Default | Descrizione |
 |-----------|---------|-------------|
 | `INTUNE_ACTIONS_API_URL` | `https://devact-web-dev.azurewebsites.net` | Base URL dell'API |
+| `INTUNE_ACTIONS_FUNCTION_KEY` | (vuoto) | Function key inviata come header `x-functions-key` verso `/api/schedule/me` |
 | `INTUNE_ACTIONS_CERT_THUMBPRINT` | (auto-detect) | Thumbprint del certificato client |
 | `INTUNE_ACTIONS_CERT_SUBJECT_LIKE` | (vuoto) | Filtro wildcard sul Subject DN del certificato client (es. `*Intune MDM Device CA*`) |
 | `INTUNE_ACTIONS_CERT_ISSUER_LIKE` | (vuoto) | Filtro wildcard (anche multiplo separato da `;`) sull'Issuer DN del certificato client |
 | `INTUNE_ACTIONS_CERT_EXCLUDE_ISSUER_LIKE` | `*Intune*MDM*` | Esclude issuer non desiderati in auto-detect (default: evita il certificato Intune MDM e favorisce PKI aziendale) |
 
 > Compatibilita': `Detect.ps1` accetta anche le variabili legacy `INTUNE_WIPE_*`
-> (es. `INTUNE_WIPE_API_URL`, `INTUNE_WIPE_CERT_ISSUER_LIKE`). Se
+> (es. `INTUNE_WIPE_API_URL`, `INTUNE_WIPE_FUNCTION_KEY`, `INTUNE_WIPE_CERT_ISSUER_LIKE`). Se
 > `INTUNE_WIPE_API_URL` contiene `/api/actions`, lo script normalizza
 > automaticamente al base URL corretto per `/api/schedule/me`.
 
