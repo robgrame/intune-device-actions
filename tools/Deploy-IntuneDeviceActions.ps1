@@ -140,6 +140,20 @@
 .PARAMETER SkipRegisterResourceProvider
     Skip the Azure Resource Provider registration check/registration step.
 
+.PARAMETER EnableGuardrailBicepBuild
+    Run `az bicep build` validation for all active deployment profile templates
+    (`infra/main.bicep`, `infra/main-public.bicep`, `infra/main-public-flex.bicep`)
+    before any infra deployment.
+
+.PARAMETER EnableWhatIfPreview
+    Run an `az deployment group what-if` preview before `deployment group create`.
+    This is a read-only safety gate.
+
+.PARAMETER WhatIfOnly
+    With -EnableWhatIfPreview, run only the what-if preview and skip all apply
+    phases (infra create/update, zip deploy, runbook publish, Graph consent,
+    smoke test). Useful for change review gates.
+
 .EXAMPLE
     .\tools\Deploy-IntuneDeviceActions.ps1
 
@@ -191,7 +205,10 @@ param(
     [string]$EntraClientId,
     [SecureString]$EntraClientSecret,
     [switch]$DeployOnlyPortal,
-    [switch]$SkipRegisterResourceProvider
+    [switch]$SkipRegisterResourceProvider,
+    [switch]$EnableGuardrailBicepBuild,
+    [switch]$EnableWhatIfPreview,
+    [switch]$WhatIfOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -201,6 +218,7 @@ $ProgressPreference    = 'SilentlyContinue'
 # don't see the script-level $PSBoundParameters).
 $script:NameSuffixOverridden = $PSBoundParameters.ContainsKey('NameSuffix')
 $script:NamePrefixOverridden = $PSBoundParameters.ContainsKey('NamePrefix')
+$script:InfraApplySkipped     = $false
 
 # -- Paths -------------------------------------------------------------------
 $RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -225,6 +243,15 @@ function Write-Ok($m)   { Write-Host "    [OK]   $m" -ForegroundColor Green }
 function Write-Warn2($m){ Write-Host "    [WARN] $m" -ForegroundColor Yellow }
 function Write-Err($m)  { Write-Host "    [ERR]  $m" -ForegroundColor Red }
 function Test-Cmd($n)   { [bool](Get-Command $n -ErrorAction SilentlyContinue) }
+
+function Assert-GuardrailFlags {
+    if ($WhatIfOnly -and -not $EnableWhatIfPreview) {
+        throw "Invalid guardrail flags: -WhatIfOnly requires -EnableWhatIfPreview. Example: .\tools\Deploy-IntuneDeviceActions.ps1 -EnableWhatIfPreview -WhatIfOnly"
+    }
+    if ($WhatIfOnly -and $DeployOnlyPortal) {
+        throw '-WhatIfOnly and -DeployOnlyPortal cannot be combined.'
+    }
+}
 
 # -- Prereqs ----------------------------------------------------------------
 function Test-Winget { Test-Cmd winget }
@@ -302,6 +329,41 @@ function Confirm-Bicep {
     & az bicep install --only-show-errors 2>&1 | Out-Null
     if ((& az bicep version --only-show-errors 2>&1) -and $LASTEXITCODE -eq 0) { Write-Ok 'Bicep installed' }
     else { throw 'Bicep install failed.' }
+}
+
+function Invoke-GuardrailBicepBuild {
+    if (-not $EnableGuardrailBicepBuild) { return }
+    Write-Step 'Guardrail: Bicep build validation (all active profiles)'
+    $templates = @(
+        @{ Profile = 'hardened'; File = (Join-Path $InfraDir 'main.bicep') },
+        @{ Profile = 'public';   File = (Join-Path $InfraDir 'main-public.bicep') },
+        @{ Profile = 'flex';     File = (Join-Path $InfraDir 'main-public-flex.bicep') }
+    )
+    $guardrailOutDir = Join-Path $RepoRoot 'artifacts\guardrails'
+    if (-not (Test-Path $guardrailOutDir)) {
+        New-Item -ItemType Directory -Path $guardrailOutDir -Force | Out-Null
+    }
+    $failed = @()
+    foreach ($t in $templates) {
+        if (-not (Test-Path $t.File)) {
+            $failed += "$($t.Profile): missing template '$($t.File)'"
+            continue
+        }
+        $outFile = Join-Path $guardrailOutDir "bicep-build-$($t.Profile).json"
+        & az bicep build --file $t.File --outfile $outFile --only-show-errors | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            $failed += "$($t.Profile): build failed for '$($t.File)'"
+            continue
+        }
+        if (Test-Path $outFile) {
+            Remove-Item -Path $outFile -Force -ErrorAction SilentlyContinue
+        }
+        Write-Ok "$($t.Profile): bicep build passed"
+    }
+    if ($failed.Count -gt 0) {
+        $details = ($failed -join '; ')
+        throw "Guardrail failed. Fix Bicep errors before deploy. Details: $details. Tip: run 'az bicep build --file <template>' locally for the failing profile."
+    }
 }
 
 # -- Azure auth -------------------------------------------------------------
@@ -528,21 +590,19 @@ function Invoke-InfraDeploy {
 
     $deployName = "$NamePrefix-deploy-$([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))"
     Write-Host "    deployment name: $deployName"
-    $azArgs = @(
-        'deployment','group','create',
-        '-g', $ResourceGroup, '-n', $deployName,
+    $commonDeployArgs = @(
+        '-g', $ResourceGroup,
         '-f', $BicepFile, '-p', "@$ParametersFile",
-        '--query', 'properties.provisioningState', '-o', 'tsv',
         '--only-show-errors'
     )
     # Bound (incl. empty string) -> forward to bicep as named param override.
     if ($script:NamePrefixOverridden) {
         Write-Host "    namePrefix override: '$NamePrefix'"
-        $azArgs += @('-p', "namePrefix=$NamePrefix")
+        $commonDeployArgs += @('-p', "namePrefix=$NamePrefix")
     }
     if ($script:NameSuffixOverridden) {
         Write-Host "    nameSuffix override: '$NameSuffix'"
-        $azArgs += @('-p', "nameSuffix=$NameSuffix")
+        $commonDeployArgs += @('-p', "nameSuffix=$NameSuffix")
     }
     $tagsParamFile = $null
     if ($Tags -and $Tags.Count -gt 0) {
@@ -558,17 +618,45 @@ function Invoke-InfraDeploy {
         }
         ($paramDoc | ConvertTo-Json -Depth 10) | Set-Content -Path $tagsParamFile -Encoding utf8
         Write-Host "    tags override: $($Tags.Count) key(s) via $tagsParamFile"
-        $azArgs += @('-p', "@$tagsParamFile")
+        $commonDeployArgs += @('-p', "@$tagsParamFile")
     }
     try {
-        $state = & az @azArgs
+        if ($EnableWhatIfPreview -or $WhatIfOnly) {
+            if (-not $EnableWhatIfPreview) {
+                throw "Invalid guardrail flags: -WhatIfOnly requires -EnableWhatIfPreview."
+            }
+            Write-Step "Guardrail: what-if preview -> $ResourceGroup"
+            $whatIfArgs = @(
+                'deployment','group','what-if',
+                '-n', $deployName,
+                '--result-format', 'ResourceIdOnly',
+                '--no-pretty-print'
+            ) + $commonDeployArgs
+            & az @whatIfArgs
+            if ($LASTEXITCODE -ne 0) {
+                throw "What-if preview failed. Resolve template/parameter issues, then retry with -EnableWhatIfPreview. Inspect details with: az deployment group what-if -g $ResourceGroup -f $BicepFile -p @$ParametersFile"
+            }
+            Write-Ok 'What-if preview completed successfully.'
+            if ($WhatIfOnly) {
+                $script:InfraApplySkipped = $true
+                Write-Warn2 'What-if-only mode enabled: skipping infra apply.'
+                return
+            }
+        }
+
+        $azCreateArgs = @(
+            'deployment','group','create',
+            '-n', $deployName,
+            '--query', 'properties.provisioningState', '-o', 'tsv'
+        ) + $commonDeployArgs
+        $state = & az @azCreateArgs
     } finally {
         if ($tagsParamFile -and (Test-Path $tagsParamFile)) {
             Remove-Item $tagsParamFile -Force -ErrorAction SilentlyContinue
         }
     }
     if ($LASTEXITCODE -ne 0 -or $state -ne 'Succeeded') {
-        throw "Bicep deployment failed (state: $state). Run: az deployment group show -g $ResourceGroup -n $deployName"
+        throw "Bicep deployment failed (state: $state). Run: az deployment group show -g $ResourceGroup -n $deployName and az deployment operation group list -g $ResourceGroup -n $deployName --query ""[?properties.provisioningState=='Failed']"""
     }
     Write-Ok "Infra deployed (state: $state)"
 }
@@ -586,15 +674,56 @@ function Get-FunctionAppByRole($role) {
     return $name.Trim()
 }
 
+# -- Publishing credential policy helpers ------------------------------------
+function Get-BasicPublishingPolicyAllow {
+    param(
+        [Parameter(Mandatory = $true)][string]$SiteName,
+        [ValidateSet('scm','ftp')][string]$PolicyName = 'scm'
+    )
+    $subId = (& az account show --query id -o tsv --only-show-errors).Trim()
+    if (-not $subId) { throw 'Unable to resolve current Azure subscription id.' }
+    $uri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$SiteName/basicPublishingCredentialsPolicies/$PolicyName?api-version=2023-12-01"
+    $json = & az rest --method get --uri $uri --only-show-errors | ConvertFrom-Json
+    return [bool]$json.properties.allow
+}
+
+function Set-BasicPublishingPolicyAllow {
+    param(
+        [Parameter(Mandatory = $true)][string]$SiteName,
+        [Parameter(Mandatory = $true)][bool]$Allow,
+        [ValidateSet('scm','ftp')][string]$PolicyName = 'scm'
+    )
+    $subId = (& az account show --query id -o tsv --only-show-errors).Trim()
+    if (-not $subId) { throw 'Unable to resolve current Azure subscription id.' }
+    $uri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$SiteName/basicPublishingCredentialsPolicies/$PolicyName?api-version=2023-12-01"
+    $payload = @{ properties = @{ allow = $Allow } } | ConvertTo-Json -Depth 3 -Compress
+    & az rest --method put --uri $uri --body $payload --only-show-errors -o none
+    if ($LASTEXITCODE -ne 0) { throw "Failed to set $PolicyName basic publishing policy on $SiteName." }
+}
+
 # -- Zip deploy -------------------------------------------------------------
 function Invoke-ZipDeploy {
     if ($SkipDeploy) { Write-Warn2 'Skipping zip deploy (-SkipDeploy).'; return }
     $apps = @{}
+    $scmPolicyBefore = @{}
     foreach ($role in 'web','proc','wipe','autopilot','bitlocker','rename') {
         $a = Get-FunctionAppByRole $role
         if (-not $a) { throw "No Function App found with prefix '$NamePrefix-$role-' in $ResourceGroup." }
         $apps[$role] = $a
     }
+    Write-Step 'Ensuring SCM zip-deploy auth is enabled'
+    foreach ($role in 'web','proc','wipe','autopilot','bitlocker','rename') {
+        $app = $apps[$role]
+        $scmEnabled = Get-BasicPublishingPolicyAllow -SiteName $app -PolicyName 'scm'
+        $scmPolicyBefore[$role] = $scmEnabled
+        if (-not $scmEnabled) {
+            Set-BasicPublishingPolicyAllow -SiteName $app -PolicyName 'scm' -Allow $true
+            Write-Ok "enabled SCM basic publishing on $app"
+        } else {
+            Write-Host "    SCM already enabled on $app" -ForegroundColor Gray
+        }
+    }
+
     Write-Step 'Restarting Function Apps (RBAC propagation buffer)'
     foreach ($role in 'web','proc','wipe','autopilot','bitlocker','rename') {
         & az functionapp restart -g $ResourceGroup -n $apps[$role] --only-show-errors -o none
@@ -603,17 +732,28 @@ function Invoke-ZipDeploy {
     Write-Host "    waiting 60s for restart + RBAC settle..."
     Start-Sleep 60
 
-    Write-Step 'Deploying function zips'
-    foreach ($role in 'web','proc','wipe','autopilot','bitlocker','rename') {
-        $app = $apps[$role]
-        $zip = Join-Path $PublishDir "$role.zip"
-        if (-not (Test-Path $zip)) { throw "Missing zip: $zip (did you skip -SkipPublish?)" }
-        Write-Host "    -> $app  ($role.zip)"
-        & az functionapp deployment source config-zip `
-            -g $ResourceGroup -n $app --src $zip `
-            --only-show-errors -o none
-        if ($LASTEXITCODE -ne 0) { throw "Zip deploy failed for $app" }
-        Write-Ok "$app  deployed"
+    try {
+        Write-Step 'Deploying function zips'
+        foreach ($role in 'web','proc','wipe','autopilot','bitlocker','rename') {
+            $app = $apps[$role]
+            $zip = Join-Path $PublishDir "$role.zip"
+            if (-not (Test-Path $zip)) { throw "Missing zip: $zip (did you skip -SkipPublish?)" }
+            Write-Host "    -> $app  ($role.zip)"
+            & az functionapp deployment source config-zip `
+                -g $ResourceGroup -n $app --src $zip `
+                --only-show-errors -o none
+            if ($LASTEXITCODE -ne 0) { throw "Zip deploy failed for $app" }
+            Write-Ok "$app  deployed"
+        }
+    } finally {
+        Write-Step 'Restoring SCM publishing policy'
+        foreach ($role in 'web','proc','wipe','autopilot','bitlocker','rename') {
+            $app = $apps[$role]
+            if ($scmPolicyBefore.ContainsKey($role) -and -not [bool]$scmPolicyBefore[$role]) {
+                Set-BasicPublishingPolicyAllow -SiteName $app -PolicyName 'scm' -Allow $false
+                Write-Ok "restored SCM basic publishing disabled on $app"
+            }
+        }
     }
 }
 
@@ -874,6 +1014,7 @@ try {
     Write-Host '|  IntuneDeviceActions  -  end-to-end deploy   |' -ForegroundColor White
     Write-Host '+----------------------------------------------+' -ForegroundColor White
 
+    Assert-GuardrailFlags
     if ($SkipPrereqInstall) {
         Write-Warn2 '-SkipPrereqInstall set; assuming dotnet/az/bicep are present.'
     } else {
@@ -894,18 +1035,27 @@ try {
     if ($DeployOnlyPortal) {
         Write-Warn2 'DeployOnlyPortal set: skipping all API phases (publish/infra/zip/runbooks/graph/smoke).'
     } else {
+        Invoke-GuardrailBicepBuild
         Invoke-Publish
         Invoke-InfraDeploy
-        Invoke-ZipDeploy
-        Invoke-RunbookPublish
-        if ($SkipGraphConsent) {
-            Write-Warn2 'Skipping Graph consent (-SkipGraphConsent).'
+        if ($script:InfraApplySkipped) {
+            Write-Warn2 'What-if-only mode: skipped infra apply and all post-infra execution phases.'
         } else {
-            Invoke-GraphConsent
+            Invoke-ZipDeploy
+            Invoke-RunbookPublish
+            if ($SkipGraphConsent) {
+                Write-Warn2 'Skipping Graph consent (-SkipGraphConsent).'
+            } else {
+                Invoke-GraphConsent
+            }
+            Invoke-SmokeTest
         }
-        Invoke-SmokeTest
     }
-    Invoke-PortalDeploy
+    if ($script:InfraApplySkipped -and $DeployPortal) {
+        Write-Warn2 'What-if-only mode: skipping optional portal deployment.'
+    } else {
+        Invoke-PortalDeploy
+    }
     Show-PostDeployNotes
 
     Write-Host ''
