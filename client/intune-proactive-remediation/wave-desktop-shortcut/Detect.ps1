@@ -28,6 +28,8 @@ $SchedulePath  = '/api/schedule/me?actionType=wipe'
 $CertThumbprint = $env:INTUNE_ACTIONS_CERT_THUMBPRINT
 $CertSubjectLike = $env:INTUNE_ACTIONS_CERT_SUBJECT_LIKE
 $CertIssuerLike  = $env:INTUNE_ACTIONS_CERT_ISSUER_LIKE
+$CertExcludeIssuerLike = $env:INTUNE_ACTIONS_CERT_EXCLUDE_ISSUER_LIKE
+if (-not $CertExcludeIssuerLike) { $CertExcludeIssuerLike = '*Intune*MDM*' }
 $CacheDir      = Join-Path $env:ProgramData 'IntuneWipeClient'
 $CacheFile     = Join-Path $CacheDir 'wave-schedule.json'
 $CacheTtlHours = 4
@@ -57,15 +59,22 @@ function Get-ClientCertificate {
     param(
         [string]$Thumbprint,
         [string]$SubjectLike,
-        [string]$IssuerLike
+        [string]$IssuerLike,
+        [string]$ExcludeIssuerLike
     )
 
     $thumb = if ($Thumbprint) { $Thumbprint.Trim().ToUpper().Replace(' ', '') } else { $null }
     $issuerPatterns = @()
+    $excludeIssuerPatterns = @()
     if ($IssuerLike) {
         $issuerPatterns = @($IssuerLike -split ';' |
                             ForEach-Object { $_.Trim() } |
                             Where-Object { $_ })
+    }
+    if ($ExcludeIssuerLike) {
+        $excludeIssuerPatterns = @($ExcludeIssuerLike -split ';' |
+                                   ForEach-Object { $_.Trim() } |
+                                   Where-Object { $_ })
     }
 
     $candidates = Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
@@ -86,6 +95,15 @@ function Get-ClientCertificate {
             return $false
         }
     }
+    if ($excludeIssuerPatterns.Count -gt 0) {
+        $candidates = $candidates | Where-Object {
+            $issuer = $_.Issuer
+            foreach ($pattern in $excludeIssuerPatterns) {
+                if ($issuer -like $pattern) { return $false }
+            }
+            return $true
+        }
+    }
 
     if ($thumb) {
         return $candidates | Where-Object { $_.Thumbprint -eq $thumb } | Select-Object -First 1
@@ -98,13 +116,17 @@ function Get-ClientCertificate {
     return $candidates | Sort-Object NotAfter -Descending | Select-Object -First 1
 }
 
-$cert = Get-ClientCertificate -Thumbprint $CertThumbprint -SubjectLike $CertSubjectLike -IssuerLike $CertIssuerLike
+$cert = Get-ClientCertificate `
+    -Thumbprint $CertThumbprint `
+    -SubjectLike $CertSubjectLike `
+    -IssuerLike $CertIssuerLike `
+    -ExcludeIssuerLike $CertExcludeIssuerLike
 
 if (-not $cert) {
-    Write-Log "No valid client certificate found (thumbprint='$CertThumbprint', subjectLike='$CertSubjectLike', issuerLike='$CertIssuerLike'). Cannot poll API. Compliant (skip)."
+    Write-Log "No valid client certificate found (thumbprint='$CertThumbprint', subjectLike='$CertSubjectLike', issuerLike='$CertIssuerLike', excludeIssuerLike='$CertExcludeIssuerLike'). Cannot poll API. Compliant (skip)."
     exit 0
 }
-Write-Log "Using client certificate thumbprint='$($cert.Thumbprint)' subject='$($cert.Subject)' notAfter='$($cert.NotAfter.ToString('o'))'."
+Write-Log "Using client certificate thumbprint='$($cert.Thumbprint)' subject='$($cert.Subject)' issuer='$($cert.Issuer)' notAfter='$($cert.NotAfter.ToString('o'))'."
 
 # --- Check cache freshness ---------------------------------------------------
 if (-not (Test-Path $CacheDir)) { New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null }
