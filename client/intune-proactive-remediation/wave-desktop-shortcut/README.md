@@ -68,10 +68,20 @@ Se il device non e' in nessuna wave, il server risponde `204 No Content`.
 ### Personalizzazione shortcut
 
 In `Remediate.ps1` modificare:
-- `$ShortcutTarget` - percorso dell'eseguibile/script da lanciare
+- `$ShortcutTarget` / `$ShortcutArgs` - comando da lanciare (default: `powershell.exe -File "<ProgramFiles64>\\IntuneWipeClient\\Launch-Wipe.ps1"`)
 - `$ShortcutIcon` - percorso dell'icona (.ico)
 - `$ShortcutName` - nome del file .lnk
 - `$ShortcutDesc` - tooltip
+
+### Logging remediation
+
+`Remediate.ps1` scrive un log persistente in:
+
+`%ProgramData%\IntuneWipeClient\Logs\wave-desktop-shortcut-remediate.log`
+
+In aggiunta, l'esecuzione Intune resta visibile nei log dell'agent:
+
+`C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\IntuneManagementExtension.log`
 
 ### Cache
 
