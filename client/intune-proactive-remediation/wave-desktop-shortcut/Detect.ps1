@@ -194,11 +194,17 @@ if ($useCache) {
     $uri = "$ApiBaseUrl$SchedulePath"
     $headers = @{}
     if ($FunctionKey) { $headers['x-functions-key'] = $FunctionKey }
+    Write-Log "Calling schedule function: GET $uri"
     $response = Invoke-RestMethod -Uri $uri -Certificate $cert -Headers $headers -Method GET -TimeoutSec 30
     $manifest = $response  # $null on 204 No Content
         if ($manifest) {
             $manifest | ConvertTo-Json -Depth 10 | Set-Content -Path $CacheFile -Encoding UTF8
-            Write-Log "Fetched schedule manifest from API and refreshed cache."
+            Write-Log ("Fetched schedule manifest from API and refreshed cache. waveId={0}, name={1}, isImmediate={2}, scheduledAtUtc={3}, status={4}" -f `
+                $manifest.waveId,
+                $manifest.name,
+                $manifest.isImmediate,
+                $manifest.scheduledAtUtc,
+                $manifest.status)
         } else {
             # 204 - no wave; clear stale cache
             if (Test-Path $CacheFile) { Remove-Item $CacheFile -Force }
@@ -224,6 +230,10 @@ if ($useCache) {
 
 if (-not $manifest) {
     $hasShortcut = @(Get-ShortcutPaths | Where-Object { Test-Path $_ })
+    foreach ($shortcutPath in (Get-ShortcutPaths)) {
+        Write-Log ("Shortcut path check: '{0}' exists={1}" -f $shortcutPath, (Test-Path $shortcutPath))
+    }
+    Write-Log ("Shortcut flag check: '{0}' exists={1}" -f $ShortcutFlag, (Test-Path $ShortcutFlag))
     if ($hasShortcut) {
         Write-Log "No scheduled wave for this device, but shortcut(s) exist. Non-compliant - remediation needed to remove them."
         exit 1
@@ -234,6 +244,10 @@ if (-not $manifest) {
 
 $existingShortcuts = @(Get-ShortcutPaths | Where-Object { Test-Path $_ })
 $hasFlag = Test-Path $ShortcutFlag
+foreach ($shortcutPath in (Get-ShortcutPaths)) {
+    Write-Log ("Shortcut path check: '{0}' exists={1}" -f $shortcutPath, (Test-Path $shortcutPath))
+}
+Write-Log ("Shortcut flag check: '{0}' exists={1}" -f $ShortcutFlag, $hasFlag)
 Write-Log ("Shortcut state snapshot: flag={0}, existingShortcutCount={1}" -f $hasFlag, ($existingShortcuts.Count))
 
 if ($manifest.isImmediate -eq $true) {
