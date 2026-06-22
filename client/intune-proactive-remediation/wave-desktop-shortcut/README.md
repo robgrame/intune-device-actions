@@ -16,7 +16,7 @@ della `DeviceScheduleSnapshot` restituita.
 | File | Contesto | Scopo |
 |------|----------|-------|
 | `Detect.ps1` | SYSTEM | Polling periodico su `/api/schedule/me?actionType=wipe` per verificare se il device e' in una wave attiva |
-| `Remediate.ps1` | SYSTEM | Crea gli shortcut su Start Menu (all-users) + Public Desktop, poi scrive flag |
+| `Remediate.ps1` | SYSTEM | Crea o rimuove gli shortcut su Start Menu (all-users) + Public Desktop in base alla wave, poi aggiorna il flag |
 
 ## Flusso
 
@@ -31,12 +31,13 @@ Detect.ps1 --> GET /api/schedule/me?actionType=wipe (mTLS)
     |-- 200 + isImmediate=true        --> exit 1 (non-compliant)
          |
          v
-    Remediate.ps1 --> Crea shortcut su Start Menu + Public Desktop
-                  --> Scrive flag (shortcut-created.flag)
+    Remediate.ps1 --> Crea shortcut se la wave e' attiva
+                  --> Rimuove shortcut se la wave non e' piu' attiva
+                  --> Aggiorna il flag (shortcut-created.flag)
                   --> exit 0
     |
     [Prossimo ciclo Detect.ps1]
-    |-- Flag esiste --> exit 0 (compliant, shortcut gia' presente)
+    |-- Stato shortcut coerente con la wave --> exit 0
 ```
 
 ## Risposta server (DeviceScheduleSnapshot)

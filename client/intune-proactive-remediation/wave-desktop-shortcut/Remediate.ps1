@@ -43,6 +43,31 @@ function Write-Log {
     Write-Host $line
 }
 
+function Get-ShortcutPaths {
+    return @(
+        (Join-Path $PublicDesktop $ShortcutName),
+        (Join-Path $StartMenuPrograms $ShortcutName)
+    )
+}
+
+function Remove-ShortcutArtifacts {
+    $removed = 0
+    foreach ($path in (Get-ShortcutPaths)) {
+        if (Test-Path $path) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            if (-not (Test-Path $path)) {
+                Write-Log "Shortcut removed: $path"
+                $removed++
+            }
+        }
+    }
+    if (Test-Path $FlagFile) {
+        Remove-Item -LiteralPath $FlagFile -Force -ErrorAction SilentlyContinue
+        Write-Log "Flag removed: $FlagFile"
+    }
+    return $removed
+}
+
 Write-Log "Remediation started. PublicDesktop='$PublicDesktop' StartMenuPrograms='$StartMenuPrograms'"
 Write-Log "Shortcut target='$ShortcutTarget' args='$ShortcutArgs'"
 
@@ -54,6 +79,26 @@ if (-not (Test-Path (Join-Path $InstallDir 'Launch-Wipe.ps1'))) {
 # --- Create shortcuts ---------------------------------------------------------
 try {
     $wshShell = New-Object -ComObject WScript.Shell
+    $cacheFile = Join-Path $CacheDir 'wave-schedule.json'
+    $shouldHaveShortcut = $false
+    if (Test-Path $cacheFile) {
+        try {
+            $raw = Get-Content -LiteralPath $cacheFile -Raw
+            $manifest = if ($raw) { $raw | ConvertFrom-Json } else { $null }
+            $shouldHaveShortcut = ($manifest -and $manifest.isImmediate -eq $true)
+            Write-Log ("Wave state from cache: shouldHaveShortcut={0}" -f $shouldHaveShortcut)
+        } catch {
+            Write-Log "WARN: Failed to read wave cache '$cacheFile': $($_.Exception.Message)."
+        }
+    } else {
+        Write-Log "Wave cache missing; defaulting to removal-safe behavior."
+    }
+
+    if (-not $shouldHaveShortcut) {
+        $removed = Remove-ShortcutArtifacts
+        Write-Log ("Removal mode completed. RemovedShortcutCount={0}" -f $removed)
+        exit 0
+    }
 
     foreach ($folder in @($PublicDesktop, $StartMenuPrograms)) {
         if (-not (Test-Path $folder)) {

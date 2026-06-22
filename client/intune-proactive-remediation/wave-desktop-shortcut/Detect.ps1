@@ -77,6 +77,13 @@ function Get-SecretFingerprint {
     return ('sha256={0}' -f ([BitConverter]::ToString($hash).Replace('-', '').Substring(0, 16)))
 }
 
+function Get-ShortcutPaths {
+    return @(
+        (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Intune Device Actions.lnk'),
+        (Join-Path (Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs') 'Intune Device Actions.lnk')
+    )
+}
+
 Write-Log "Detect started. ApiBaseUrl='$ApiBaseUrl'"
 Write-Log ("Config snapshot: URL='{0}', FunctionKey={1} {2}, Thumbprint={3}, SubjectLike={4}, IssuerLike={5}, ExcludeIssuerLike={6}" -f `
     $ApiBaseUrl,
@@ -90,12 +97,6 @@ if ($FunctionKey) {
     Write-Log "Using function key from environment (length=$($FunctionKey.Trim().Length))."
 } else {
     Write-Log "Function key missing in environment (INTUNE_ACTIONS_FUNCTION_KEY / INTUNE_WIPE_FUNCTION_KEY). API call may return 401."
-}
-
-# --- If shortcut was already created, we're compliant (no need to remediate again)
-if (Test-Path $ShortcutFlag) {
-    Write-Log "Shortcut already created (flag exists). Compliant."
-    exit 0
 }
 
 # --- Find client certificate -------------------------------------------------
@@ -222,14 +223,31 @@ if ($useCache) {
 # If no wave applies, the server returns 204 (empty response / $null manifest).
 
 if (-not $manifest) {
-    Write-Log "No scheduled wave for this device (204). Compliant."
+    $hasShortcut = @(Get-ShortcutPaths | Where-Object { Test-Path $_ })
+    if ($hasShortcut) {
+        Write-Log "No scheduled wave for this device, but shortcut(s) exist. Non-compliant - remediation needed to remove them."
+        exit 1
+    }
+    Write-Log "No scheduled wave for this device (204) and no shortcut exists. Compliant."
     exit 0
 }
 
+$existingShortcuts = @(Get-ShortcutPaths | Where-Object { Test-Path $_ })
+$hasFlag = Test-Path $ShortcutFlag
+Write-Log ("Shortcut state snapshot: flag={0}, existingShortcutCount={1}" -f $hasFlag, ($existingShortcuts.Count))
+
 if ($manifest.isImmediate -eq $true) {
-    Write-Log "Active wave '$($manifest.name)' (scheduledAtUtc: $($manifest.scheduledAtUtc), waveId: $($manifest.waveId)). Non-compliant - remediation needed."
+    if ($existingShortcuts.Count -gt 0 -and $hasFlag) {
+        Write-Log "Active wave '$($manifest.name)' and shortcut already present. Compliant."
+        exit 0
+    }
+    Write-Log "Active wave '$($manifest.name)' (scheduledAtUtc: $($manifest.scheduledAtUtc), waveId: $($manifest.waveId)). Non-compliant - remediation needed to create shortcut."
     exit 1
 } else {
-    Write-Log "Wave '$($manifest.name)' scheduled for $($manifest.scheduledAtUtc) - not yet active. Compliant."
+    if ($existingShortcuts.Count -gt 0 -or $hasFlag) {
+        Write-Log "Wave '$($manifest.name)' is not active, but shortcut/flag still exists. Non-compliant - remediation needed to remove shortcut."
+        exit 1
+    }
+    Write-Log "Wave '$($manifest.name)' scheduled for $($manifest.scheduledAtUtc) - not yet active and no shortcut exists. Compliant."
     exit 0
 }
