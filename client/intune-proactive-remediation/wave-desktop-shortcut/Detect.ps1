@@ -22,13 +22,27 @@
 $ErrorActionPreference = 'Stop'
 
 # --- Configuration (override via env vars or hardcode for your tenant) -------
+# Backward-compatible env var resolution:
+# - New namespace: INTUNE_ACTIONS_*
+# - Legacy namespace: INTUNE_WIPE_*
 $ApiBaseUrl    = $env:INTUNE_ACTIONS_API_URL
+if (-not $ApiBaseUrl) { $ApiBaseUrl = $env:INTUNE_WIPE_API_URL }
 if (-not $ApiBaseUrl) { $ApiBaseUrl = 'https://devact-web-dev.azurewebsites.net' }
+# Legacy INTUNE_WIPE_API_URL usually points to /api/actions. For schedule polling
+# we need the app base URL only.
+$ApiBaseUrl = $ApiBaseUrl.TrimEnd('/')
+if ($ApiBaseUrl -match '/api/actions$') {
+    $ApiBaseUrl = $ApiBaseUrl.Substring(0, $ApiBaseUrl.Length - '/api/actions'.Length)
+}
 $SchedulePath  = '/api/schedule/me?actionType=wipe'
 $CertThumbprint = $env:INTUNE_ACTIONS_CERT_THUMBPRINT
+if (-not $CertThumbprint) { $CertThumbprint = $env:INTUNE_WIPE_CERT_THUMBPRINT }
 $CertSubjectLike = $env:INTUNE_ACTIONS_CERT_SUBJECT_LIKE
+if (-not $CertSubjectLike) { $CertSubjectLike = $env:INTUNE_WIPE_CERT_SUBJECT_LIKE }
 $CertIssuerLike  = $env:INTUNE_ACTIONS_CERT_ISSUER_LIKE
+if (-not $CertIssuerLike) { $CertIssuerLike = $env:INTUNE_WIPE_CERT_ISSUER_LIKE }
 $CertExcludeIssuerLike = $env:INTUNE_ACTIONS_CERT_EXCLUDE_ISSUER_LIKE
+if (-not $CertExcludeIssuerLike) { $CertExcludeIssuerLike = $env:INTUNE_WIPE_CERT_EXCLUDE_ISSUER_LIKE }
 if (-not $CertExcludeIssuerLike) { $CertExcludeIssuerLike = '*Intune*MDM*' }
 $CacheDir      = Join-Path $env:ProgramData 'IntuneWipeClient'
 $CacheFile     = Join-Path $CacheDir 'wave-schedule.json'
