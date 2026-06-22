@@ -37,7 +37,7 @@ $ExpectedFunctionKey = '__REPLACE_WITH_REAL_FUNCTION_KEY__'
 # from a previously-set env var — will be left untouched).
 $ExpectedCertThumbprint  = ''
 $ExpectedCertSubjectLike = ''
-$ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*;*MSLABS-ADCS*'
+$ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*'
 # =============================================================================
 
 $UrlVarName     = 'INTUNE_WIPE_API_URL'
@@ -51,14 +51,36 @@ function Write-OneLine {
     if ($Message) { Write-Host ($Message -replace "[\r\n]+", ' ') }
 }
 
+function Format-SafeValue {
+    param([string]$Value, [switch]$Secret)
+    if (-not $Value) { return '(empty)' }
+    if ($Secret) { return "len=$($Value.Length)" }
+    return $Value
+}
+
 try {
+    Write-OneLine ("Expected config snapshot: URL='{0}', FunctionKey={1}, Thumbprint={2}, SubjectLike={3}, IssuerLike={4}" -f `
+        $ExpectedApiUrl,
+        (Format-SafeValue $ExpectedFunctionKey -Secret),
+        (Format-SafeValue $ExpectedCertThumbprint),
+        (Format-SafeValue $ExpectedCertSubjectLike),
+        (Format-SafeValue $ExpectedCertIssuerLike))
     $currentUrl = [Environment]::GetEnvironmentVariable($UrlVarName, 'Machine')
+    $currentKey = [Environment]::GetEnvironmentVariable($KeyVarName, 'Machine')
+    $currentThumb = [Environment]::GetEnvironmentVariable($CertThumbVar, 'Machine')
+    $currentSubject = [Environment]::GetEnvironmentVariable($CertSubjectVar, 'Machine')
+    $currentIssuer = [Environment]::GetEnvironmentVariable($CertIssuerVar, 'Machine')
+    Write-OneLine ("Current env snapshot: URL='{0}', FunctionKey={1}, Thumbprint={2}, SubjectLike={3}, IssuerLike={4}" -f `
+        (Format-SafeValue $currentUrl),
+        (Format-SafeValue $currentKey -Secret),
+        (Format-SafeValue $currentThumb),
+        (Format-SafeValue $currentSubject),
+        (Format-SafeValue $currentIssuer))
     if (-not $currentUrl -or $currentUrl.Trim() -ne $ExpectedApiUrl) {
         Write-OneLine "REMEDIATE: $UrlVarName missing or mismatched (expected '$ExpectedApiUrl')."
         exit 1
     }
 
-    $currentKey = [Environment]::GetEnvironmentVariable($KeyVarName, 'Machine')
     if (-not $currentKey -or $currentKey.Trim() -ne $ExpectedFunctionKey) {
         $obs = if ($currentKey) { "len=$($currentKey.Trim().Length)" } else { 'missing' }
         Write-OneLine "REMEDIATE: $KeyVarName mismatched ($obs vs expected len=$($ExpectedFunctionKey.Length))."

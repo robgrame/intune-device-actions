@@ -30,7 +30,7 @@ $ExpectedFunctionKey = '__REPLACE_WITH_REAL_FUNCTION_KEY__'
 # of pinning that selector via env var.
 $ExpectedCertThumbprint  = ''
 $ExpectedCertSubjectLike = ''
-$ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*;*MSLABS-ADCS*'
+$ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*'
 # =============================================================================
 
 $UrlVarName     = 'INTUNE_WIPE_API_URL'
@@ -52,8 +52,21 @@ function Write-Log {
     Write-Host $line
 }
 
+function Format-SafeValue {
+    param([string]$Value, [switch]$Secret)
+    if (-not $Value) { return '(empty)' }
+    if ($Secret) { return "len=$($Value.Length)" }
+    return $Value
+}
+
 try {
     Write-Log "Remediation started."
+    Write-Log ("Expected config: URL='{0}', FunctionKey={1}, Thumbprint={2}, SubjectLike={3}, IssuerLike={4}" -f `
+        $ExpectedApiUrl,
+        (Format-SafeValue $ExpectedFunctionKey -Secret),
+        (Format-SafeValue $ExpectedCertThumbprint),
+        (Format-SafeValue $ExpectedCertSubjectLike),
+        (Format-SafeValue $ExpectedCertIssuerLike))
     [Environment]::SetEnvironmentVariable($UrlVarName, $ExpectedApiUrl,      'Machine')
     [Environment]::SetEnvironmentVariable($KeyVarName, $ExpectedFunctionKey, 'Machine')
     Write-Log "Set $UrlVarName and $KeyVarName."
@@ -78,6 +91,15 @@ try {
 
     $writtenUrl = [Environment]::GetEnvironmentVariable($UrlVarName, 'Machine')
     $writtenKey = [Environment]::GetEnvironmentVariable($KeyVarName, 'Machine')
+    $writtenThumb = [Environment]::GetEnvironmentVariable($CertThumbVar, 'Machine')
+    $writtenSubject = [Environment]::GetEnvironmentVariable($CertSubjectVar, 'Machine')
+    $writtenIssuer = [Environment]::GetEnvironmentVariable($CertIssuerVar, 'Machine')
+    Write-Log ("Read-back snapshot: URL='{0}', FunctionKey={1}, Thumbprint={2}, SubjectLike={3}, IssuerLike={4}" -f `
+        $writtenUrl,
+        (Format-SafeValue $writtenKey -Secret),
+        (Format-SafeValue $writtenThumb),
+        (Format-SafeValue $writtenSubject),
+        (Format-SafeValue $writtenIssuer))
     if ($writtenUrl -ne $ExpectedApiUrl) {
         Write-Log "FAIL: $UrlVarName read-back '$writtenUrl' does not match expected."
         exit 1

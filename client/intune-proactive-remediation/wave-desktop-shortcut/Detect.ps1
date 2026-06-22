@@ -62,7 +62,21 @@ function Write-Log {
     Write-Host $line
 }
 
+function Format-SafeValue {
+    param([string]$Value, [switch]$Secret)
+    if (-not $Value) { return '(empty)' }
+    if ($Secret) { return "len=$($Value.Length)" }
+    return $Value
+}
+
 Write-Log "Detect started. ApiBaseUrl='$ApiBaseUrl'"
+Write-Log ("Config snapshot: URL='{0}', FunctionKey={1}, Thumbprint={2}, SubjectLike={3}, IssuerLike={4}, ExcludeIssuerLike={5}" -f `
+    $ApiBaseUrl,
+    (Format-SafeValue $FunctionKey -Secret),
+    (Format-SafeValue $CertThumbprint),
+    (Format-SafeValue $CertSubjectLike),
+    (Format-SafeValue $CertIssuerLike),
+    (Format-SafeValue $CertExcludeIssuerLike))
 if ($FunctionKey) {
     Write-Log "Using function key from environment (length=$($FunctionKey.Trim().Length))."
 } else {
