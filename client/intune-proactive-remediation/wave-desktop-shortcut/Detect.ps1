@@ -69,10 +69,19 @@ function Format-SafeValue {
     return $Value
 }
 
+function Get-SecretFingerprint {
+    param([string]$Value)
+    if (-not $Value) { return '(empty)' }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+    $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+    return ('sha256={0}' -f ([BitConverter]::ToString($hash).Replace('-', '').Substring(0, 16)))
+}
+
 Write-Log "Detect started. ApiBaseUrl='$ApiBaseUrl'"
-Write-Log ("Config snapshot: URL='{0}', FunctionKey={1}, Thumbprint={2}, SubjectLike={3}, IssuerLike={4}, ExcludeIssuerLike={5}" -f `
+Write-Log ("Config snapshot: URL='{0}', FunctionKey={1} {2}, Thumbprint={3}, SubjectLike={4}, IssuerLike={5}, ExcludeIssuerLike={6}" -f `
     $ApiBaseUrl,
     (Format-SafeValue $FunctionKey -Secret),
+    (Get-SecretFingerprint $FunctionKey),
     (Format-SafeValue $CertThumbprint),
     (Format-SafeValue $CertSubjectLike),
     (Format-SafeValue $CertIssuerLike),

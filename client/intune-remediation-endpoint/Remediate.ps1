@@ -59,11 +59,20 @@ function Format-SafeValue {
     return $Value
 }
 
+function Get-SecretFingerprint {
+    param([string]$Value)
+    if (-not $Value) { return '(empty)' }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+    $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+    return ('sha256={0}' -f ([BitConverter]::ToString($hash).Replace('-', '').Substring(0, 16)))
+}
+
 try {
     Write-Log "Remediation started."
-    Write-Log ("Expected config: URL='{0}', FunctionKey={1}, Thumbprint={2}, SubjectLike={3}, IssuerLike={4}" -f `
+    Write-Log ("Expected config: URL='{0}', FunctionKey={1} {2}, Thumbprint={3}, SubjectLike={4}, IssuerLike={5}" -f `
         $ExpectedApiUrl,
         (Format-SafeValue $ExpectedFunctionKey -Secret),
+        (Get-SecretFingerprint $ExpectedFunctionKey),
         (Format-SafeValue $ExpectedCertThumbprint),
         (Format-SafeValue $ExpectedCertSubjectLike),
         (Format-SafeValue $ExpectedCertIssuerLike))
@@ -94,9 +103,10 @@ try {
     $writtenThumb = [Environment]::GetEnvironmentVariable($CertThumbVar, 'Machine')
     $writtenSubject = [Environment]::GetEnvironmentVariable($CertSubjectVar, 'Machine')
     $writtenIssuer = [Environment]::GetEnvironmentVariable($CertIssuerVar, 'Machine')
-    Write-Log ("Read-back snapshot: URL='{0}', FunctionKey={1}, Thumbprint={2}, SubjectLike={3}, IssuerLike={4}" -f `
+    Write-Log ("Read-back snapshot: URL='{0}', FunctionKey={1} {2}, Thumbprint={3}, SubjectLike={4}, IssuerLike={5}" -f `
         $writtenUrl,
         (Format-SafeValue $writtenKey -Secret),
+        (Get-SecretFingerprint $writtenKey),
         (Format-SafeValue $writtenThumb),
         (Format-SafeValue $writtenSubject),
         (Format-SafeValue $writtenIssuer))

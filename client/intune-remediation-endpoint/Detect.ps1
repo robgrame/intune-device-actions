@@ -58,10 +58,19 @@ function Format-SafeValue {
     return $Value
 }
 
+function Get-SecretFingerprint {
+    param([string]$Value)
+    if (-not $Value) { return '(empty)' }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+    $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+    return ('sha256={0}' -f ([BitConverter]::ToString($hash).Replace('-', '').Substring(0, 16)))
+}
+
 try {
-    Write-OneLine ("Expected config snapshot: URL='{0}', FunctionKey={1}, Thumbprint={2}, SubjectLike={3}, IssuerLike={4}" -f `
+    Write-OneLine ("Expected config snapshot: URL='{0}', FunctionKey={1} {2}, Thumbprint={3}, SubjectLike={4}, IssuerLike={5}" -f `
         $ExpectedApiUrl,
         (Format-SafeValue $ExpectedFunctionKey -Secret),
+        (Get-SecretFingerprint $ExpectedFunctionKey),
         (Format-SafeValue $ExpectedCertThumbprint),
         (Format-SafeValue $ExpectedCertSubjectLike),
         (Format-SafeValue $ExpectedCertIssuerLike))
@@ -70,9 +79,10 @@ try {
     $currentThumb = [Environment]::GetEnvironmentVariable($CertThumbVar, 'Machine')
     $currentSubject = [Environment]::GetEnvironmentVariable($CertSubjectVar, 'Machine')
     $currentIssuer = [Environment]::GetEnvironmentVariable($CertIssuerVar, 'Machine')
-    Write-OneLine ("Current env snapshot: URL='{0}', FunctionKey={1}, Thumbprint={2}, SubjectLike={3}, IssuerLike={4}" -f `
+    Write-OneLine ("Current env snapshot: URL='{0}', FunctionKey={1} {2}, Thumbprint={3}, SubjectLike={4}, IssuerLike={5}" -f `
         (Format-SafeValue $currentUrl),
         (Format-SafeValue $currentKey -Secret),
+        (Get-SecretFingerprint $currentKey),
         (Format-SafeValue $currentThumb),
         (Format-SafeValue $currentSubject),
         (Format-SafeValue $currentIssuer))
