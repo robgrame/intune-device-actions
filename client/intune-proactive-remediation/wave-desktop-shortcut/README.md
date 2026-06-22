@@ -64,6 +64,8 @@ Se il device non e' in nessuna wave, il server risponde `204 No Content`.
 |-----------|---------|-------------|
 | `INTUNE_ACTIONS_API_URL` | `https://devact-web-dev.azurewebsites.net` | Base URL dell'API |
 | `INTUNE_ACTIONS_CERT_THUMBPRINT` | (auto-detect) | Thumbprint del certificato client |
+| `INTUNE_ACTIONS_CERT_SUBJECT_LIKE` | (vuoto) | Filtro wildcard sul Subject DN del certificato client (es. `*Intune MDM Device CA*`) |
+| `INTUNE_ACTIONS_CERT_ISSUER_LIKE` | (vuoto) | Filtro wildcard (anche multiplo separato da `;`) sull'Issuer DN del certificato client |
 
 ### Personalizzazione shortcut
 

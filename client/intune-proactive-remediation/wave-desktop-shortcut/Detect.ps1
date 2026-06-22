@@ -25,6 +25,9 @@ $ErrorActionPreference = 'Stop'
 $ApiBaseUrl    = $env:INTUNE_ACTIONS_API_URL
 if (-not $ApiBaseUrl) { $ApiBaseUrl = 'https://devact-web-dev.azurewebsites.net' }
 $SchedulePath  = '/api/schedule/me?actionType=wipe'
+$CertThumbprint = $env:INTUNE_ACTIONS_CERT_THUMBPRINT
+$CertSubjectLike = $env:INTUNE_ACTIONS_CERT_SUBJECT_LIKE
+$CertIssuerLike  = $env:INTUNE_ACTIONS_CERT_ISSUER_LIKE
 $CacheDir      = Join-Path $env:ProgramData 'IntuneWipeClient'
 $CacheFile     = Join-Path $CacheDir 'wave-schedule.json'
 $CacheTtlHours = 4
@@ -50,21 +53,58 @@ if (Test-Path $ShortcutFlag) {
 }
 
 # --- Find client certificate -------------------------------------------------
-$CertThumbprint = $env:INTUNE_ACTIONS_CERT_THUMBPRINT
-if (-not $CertThumbprint) {
-    # Auto-detect: find cert issued by our known CA
-    $cert = Get-ChildItem Cert:\LocalMachine\My |
-        Where-Object { $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date) } |
-        Sort-Object NotAfter -Descending |
-        Select-Object -First 1
-} else {
-    $cert = Get-ChildItem Cert:\LocalMachine\My\$CertThumbprint -ErrorAction SilentlyContinue
+function Get-ClientCertificate {
+    param(
+        [string]$Thumbprint,
+        [string]$SubjectLike,
+        [string]$IssuerLike
+    )
+
+    $thumb = if ($Thumbprint) { $Thumbprint.Trim().ToUpper().Replace(' ', '') } else { $null }
+    $issuerPatterns = @()
+    if ($IssuerLike) {
+        $issuerPatterns = @($IssuerLike -split ';' |
+                            ForEach-Object { $_.Trim() } |
+                            Where-Object { $_ })
+    }
+
+    $candidates = Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date) -and $_.NotBefore -le (Get-Date)
+        } |
+        Where-Object {
+            $ekus = $_.EnhancedKeyUsageList
+            (-not $ekus) -or ($ekus | Where-Object { $_.ObjectId -eq '1.3.6.1.5.5.7.3.2' })
+        }
+
+    if ($issuerPatterns.Count -gt 0) {
+        $candidates = $candidates | Where-Object {
+            $issuer = $_.Issuer
+            foreach ($pattern in $issuerPatterns) {
+                if ($issuer -like $pattern) { return $true }
+            }
+            return $false
+        }
+    }
+
+    if ($thumb) {
+        return $candidates | Where-Object { $_.Thumbprint -eq $thumb } | Select-Object -First 1
+    }
+    if ($SubjectLike) {
+        return $candidates | Where-Object { $_.Subject -like $SubjectLike } |
+            Sort-Object NotAfter -Descending |
+            Select-Object -First 1
+    }
+    return $candidates | Sort-Object NotAfter -Descending | Select-Object -First 1
 }
 
+$cert = Get-ClientCertificate -Thumbprint $CertThumbprint -SubjectLike $CertSubjectLike -IssuerLike $CertIssuerLike
+
 if (-not $cert) {
-    Write-Log "No valid client certificate found. Cannot poll API. Compliant (skip)."
+    Write-Log "No valid client certificate found (thumbprint='$CertThumbprint', subjectLike='$CertSubjectLike', issuerLike='$CertIssuerLike'). Cannot poll API. Compliant (skip)."
     exit 0
 }
+Write-Log "Using client certificate thumbprint='$($cert.Thumbprint)' subject='$($cert.Subject)' notAfter='$($cert.NotAfter.ToString('o'))'."
 
 # --- Check cache freshness ---------------------------------------------------
 if (-not (Test-Path $CacheDir)) { New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null }
