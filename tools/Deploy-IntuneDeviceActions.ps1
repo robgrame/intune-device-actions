@@ -701,6 +701,50 @@ function Set-BasicPublishingPolicyAllow {
     if ($LASTEXITCODE -ne 0) { throw "Failed to set $PolicyName basic publishing policy on $SiteName." }
 }
 
+function Invoke-ConfigZipDeploy {
+    param(
+        [Parameter(Mandatory = $true)][string]$AppName,
+        [Parameter(Mandatory = $true)][string]$ZipPath,
+        [int]$TimeoutSeconds = 900,
+        [switch]$AllowTimeout
+    )
+    $stdoutFile = Join-Path $env:TEMP ("idactions-zipdeploy-{0}-out.log" -f ([guid]::NewGuid().ToString('N')))
+    $stderrFile = Join-Path $env:TEMP ("idactions-zipdeploy-{0}-err.log" -f ([guid]::NewGuid().ToString('N')))
+    try {
+        $args = @(
+            'functionapp','deployment','source','config-zip',
+            '-g', $ResourceGroup,
+            '-n', $AppName,
+            '--src', $ZipPath,
+            '--only-show-errors',
+            '-o', 'none'
+        )
+        $proc = Start-Process -FilePath 'az' -ArgumentList $args `
+            -NoNewWindow -PassThru `
+            -RedirectStandardOutput $stdoutFile `
+            -RedirectStandardError $stderrFile
+        if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+            Stop-Process -Id $proc.Id -Force
+            if ($AllowTimeout) {
+                Write-Warn2 "config-zip timed out for $AppName after ${TimeoutSeconds}s; continuing."
+                return
+            }
+            throw "config-zip timed out for $AppName after ${TimeoutSeconds}s."
+        }
+        if ($proc.ExitCode -ne 0) {
+            $stderr = if (Test-Path $stderrFile) { [string](Get-Content -LiteralPath $stderrFile -Raw) } else { '' }
+            $stdout = if (Test-Path $stdoutFile) { [string](Get-Content -LiteralPath $stdoutFile -Raw) } else { '' }
+            $stderr = $stderr.Trim()
+            $stdout = $stdout.Trim()
+            $details = ($stderr, $stdout | Where-Object { $_ } | Select-Object -First 1)
+            throw "Zip deploy failed for $AppName. $($details -join ' ')"
+        }
+    } finally {
+        if (Test-Path $stdoutFile) { Remove-Item -LiteralPath $stdoutFile -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $stderrFile) { Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 # -- Zip deploy -------------------------------------------------------------
 function Invoke-ZipDeploy {
     if ($SkipDeploy) { Write-Warn2 'Skipping zip deploy (-SkipDeploy).'; return }
@@ -739,10 +783,14 @@ function Invoke-ZipDeploy {
             $zip = Join-Path $PublishDir "$role.zip"
             if (-not (Test-Path $zip)) { throw "Missing zip: $zip (did you skip -SkipPublish?)" }
             Write-Host "    -> $app  ($role.zip)"
-            & az functionapp deployment source config-zip `
-                -g $ResourceGroup -n $app --src $zip `
-                --only-show-errors -o none
-            if ($LASTEXITCODE -ne 0) { throw "Zip deploy failed for $app" }
+            # Flex web app can occasionally hang forever on "Waiting for sync triggers"
+            # even after package upload succeeded. Bound this role with a timeout so
+            # the whole pipeline does not deadlock.
+            if ($role -eq 'web') {
+                Invoke-ConfigZipDeploy -AppName $app -ZipPath $zip -TimeoutSeconds 300 -AllowTimeout
+            } else {
+                Invoke-ConfigZipDeploy -AppName $app -ZipPath $zip -TimeoutSeconds 900
+            }
             Write-Ok "$app  deployed"
         }
     } finally {
