@@ -262,19 +262,14 @@ var bitlockerDeployContainer = 'app-package-bitlocker'
 var renameDeployContainer = 'app-package-rename'
 
 // ── Observability ────────────────────────────────────────────────────────────
-resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
-  name: lawName
-  location: location
-  tags:     tags
-  properties: { sku: { name: 'PerGB2018' }, retentionInDays: 30 }
-}
-
-resource ai 'Microsoft.Insights/components@2020-02-02' = {
-  name: aiName
-  location: location
-  tags:     tags
-  kind: 'web'
-  properties: { Application_Type: 'web', WorkspaceResourceId: law.id }
+module observability './modules/observability.bicep' = {
+  name: 'observability'
+  params: {
+    location: location
+    lawName: lawName
+    aiName: aiName
+    tags: tags
+  }
 }
 
 // ── Storage accounts (one per app) ───────────────────────────────────────────
@@ -598,7 +593,7 @@ resource funcWeb 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AzureWebJobsStorage__accountName', value: storageWeb.name }
         { name: 'AzureWebJobsStorage__credential',  value: 'managedidentity' }
         { name: 'AzureWebJobsStorage__clientId',    value: uamiWeb.properties.clientId }
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: ai.properties.ConnectionString }
+        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: observability.outputs.appInsightsConnectionString }
         { name: 'AZURE_CLIENT_ID', value: uamiWeb.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'web' }
@@ -708,7 +703,7 @@ resource funcProc 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AzureWebJobsStorage__accountName', value: storageProc.name }
         { name: 'AzureWebJobsStorage__credential',  value: 'managedidentity' }
         { name: 'AzureWebJobsStorage__clientId',    value: uami.properties.clientId }
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: ai.properties.ConnectionString }
+        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: observability.outputs.appInsightsConnectionString }
         { name: 'AZURE_CLIENT_ID', value: uami.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'proc' }
@@ -822,7 +817,7 @@ resource funcWipe 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AzureWebJobsStorage__accountName', value: storageWipe.name }
         { name: 'AzureWebJobsStorage__credential',  value: 'managedidentity' }
         { name: 'AzureWebJobsStorage__clientId',    value: uamiWipe.properties.clientId }
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: ai.properties.ConnectionString }
+        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: observability.outputs.appInsightsConnectionString }
         { name: 'AZURE_CLIENT_ID', value: uamiWipe.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'wipe' }
@@ -1216,6 +1211,17 @@ resource appConfigKv_AuditStorageAccount 'Microsoft.AppConfiguration/configurati
   name: 'Audit:StorageAccount'
   properties: {
     value: storageProc.name
+  }
+}
+// Wave schedule tables (wipeschedulewaves / wipeschedulemembers) live on the
+// Wipe storage account — the same account the portal writes them to. Without
+// this key, AddWipeScheduleStore falls back to Audit:StorageAccount (the Proc
+// account) and the schedule endpoint / wave gate read an empty table.
+resource appConfigKv_WipeScheduleStorageAccount 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = if (seedAppConfig) {
+  parent: appConfig
+  name: 'WipeSchedule:StorageAccount'
+  properties: {
+    value: storageWipe.name
   }
 }
 resource appConfigKv_ActionStatusTableName 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = if (seedAppConfig) {
@@ -2130,7 +2136,7 @@ resource funcAutopilot 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AzureWebJobsStorage__accountName', value: storageAutopilot.name }
         { name: 'AzureWebJobsStorage__credential',  value: 'managedidentity' }
         { name: 'AzureWebJobsStorage__clientId',    value: uamiAutopilot.properties.clientId }
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: ai.properties.ConnectionString }
+        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: observability.outputs.appInsightsConnectionString }
         { name: 'AZURE_CLIENT_ID', value: uamiAutopilot.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'autopilot' }
@@ -2212,7 +2218,7 @@ resource funcBitLocker 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AzureWebJobsStorage__accountName', value: storageBitLocker.name }
         { name: 'AzureWebJobsStorage__credential',  value: 'managedidentity' }
         { name: 'AzureWebJobsStorage__clientId',    value: uamiBitLocker.properties.clientId }
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: ai.properties.ConnectionString }
+        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: observability.outputs.appInsightsConnectionString }
         { name: 'AZURE_CLIENT_ID', value: uamiBitLocker.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'bitlocker' }
@@ -2295,7 +2301,7 @@ resource funcRename 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'AzureWebJobsStorage__accountName', value: storageRename.name }
         { name: 'AzureWebJobsStorage__credential',  value: 'managedidentity' }
         { name: 'AzureWebJobsStorage__clientId',    value: uamiRename.properties.clientId }
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: ai.properties.ConnectionString }
+        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: observability.outputs.appInsightsConnectionString }
         { name: 'AZURE_CLIENT_ID', value: uamiRename.properties.clientId }
         { name: 'AppConfig__Endpoint', value: appConfig.properties.endpoint }
         { name: 'App__Role', value: 'rename' }
@@ -2394,5 +2400,5 @@ output automationAccountName string = enableRunbookVariant ? automationAccount.n
 output runbookName           string = enableRunbookVariant ? runbookName : ''
 output automationPrincipalId string = enableRunbookVariant ? automationAccount.identity.principalId : ''
 
-output aiName             string = ai.name
-output aiConnectionString string = ai.properties.ConnectionString
+output aiName             string = observability.outputs.appInsightsName
+output aiConnectionString string = observability.outputs.appInsightsConnectionString
