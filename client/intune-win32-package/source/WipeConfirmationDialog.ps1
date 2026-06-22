@@ -93,7 +93,7 @@ $bul Assicurati di aver salvato tutto il lavoro in corso e di essere collegato a
     $infoLbl.Location = New-Object System.Drawing.Point(14, 22)
     $infoLbl.Size     = New-Object System.Drawing.Size(556, 70)
     $infoLbl.Font     = New-Object System.Drawing.Font('Consolas', 9)
-    $infoLbl.Text     = "Nome           : $DeviceName`r`nEntra Device   : $EntraDeviceId`r`nIntune Device  : $IntuneDeviceId"
+    $infoLbl.Text     = "Nome           : $DeviceName`r`nEntra Device   : $EntraDeviceId"
     $info.Controls.Add($infoLbl)
 
     $chk = New-Object System.Windows.Forms.CheckBox

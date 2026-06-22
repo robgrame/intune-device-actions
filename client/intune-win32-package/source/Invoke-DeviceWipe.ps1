@@ -140,13 +140,21 @@ if ($DryRun) {
 $cert = Get-ClientCertificate -Thumb $CertificateThumbprint -SubjectLike $CertificateSubjectLike -IssuerLike $CertificateIssuerLike
 Write-Host ("Using cert: {0} (thumb {1})" -f $cert.Subject, $cert.Thumbprint) -ForegroundColor Cyan
 
-$body = @{
-    actionType     = $ActionType
-    deviceName     = $deviceName
-    entraDeviceId  = $entraId
+$callerUpn = $null
+try {
+    $whoamiUpn = & whoami /upn 2>$null
+    if ($whoamiUpn) {
+        $callerUpn = ($whoamiUpn | Select-Object -First 1).Trim()
+    }
+} catch { }
+$bodyObj = @{
+    actionType    = $ActionType
+    deviceName    = $deviceName
+    entraDeviceId = $entraId
     intuneDeviceId = $enrollmentId   # legacy field name; backend uses it only for audit, resolves real id via EntraDeviceId
-    callerUpn      = try { (whoami /upn 2>$null)?.Trim() } catch { $null }
-} | ConvertTo-Json -Compress
+    callerUpn     = $callerUpn
+}
+$body = $bodyObj | ConvertTo-Json -Compress
 
 $headers = @{
     'x-functions-key'     = $FunctionKey
