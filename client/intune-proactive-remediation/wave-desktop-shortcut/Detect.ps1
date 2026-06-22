@@ -29,10 +29,23 @@ $CacheDir      = Join-Path $env:ProgramData 'IntuneWipeClient'
 $CacheFile     = Join-Path $CacheDir 'wave-schedule.json'
 $CacheTtlHours = 4
 $ShortcutFlag  = Join-Path $CacheDir 'shortcut-created.flag'
+$LogDir        = Join-Path $CacheDir 'Logs'
+$LogFile       = Join-Path $LogDir 'wave-desktop-shortcut-detect.log'
+
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+
+function Write-Log {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    $line = "[{0}] {1}" -f (Get-Date -Format o), $Message
+    $line | Out-File -FilePath $LogFile -Append -Encoding utf8
+    Write-Host $line
+}
+
+Write-Log "Detect started. ApiBaseUrl='$ApiBaseUrl'"
 
 # --- If shortcut was already created, we're compliant (no need to remediate again)
 if (Test-Path $ShortcutFlag) {
-    Write-Host "Shortcut already created (flag exists). Compliant."
+    Write-Log "Shortcut already created (flag exists). Compliant."
     exit 0
 }
 
@@ -49,7 +62,7 @@ if (-not $CertThumbprint) {
 }
 
 if (-not $cert) {
-    Write-Host "No valid client certificate found. Cannot poll API. Compliant (skip)."
+    Write-Log "No valid client certificate found. Cannot poll API. Compliant (skip)."
     exit 0
 }
 
@@ -68,24 +81,28 @@ if (Test-Path $CacheFile) {
 if ($useCache) {
     $raw = Get-Content $CacheFile -Raw
     $manifest = if ($raw) { $raw | ConvertFrom-Json } else { $null }
+    Write-Log "Using cached schedule manifest."
 } else {
     try {
-        $uri = "$ApiBaseUrl$SchedulePath"
-        $response = Invoke-RestMethod -Uri $uri -Certificate $cert -Method GET -TimeoutSec 30
-        $manifest = $response  # $null on 204 No Content
+    $uri = "$ApiBaseUrl$SchedulePath"
+    $response = Invoke-RestMethod -Uri $uri -Certificate $cert -Method GET -TimeoutSec 30
+    $manifest = $response  # $null on 204 No Content
         if ($manifest) {
             $manifest | ConvertTo-Json -Depth 10 | Set-Content -Path $CacheFile -Encoding UTF8
+            Write-Log "Fetched schedule manifest from API and refreshed cache."
         } else {
             # 204 - no wave; clear stale cache
             if (Test-Path $CacheFile) { Remove-Item $CacheFile -Force }
+            Write-Log "API returned 204/no manifest. Cleared cache."
         }
     } catch {
-        Write-Host "API call failed: $($_.Exception.Message). Using stale cache or skipping."
+        Write-Log "API call failed: $($_.Exception.Message). Using stale cache or skipping."
         if (Test-Path $CacheFile) {
             $raw = Get-Content $CacheFile -Raw
             $manifest = if ($raw) { $raw | ConvertFrom-Json } else { $null }
+            Write-Log "Loaded stale cache fallback."
         } else {
-            Write-Host "No cache available. Compliant (skip)."
+            Write-Log "No cache available. Compliant (skip)."
             exit 0
         }
     }
@@ -97,14 +114,14 @@ if ($useCache) {
 # If no wave applies, the server returns 204 (empty response / $null manifest).
 
 if (-not $manifest) {
-    Write-Host "No scheduled wave for this device (204). Compliant."
+    Write-Log "No scheduled wave for this device (204). Compliant."
     exit 0
 }
 
 if ($manifest.isImmediate -eq $true) {
-    Write-Host "Active wave '$($manifest.name)' (scheduledAtUtc: $($manifest.scheduledAtUtc), waveId: $($manifest.waveId)). Non-compliant - remediation needed."
+    Write-Log "Active wave '$($manifest.name)' (scheduledAtUtc: $($manifest.scheduledAtUtc), waveId: $($manifest.waveId)). Non-compliant - remediation needed."
     exit 1
 } else {
-    Write-Host "Wave '$($manifest.name)' scheduled for $($manifest.scheduledAtUtc) - not yet active. Compliant."
+    Write-Log "Wave '$($manifest.name)' scheduled for $($manifest.scheduledAtUtc) - not yet active. Compliant."
     exit 0
 }

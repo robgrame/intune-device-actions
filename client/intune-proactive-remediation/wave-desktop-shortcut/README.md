@@ -16,7 +16,7 @@ della `DeviceScheduleSnapshot` restituita.
 | File | Contesto | Scopo |
 |------|----------|-------|
 | `Detect.ps1` | SYSTEM | Polling periodico su `/api/schedule/me?actionType=wipe` per verificare se il device e' in una wave attiva |
-| `Remediate.ps1` | SYSTEM | Crea lo shortcut sul Public Desktop + scrive flag |
+| `Remediate.ps1` | SYSTEM | Crea gli shortcut su Start Menu (all-users) + Public Desktop, poi scrive flag |
 
 ## Flusso
 
@@ -31,7 +31,7 @@ Detect.ps1 --> GET /api/schedule/me?actionType=wipe (mTLS)
     |-- 200 + isImmediate=true        --> exit 1 (non-compliant)
          |
          v
-    Remediate.ps1 --> Crea shortcut sul Public Desktop
+    Remediate.ps1 --> Crea shortcut su Start Menu + Public Desktop
                   --> Scrive flag (shortcut-created.flag)
                   --> exit 0
     |
@@ -78,6 +78,10 @@ In `Remediate.ps1` modificare:
 `Remediate.ps1` scrive un log persistente in:
 
 `%ProgramData%\IntuneWipeClient\Logs\wave-desktop-shortcut-remediate.log`
+
+`Detect.ps1` scrive un log persistente in:
+
+`%ProgramData%\IntuneWipeClient\Logs\wave-desktop-shortcut-detect.log`
 
 In aggiunta, l'esecuzione Intune resta visibile nei log dell'agent:
 

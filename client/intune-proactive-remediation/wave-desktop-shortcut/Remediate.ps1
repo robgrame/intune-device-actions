@@ -1,15 +1,15 @@
 <#
 .SYNOPSIS
     Proactive Remediation - Remediate script.
-    Creates the Intune Device Actions shortcut on the user's desktop.
+    Creates the Intune Device Actions shortcuts on Start Menu + Public Desktop.
 
 .DESCRIPTION
     Triggered by Intune when Detect.ps1 exits 1 (device is in an active wave).
-    - Creates a desktop shortcut (.lnk) pointing to the wipe confirmation tool.
+    - Creates Start Menu + Public Desktop shortcuts (.lnk) pointing to the wipe confirmation tool.
     - Writes a flag file so Detect.ps1 knows remediation is complete.
 
 .NOTES
-    Context: SYSTEM (creates shortcut in Public Desktop so all users see it).
+    Context: SYSTEM (creates shortcuts in all-users Start Menu + Public Desktop).
     The shortcut target can be:
       - A local script path (deployed via Win32 app / LOB)
       - A URL to launch the self-service portal
@@ -27,6 +27,8 @@ $ShortcutArgs   = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File 
 $ShortcutIcon   = Join-Path $env:ProgramData 'IntuneWipeClient\icon.ico'
 $ShortcutDesc   = 'Avvia la procedura di Device Wipe programmata'
 $PublicDesktop  = [Environment]::GetFolderPath('CommonDesktopDirectory')
+$AllUsersStart  = [Environment]::GetFolderPath('CommonStartMenu')
+$StartMenuPrograms = Join-Path $AllUsersStart 'Programs'
 $CacheDir       = Join-Path $env:ProgramData 'IntuneWipeClient'
 $FlagFile       = Join-Path $CacheDir 'shortcut-created.flag'
 $LogDir         = Join-Path $CacheDir 'Logs'
@@ -41,7 +43,7 @@ function Write-Log {
     Write-Host $line
 }
 
-Write-Log "Remediation started. PublicDesktop='$PublicDesktop'"
+Write-Log "Remediation started. PublicDesktop='$PublicDesktop' StartMenuPrograms='$StartMenuPrograms'"
 Write-Log "Shortcut target='$ShortcutTarget' args='$ShortcutArgs'"
 
 if (-not (Test-Path (Join-Path $InstallDir 'Launch-Wipe.ps1'))) {
@@ -49,25 +51,32 @@ if (-not (Test-Path (Join-Path $InstallDir 'Launch-Wipe.ps1'))) {
     exit 1
 }
 
-# --- Create shortcut ---------------------------------------------------------
-$shortcutPath = Join-Path $PublicDesktop $ShortcutName
-
+# --- Create shortcuts ---------------------------------------------------------
 try {
     $wshShell = New-Object -ComObject WScript.Shell
-    $shortcut = $wshShell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath  = $ShortcutTarget
-    $shortcut.Arguments   = $ShortcutArgs
-    $shortcut.Description = $ShortcutDesc
-    $shortcut.WorkingDirectory = $InstallDir
 
-    if (Test-Path $ShortcutIcon) {
-        $shortcut.IconLocation = "$ShortcutIcon,0"
+    foreach ($folder in @($PublicDesktop, $StartMenuPrograms)) {
+        if (-not (Test-Path $folder)) {
+            New-Item -ItemType Directory -Path $folder -Force | Out-Null
+            Write-Log "Created folder: $folder"
+        }
+
+        $shortcutPath = Join-Path $folder $ShortcutName
+        $shortcut = $wshShell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath  = $ShortcutTarget
+        $shortcut.Arguments   = $ShortcutArgs
+        $shortcut.Description = $ShortcutDesc
+        $shortcut.WorkingDirectory = $InstallDir
+
+        if (Test-Path $ShortcutIcon) {
+            $shortcut.IconLocation = "$ShortcutIcon,0"
+        }
+
+        $shortcut.Save()
+        Write-Log "Shortcut created: $shortcutPath"
     }
-
-    $shortcut.Save()
-    Write-Log "Shortcut created: $shortcutPath"
 } catch {
-    Write-Log "ERROR: Failed to create shortcut: $($_.Exception.Message)"
+    Write-Log "ERROR: Failed to create shortcut(s): $($_.Exception.Message)"
     exit 1
 }
 

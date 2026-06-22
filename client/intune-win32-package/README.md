@@ -11,8 +11,8 @@ for distribution via Microsoft Intune as a Win32 LOB application.
 | `%ProgramFiles%\IntuneWipeClient\WipeConfirmationDialog.ps1` | Shared WinForms confirmation dialog. |
 | `%ProgramFiles%\IntuneWipeClient\Launch-Wipe.ps1` | Shortcut launcher: reads config + invokes the wipe script. |
 | `%ProgramFiles%\IntuneWipeClient\config.json` | API URL + function key (ACL = SYSTEM + Administrators only). |
-| `%ProgramData%\Microsoft\Windows\Start Menu\Programs\Migrazione a MODERN.lnk` | All-users Start Menu shortcut. |
-| `%PUBLIC%\Desktop\Migrazione a MODERN.lnk` | Public Desktop shortcut (visible to every user). |
+| `%ProgramData%\Microsoft\Windows\Start Menu\Programs\Intune Device Actions.lnk` | All-users Start Menu shortcut (**created by wave remediation only**). |
+| `%PUBLIC%\Desktop\Intune Device Actions.lnk` | Public Desktop shortcut (**created by wave remediation only**). |
 | `HKLM:\SOFTWARE\MSLABS\IntuneWipeClient` | Detection registry key (`Version`, `ProductCode`, `InstallDir`). |
 
 ## Build
@@ -76,6 +76,8 @@ re-published.
   users, switch the secret to Key Vault retrieval at script start.
 - Logs:
   - `Install.ps1` / `Uninstall.ps1` → `%ProgramData%\IntuneWipeClient\Logs\`
+  - `intune-proactive-remediation\wave-desktop-shortcut\Detect.ps1` → `%ProgramData%\IntuneWipeClient\Logs\wave-desktop-shortcut-detect.log`
+  - `intune-proactive-remediation\wave-desktop-shortcut\Remediate.ps1` → `%ProgramData%\IntuneWipeClient\Logs\wave-desktop-shortcut-remediate.log`
   - `Launch-Wipe.ps1` → `%LOCALAPPDATA%\IntuneWipeClient\Logs\`
 - Audit events are emitted by the API into Application Insights as
   `wipe.*` and surfaced by the observability portal
