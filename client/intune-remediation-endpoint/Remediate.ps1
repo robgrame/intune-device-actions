@@ -38,15 +38,25 @@ $KeyVarName     = 'INTUNE_WIPE_FUNCTION_KEY'
 $CertThumbVar   = 'INTUNE_WIPE_CERT_THUMBPRINT'
 $CertSubjectVar = 'INTUNE_WIPE_CERT_SUBJECT_LIKE'
 $CertIssuerVar  = 'INTUNE_WIPE_CERT_ISSUER_LIKE'
+$LogDir         = Join-Path $env:ProgramData 'IntuneWipeClient\Logs'
+$LogFile        = Join-Path $LogDir 'intune-remediation-endpoint-remediate.log'
 
-function Write-OneLine {
+function Write-Log {
     param([string] $Message)
-    if ($Message) { Write-Host ($Message -replace "[\r\n]+", ' ') }
+    if (-not $Message) { return }
+    if (-not (Test-Path $LogDir)) {
+        New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+    }
+    $line = "[{0}] {1}" -f (Get-Date -Format o), ($Message -replace "[\r\n]+", ' ')
+    $line | Out-File -FilePath $LogFile -Append -Encoding utf8
+    Write-Host $line
 }
 
 try {
+    Write-Log "Remediation started."
     [Environment]::SetEnvironmentVariable($UrlVarName, $ExpectedApiUrl,      'Machine')
     [Environment]::SetEnvironmentVariable($KeyVarName, $ExpectedFunctionKey, 'Machine')
+    Write-Log "Set $UrlVarName and $KeyVarName."
 
     # For cert selectors: empty ExpectedX means "do not pin via env" — in
     # that case we DELETE the env var so the wipe client falls back to
@@ -59,25 +69,27 @@ try {
     )) {
         if ($pair.Expected) {
             [Environment]::SetEnvironmentVariable($pair.Var, $pair.Expected, 'Machine')
+            Write-Log "Set $($pair.Var)."
         } else {
             [Environment]::SetEnvironmentVariable($pair.Var, $null, 'Machine')
+            Write-Log "Removed $($pair.Var) (empty expected value)."
         }
     }
 
     $writtenUrl = [Environment]::GetEnvironmentVariable($UrlVarName, 'Machine')
     $writtenKey = [Environment]::GetEnvironmentVariable($KeyVarName, 'Machine')
     if ($writtenUrl -ne $ExpectedApiUrl) {
-        Write-OneLine "FAIL: $UrlVarName read-back '$writtenUrl' does not match expected."
+        Write-Log "FAIL: $UrlVarName read-back '$writtenUrl' does not match expected."
         exit 1
     }
     if ($writtenKey -ne $ExpectedFunctionKey) {
-        Write-OneLine "FAIL: $KeyVarName read-back length does not match expected length=$($ExpectedFunctionKey.Length)."
+        Write-Log "FAIL: $KeyVarName read-back length does not match expected length=$($ExpectedFunctionKey.Length)."
         exit 1
     }
 
-    Write-OneLine "OK: URL + key + cert selectors written to Machine env."
+    Write-Log "OK: URL + key + cert selectors written to Machine env."
     exit 0
 } catch {
-    Write-OneLine "ERROR: $($_.Exception.Message)"
+    Write-Log "ERROR: $($_.Exception.Message)"
     exit 1
 }

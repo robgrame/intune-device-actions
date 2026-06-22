@@ -43,6 +43,8 @@ vars over `config.json`, so any subsequent rotation is a single edit in
 - `Detect.ps1` — exits `1` if either env var is missing or does not
   match `$ExpectedApiUrl` / `$ExpectedFunctionKey`, `0` otherwise.
 - `Remediate.ps1` — sets both env vars and verifies the read-back.
+  Writes a persistent log to:
+  `%ProgramData%\IntuneWipeClient\Logs\intune-remediation-endpoint-remediate.log`
 
 ## Security
 
