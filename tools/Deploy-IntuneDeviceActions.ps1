@@ -682,7 +682,7 @@ function Get-BasicPublishingPolicyAllow {
     )
     $subId = (& az account show --query id -o tsv --only-show-errors).Trim()
     if (-not $subId) { throw 'Unable to resolve current Azure subscription id.' }
-    $uri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$SiteName/basicPublishingCredentialsPolicies/$PolicyName?api-version=2023-12-01"
+    $uri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$SiteName/basicPublishingCredentialsPolicies/${PolicyName}?api-version=2023-12-01"
     $json = & az rest --method get --uri $uri --only-show-errors | ConvertFrom-Json
     return [bool]$json.properties.allow
 }
@@ -695,9 +695,9 @@ function Set-BasicPublishingPolicyAllow {
     )
     $subId = (& az account show --query id -o tsv --only-show-errors).Trim()
     if (-not $subId) { throw 'Unable to resolve current Azure subscription id.' }
-    $uri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$SiteName/basicPublishingCredentialsPolicies/$PolicyName?api-version=2023-12-01"
+    $uri = "https://management.azure.com/subscriptions/$subId/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$SiteName/basicPublishingCredentialsPolicies/${PolicyName}?api-version=2023-12-01"
     $payload = @{ properties = @{ allow = $Allow } } | ConvertTo-Json -Depth 3 -Compress
-    & az rest --method put --uri $uri --body $payload --only-show-errors -o none
+    & az rest --method put --headers "Content-Type=application/json" --uri $uri --body $payload --only-show-errors -o none
     if ($LASTEXITCODE -ne 0) { throw "Failed to set $PolicyName basic publishing policy on $SiteName." }
 }
 
