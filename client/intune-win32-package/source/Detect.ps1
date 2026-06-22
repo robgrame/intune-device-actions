@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 <#
 .SYNOPSIS
     Intune Win32 detection script for IntuneWipeClient.
@@ -12,7 +12,7 @@
 #>
 
 $ErrorActionPreference = 'SilentlyContinue'
-$ExpectedVersion = '1.1.2'  # __VERSION_PLACEHOLDER__  (rewritten by Build-IntuneWinPackage.ps1)
+$ExpectedVersion = '1.1.3'  # __VERSION_PLACEHOLDER__  (rewritten by Build-IntuneWinPackage.ps1)
 $RegPath         = 'HKLM:\SOFTWARE\MSLABS\IntuneWipeClient'
 $RegSubKey       = 'SOFTWARE\MSLABS\IntuneWipeClient'
 $ProgramFiles64  = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
