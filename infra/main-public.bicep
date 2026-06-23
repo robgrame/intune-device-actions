@@ -1196,11 +1196,16 @@ resource appConfigKv_AuditStorageAccount 'Microsoft.AppConfiguration/configurati
     value: storageProc.name
   }
 }
+// Wave schedule tables (wipeschedulewaves / wipeschedulemembers) are written by
+// the portal to the Web storage account (its name matches the portal's *stw*
+// auto-detect). Point the schedule store at that same account; otherwise
+// AddWipeScheduleStore falls back to Audit:StorageAccount (the Proc account)
+// and the schedule endpoint / wave gate read an empty table (always 204).
 resource appConfigKv_WipeScheduleStorageAccount 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = if (seedAppConfig) {
   parent: appConfig
   name: 'WipeSchedule:StorageAccount'
   properties: {
-    value: storageWipe.name
+    value: storageWeb.name
   }
 }
 resource appConfigKv_ActionStatusTableName 'Microsoft.AppConfiguration/configurationStores/keyValues@2024-05-01' = if (seedAppConfig) {
