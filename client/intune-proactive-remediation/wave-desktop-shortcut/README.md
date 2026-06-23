@@ -63,18 +63,17 @@ Se il device non e' in nessuna wave, il server risponde `204 No Content`.
 
 | Variabile | Default | Descrizione |
 |-----------|---------|-------------|
-| `INTUNE_ACTIONS_API_URL` | (nessuno) | Base URL dell'API. Se vuoto, lo script usa `INTUNE_WIPE_API_URL`, poi `ApiUrl` da `config.json`; se nessuna sorgente fornisce un URL, lo script logga e salta (Compliant). Nessun URL e' cablato nello script. |
+| `INTUNE_ACTIONS_API_URL` | (nessuno) | Base URL dell'API. Se vuoto, lo script usa `ApiUrl` da `config.json`; se nessuna sorgente fornisce un URL, lo script logga e salta (Compliant). Nessun URL e' cablato nello script. |
 | `INTUNE_ACTIONS_FUNCTION_KEY` | (vuoto) | Function key inviata come header `x-functions-key` verso `/api/schedule/me` |
 | `INTUNE_ACTIONS_CERT_THUMBPRINT` | (auto-detect) | Thumbprint del certificato client |
 | `INTUNE_ACTIONS_CERT_SUBJECT_LIKE` | (vuoto) | Filtro wildcard sul Subject DN del certificato client (es. `*Intune MDM Device CA*`) |
 | `INTUNE_ACTIONS_CERT_ISSUER_LIKE` | (vuoto) | Filtro wildcard (anche multiplo separato da `;`) sull'Issuer DN del certificato client |
 | `INTUNE_ACTIONS_CERT_EXCLUDE_ISSUER_LIKE` | `*Intune*MDM*` | Esclude issuer non desiderati in auto-detect (default: evita il certificato Intune MDM e favorisce PKI aziendale) |
 
-> Compatibilita': `Detect.ps1` accetta anche le variabili legacy `INTUNE_WIPE_*`
-> (es. `INTUNE_WIPE_API_URL`, `INTUNE_WIPE_FUNCTION_KEY`, `INTUNE_WIPE_CERT_ISSUER_LIKE`) e,
-> in mancanza di env var, ricade su `ApiUrl` del `config.json` installato. Se
-> l'URL contiene `/api/actions`, lo script normalizza automaticamente al base
-> URL corretto per `/api/schedule/me`.
+> `Detect.ps1` risolve l'URL da `INTUNE_ACTIONS_API_URL` e, in mancanza di
+> env var, ricade su `ApiUrl` del `config.json` installato. Se l'URL contiene
+> `/api/actions`, lo script normalizza automaticamente al base URL corretto
+> per `/api/schedule/me`.
 
 ### Personalizzazione shortcut
 

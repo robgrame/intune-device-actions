@@ -93,8 +93,8 @@ function Get-DeviceCertificate {
 
 function Get-MachineEnvFirst {
     # Returns the first non-empty machine-scope env var value from the
-    # capability-neutral INTUNE_ACTIONS_* name, then the legacy INTUNE_WIPE_*
-    # name. Also returns which name supplied the value (for logging).
+    # capability-neutral INTUNE_ACTIONS_* names. Also returns which name
+    # supplied the value (for logging).
     param([string[]]$Names)
     foreach ($n in $Names) {
         $v = [Environment]::GetEnvironmentVariable($n, 'Machine')
@@ -117,20 +117,20 @@ try {
     }
 
     $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-    $envApiUrl = Get-MachineEnvFirst @('INTUNE_ACTIONS_API_URL', 'INTUNE_WIPE_API_URL')
+    $envApiUrl = Get-MachineEnvFirst @('INTUNE_ACTIONS_API_URL')
     if ($envApiUrl) {
         Write-Log ("ApiUrl override from machine env {0}: {1}" -f $envApiUrl.Name, $envApiUrl.Value)
         $cfg | Add-Member -NotePropertyName ApiUrl -NotePropertyValue $envApiUrl.Value -Force
     }
-    $envKey = Get-MachineEnvFirst @('INTUNE_ACTIONS_FUNCTION_KEY', 'INTUNE_WIPE_FUNCTION_KEY')
+    $envKey = Get-MachineEnvFirst @('INTUNE_ACTIONS_FUNCTION_KEY')
     if ($envKey) {
         Write-Log ("FunctionKey override from machine env {0}" -f $envKey.Name)
         $cfg | Add-Member -NotePropertyName FunctionKey -NotePropertyValue $envKey.Value -Force
     }
     foreach ($pair in @(
-        @{ Envs = @('INTUNE_ACTIONS_CERT_THUMBPRINT',   'INTUNE_WIPE_CERT_THUMBPRINT')  ; Prop = 'CertificateThumbprint'  },
-        @{ Envs = @('INTUNE_ACTIONS_CERT_SUBJECT_LIKE', 'INTUNE_WIPE_CERT_SUBJECT_LIKE'); Prop = 'CertificateSubjectLike' },
-        @{ Envs = @('INTUNE_ACTIONS_CERT_ISSUER_LIKE',  'INTUNE_WIPE_CERT_ISSUER_LIKE') ; Prop = 'CertificateIssuerLike'  }
+        @{ Envs = @('INTUNE_ACTIONS_CERT_THUMBPRINT')   ; Prop = 'CertificateThumbprint'  },
+        @{ Envs = @('INTUNE_ACTIONS_CERT_SUBJECT_LIKE') ; Prop = 'CertificateSubjectLike' },
+        @{ Envs = @('INTUNE_ACTIONS_CERT_ISSUER_LIKE')  ; Prop = 'CertificateIssuerLike'  }
     )) {
         $hit = Get-MachineEnvFirst $pair.Envs
         if ($hit) {

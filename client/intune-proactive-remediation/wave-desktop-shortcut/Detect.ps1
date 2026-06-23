@@ -22,15 +22,12 @@
 $ErrorActionPreference = 'Stop'
 
 # --- Configuration (resolved from env vars or config.json) -------------------
-# Capability-neutral env var resolution:
-# - New namespace:    INTUNE_ACTIONS_*
-# - Legacy namespace: INTUNE_WIPE_*  (backward compatibility)
+# Capability-neutral env var resolution (INTUNE_ACTIONS_* namespace).
 # No tenant URL is hardcoded: the base URL comes from the same env vars the
 # intune-remediation-endpoint remediation sets, or from the installed client
 # config.json. If none of those provide a URL the script logs and skips
 # (compliant) instead of calling a baked-in endpoint.
 $ApiBaseUrl    = $env:INTUNE_ACTIONS_API_URL
-if (-not $ApiBaseUrl) { $ApiBaseUrl = $env:INTUNE_WIPE_API_URL }
 if (-not $ApiBaseUrl) {
     try {
         $programFiles64 = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
@@ -41,8 +38,8 @@ if (-not $ApiBaseUrl) {
         }
     } catch { }
 }
-# INTUNE_*_API_URL / config.json ApiUrl usually point to /api/actions. For
-# schedule polling we need the app base URL only.
+# INTUNE_ACTIONS_API_URL / config.json ApiUrl usually point to /api/actions.
+# For schedule polling we need the app base URL only.
 if ($ApiBaseUrl) {
     $ApiBaseUrl = $ApiBaseUrl.TrimEnd('/')
     if ($ApiBaseUrl -match '/api/actions$') {
@@ -51,15 +48,10 @@ if ($ApiBaseUrl) {
 }
 $SchedulePath  = '/api/schedule/me?actionType=wipe'
 $FunctionKey = $env:INTUNE_ACTIONS_FUNCTION_KEY
-if (-not $FunctionKey) { $FunctionKey = $env:INTUNE_WIPE_FUNCTION_KEY }
 $CertThumbprint = $env:INTUNE_ACTIONS_CERT_THUMBPRINT
-if (-not $CertThumbprint) { $CertThumbprint = $env:INTUNE_WIPE_CERT_THUMBPRINT }
 $CertSubjectLike = $env:INTUNE_ACTIONS_CERT_SUBJECT_LIKE
-if (-not $CertSubjectLike) { $CertSubjectLike = $env:INTUNE_WIPE_CERT_SUBJECT_LIKE }
 $CertIssuerLike  = $env:INTUNE_ACTIONS_CERT_ISSUER_LIKE
-if (-not $CertIssuerLike) { $CertIssuerLike = $env:INTUNE_WIPE_CERT_ISSUER_LIKE }
 $CertExcludeIssuerLike = $env:INTUNE_ACTIONS_CERT_EXCLUDE_ISSUER_LIKE
-if (-not $CertExcludeIssuerLike) { $CertExcludeIssuerLike = $env:INTUNE_WIPE_CERT_EXCLUDE_ISSUER_LIKE }
 if (-not $CertExcludeIssuerLike) { $CertExcludeIssuerLike = '*Intune*MDM*' }
 $CacheDir      = Join-Path $env:ProgramData 'IntuneWipeClient'
 $CacheFile     = Join-Path $CacheDir 'wave-schedule.json'
@@ -111,11 +103,11 @@ Write-Log ("Config snapshot: URL='{0}', FunctionKey={1} {2}, Thumbprint={3}, Sub
 if ($FunctionKey) {
     Write-Log "Using function key from environment (length=$($FunctionKey.Trim().Length))."
 } else {
-    Write-Log "Function key missing in environment (INTUNE_ACTIONS_FUNCTION_KEY / INTUNE_WIPE_FUNCTION_KEY). API call may return 401."
+    Write-Log "Function key missing in environment (INTUNE_ACTIONS_FUNCTION_KEY). API call may return 401."
 }
 
 if (-not $ApiBaseUrl) {
-    Write-Log "No API base URL resolved (INTUNE_ACTIONS_API_URL / INTUNE_WIPE_API_URL / config.json ApiUrl all empty). Cannot poll schedule endpoint. Compliant (skip)."
+    Write-Log "No API base URL resolved (INTUNE_ACTIONS_API_URL / config.json ApiUrl all empty). Cannot poll schedule endpoint. Compliant (skip)."
     exit 0
 }
 
