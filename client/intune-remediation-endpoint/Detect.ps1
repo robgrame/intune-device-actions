@@ -3,17 +3,18 @@
     Detection: IntuneWipeClient Function App endpoint (URL + key) env vars.
 
 .DESCRIPTION
-    Reports the device as non-compliant if either of the machine-scope
-    env vars below is missing / blank / different from the expected
-    value. The companion Remediate.ps1 sets both.
+    Reports the device as non-compliant if any of the machine-scope env
+    vars below is missing / blank / different from the expected value.
+    The companion Remediate.ps1 sets the capability-neutral INTUNE_ACTIONS_*
+    names plus the legacy INTUNE_WIPE_* names in lockstep:
 
-        INTUNE_WIPE_API_URL       <- expected URL
-        INTUNE_WIPE_FUNCTION_KEY  <- expected Function-level / host key
+        INTUNE_ACTIONS_API_URL      (+ legacy INTUNE_WIPE_API_URL)      <- expected URL
+        INTUNE_ACTIONS_FUNCTION_KEY (+ legacy INTUNE_WIPE_FUNCTION_KEY) <- expected Function-level / host key
 
-    The wipe scripts (Invoke-WipeFromTask.ps1, Watch-WipeStatus.ps1,
-    intune-remediation-schedule/*) read these env vars in preference to
-    the values in config.json, so the Function App can be repointed and
-    the key rotated WITHOUT repackaging the .intunewin.
+    The action client scripts (Invoke-WipeFromTask.ps1, Watch-WipeStatus.ps1,
+    intune-remediation-schedule/*, wave-desktop-shortcut/*) read these env
+    vars in preference to the values in config.json, so the Function App can
+    be repointed and the key rotated WITHOUT repackaging the .intunewin.
 
 .NOTES
     Context: SYSTEM (Proactive Remediation), 64-bit.
@@ -40,11 +41,11 @@ $ExpectedCertSubjectLike = ''
 $ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*'
 # =============================================================================
 
-$UrlVarName     = 'INTUNE_WIPE_API_URL'
-$KeyVarName     = 'INTUNE_WIPE_FUNCTION_KEY'
-$CertThumbVar   = 'INTUNE_WIPE_CERT_THUMBPRINT'
-$CertSubjectVar = 'INTUNE_WIPE_CERT_SUBJECT_LIKE'
-$CertIssuerVar  = 'INTUNE_WIPE_CERT_ISSUER_LIKE'
+$UrlVarNames     = @('INTUNE_ACTIONS_API_URL',           'INTUNE_WIPE_API_URL')
+$KeyVarNames     = @('INTUNE_ACTIONS_FUNCTION_KEY',      'INTUNE_WIPE_FUNCTION_KEY')
+$CertThumbVars   = @('INTUNE_ACTIONS_CERT_THUMBPRINT',   'INTUNE_WIPE_CERT_THUMBPRINT')
+$CertSubjectVars = @('INTUNE_ACTIONS_CERT_SUBJECT_LIKE', 'INTUNE_WIPE_CERT_SUBJECT_LIKE')
+$CertIssuerVars  = @('INTUNE_ACTIONS_CERT_ISSUER_LIKE',  'INTUNE_WIPE_CERT_ISSUER_LIKE')
 
 function Write-OneLine {
     param([string] $Message)
@@ -74,11 +75,11 @@ try {
         (Format-SafeValue $ExpectedCertThumbprint),
         (Format-SafeValue $ExpectedCertSubjectLike),
         (Format-SafeValue $ExpectedCertIssuerLike))
-    $currentUrl = [Environment]::GetEnvironmentVariable($UrlVarName, 'Machine')
-    $currentKey = [Environment]::GetEnvironmentVariable($KeyVarName, 'Machine')
-    $currentThumb = [Environment]::GetEnvironmentVariable($CertThumbVar, 'Machine')
-    $currentSubject = [Environment]::GetEnvironmentVariable($CertSubjectVar, 'Machine')
-    $currentIssuer = [Environment]::GetEnvironmentVariable($CertIssuerVar, 'Machine')
+    $currentUrl     = [Environment]::GetEnvironmentVariable($UrlVarNames[0], 'Machine')
+    $currentKey     = [Environment]::GetEnvironmentVariable($KeyVarNames[0], 'Machine')
+    $currentThumb   = [Environment]::GetEnvironmentVariable($CertThumbVars[0], 'Machine')
+    $currentSubject = [Environment]::GetEnvironmentVariable($CertSubjectVars[0], 'Machine')
+    $currentIssuer  = [Environment]::GetEnvironmentVariable($CertIssuerVars[0], 'Machine')
     Write-OneLine ("Current env snapshot: URL='{0}', FunctionKey={1} {2}, Thumbprint={3}, SubjectLike={4}, IssuerLike={5}" -f `
         (Format-SafeValue $currentUrl),
         (Format-SafeValue $currentKey -Secret),
@@ -86,27 +87,38 @@ try {
         (Format-SafeValue $currentThumb),
         (Format-SafeValue $currentSubject),
         (Format-SafeValue $currentIssuer))
-    if (-not $currentUrl -or $currentUrl.Trim() -ne $ExpectedApiUrl) {
-        Write-OneLine "REMEDIATE: $UrlVarName missing or mismatched (expected '$ExpectedApiUrl')."
-        exit 1
+    # Require every name (canonical + legacy) to match expected so a device
+    # carrying only the legacy INTUNE_WIPE_* vars converges to the canonical
+    # INTUNE_ACTIONS_* namespace on the next remediation.
+    foreach ($n in $UrlVarNames) {
+        $v = [Environment]::GetEnvironmentVariable($n, 'Machine')
+        if (-not $v -or $v.Trim() -ne $ExpectedApiUrl) {
+            Write-OneLine ("REMEDIATE: {0} missing or mismatched (expected '{1}')." -f $n, $ExpectedApiUrl)
+            exit 1
+        }
     }
 
-    if (-not $currentKey -or $currentKey.Trim() -ne $ExpectedFunctionKey) {
-        $obs = if ($currentKey) { "len=$($currentKey.Trim().Length)" } else { 'missing' }
-        Write-OneLine "REMEDIATE: $KeyVarName mismatched ($obs vs expected len=$($ExpectedFunctionKey.Length))."
-        exit 1
+    foreach ($n in $KeyVarNames) {
+        $v = [Environment]::GetEnvironmentVariable($n, 'Machine')
+        if (-not $v -or $v.Trim() -ne $ExpectedFunctionKey) {
+            $obs = if ($v) { "len=$($v.Trim().Length)" } else { 'missing' }
+            Write-OneLine ("REMEDIATE: {0} mismatched ({1} vs expected len={2})." -f $n, $obs, $ExpectedFunctionKey.Length)
+            exit 1
+        }
     }
 
     foreach ($pair in @(
-        @{ Var = $CertThumbVar  ; Expected = $ExpectedCertThumbprint  },
-        @{ Var = $CertSubjectVar; Expected = $ExpectedCertSubjectLike },
-        @{ Var = $CertIssuerVar ; Expected = $ExpectedCertIssuerLike  }
+        @{ Vars = $CertThumbVars  ; Expected = $ExpectedCertThumbprint  },
+        @{ Vars = $CertSubjectVars; Expected = $ExpectedCertSubjectLike },
+        @{ Vars = $CertIssuerVars ; Expected = $ExpectedCertIssuerLike  }
     )) {
         if (-not $pair.Expected) { continue }  # opted out
-        $current = [Environment]::GetEnvironmentVariable($pair.Var, 'Machine')
-        if (-not $current -or $current.Trim() -ne $pair.Expected) {
-            Write-OneLine ("REMEDIATE: {0} missing or mismatched (expected '{1}')." -f $pair.Var, $pair.Expected)
-            exit 1
+        foreach ($n in $pair.Vars) {
+            $current = [Environment]::GetEnvironmentVariable($n, 'Machine')
+            if (-not $current -or $current.Trim() -ne $pair.Expected) {
+                Write-OneLine ("REMEDIATE: {0} missing or mismatched (expected '{1}')." -f $n, $pair.Expected)
+                exit 1
+            }
         }
     }
 

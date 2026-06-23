@@ -82,10 +82,14 @@ try {
         exit 1
     }
 
-    # Machine env override (intune-remediation-apiurl) wins so the script
-    # detects a stale schedule.json when the Function App URL has been
-    # repointed without re-installing the .intunewin package.
-    $envApiUrl = [Environment]::GetEnvironmentVariable('INTUNE_WIPE_API_URL', 'Machine')
+    # Machine env override (capability-neutral INTUNE_ACTIONS_API_URL, with
+    # legacy INTUNE_WIPE_API_URL fallback) wins so the script detects a stale
+    # schedule.json when the Function App URL has been repointed without
+    # re-installing the .intunewin package.
+    $envApiUrl = [Environment]::GetEnvironmentVariable('INTUNE_ACTIONS_API_URL', 'Machine')
+    if (-not ($envApiUrl -and $envApiUrl.Trim())) {
+        $envApiUrl = [Environment]::GetEnvironmentVariable('INTUNE_WIPE_API_URL', 'Machine')
+    }
     if ($envApiUrl -and $envApiUrl.Trim()) {
         $cfg | Add-Member -NotePropertyName ApiUrl -NotePropertyValue $envApiUrl.Trim() -Force
     }

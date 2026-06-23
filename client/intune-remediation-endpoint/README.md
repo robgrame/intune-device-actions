@@ -8,11 +8,16 @@ variables**, **without having to repackage the `.intunewin`**.
 
 | Env var (Machine scope) | Holds |
 |---|---|
-| `INTUNE_WIPE_API_URL` | Full Function App actions endpoint, e.g. `https://devact-web-dev.azurewebsites.net/api/actions` |
-| `INTUNE_WIPE_FUNCTION_KEY` | Function-level or host key for the `actions` endpoint |
-| `INTUNE_WIPE_CERT_THUMBPRINT` | (optional) Exact SHA-1 thumbprint of the mTLS client cert |
-| `INTUNE_WIPE_CERT_SUBJECT_LIKE` | (optional) `-like` wildcard on cert Subject (`*Microsoft Intune MDM Device CA*`) |
-| `INTUNE_WIPE_CERT_ISSUER_LIKE` | (optional) `;`-separated wildcards on cert Issuer (OR semantics) |
+| `INTUNE_ACTIONS_API_URL` (legacy: `INTUNE_WIPE_API_URL`) | Full Function App actions endpoint, e.g. `https://devact-web-dev.azurewebsites.net/api/actions` |
+| `INTUNE_ACTIONS_FUNCTION_KEY` (legacy: `INTUNE_WIPE_FUNCTION_KEY`) | Function-level or host key for the `actions` endpoint |
+| `INTUNE_ACTIONS_CERT_THUMBPRINT` (legacy: `INTUNE_WIPE_CERT_THUMBPRINT`) | (optional) Exact SHA-1 thumbprint of the mTLS client cert |
+| `INTUNE_ACTIONS_CERT_SUBJECT_LIKE` (legacy: `INTUNE_WIPE_CERT_SUBJECT_LIKE`) | (optional) `-like` wildcard on cert Subject (`*Microsoft Intune MDM Device CA*`) |
+| `INTUNE_ACTIONS_CERT_ISSUER_LIKE` (legacy: `INTUNE_WIPE_CERT_ISSUER_LIKE`) | (optional) `;`-separated wildcards on cert Issuer (OR semantics) |
+
+`Remediate.ps1` writes the capability-neutral `INTUNE_ACTIONS_*` names and,
+in lockstep, the legacy `INTUNE_WIPE_*` names for backward compatibility with
+client scripts not yet migrated. Consumers read `INTUNE_ACTIONS_*` first and
+fall back to `INTUNE_WIPE_*`.
 
 Set any cert selector's `$ExpectedX` to empty string `''` in
 `Detect.ps1` + `Remediate.ps1` to opt that selector out of remediation
@@ -86,7 +91,8 @@ selectors in AND:
 
 Enterprise auto-enrolled device certs frequently have an **empty
 Subject DN** (the device identity lives in the SAN-DNS / SAN-UPN). If
-you set `INTUNE_WIPE_CERT_SUBJECT_LIKE` to a non-empty pattern, those
+you set `INTUNE_ACTIONS_CERT_SUBJECT_LIKE` (or legacy
+`INTUNE_WIPE_CERT_SUBJECT_LIKE`) to a non-empty pattern, those
 certs are filtered out — including the one you actually need. Symptom:
 `Client certificate not found (with Client Authentication EKU and
 private key)` even though a perfectly valid cert sits in

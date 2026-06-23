@@ -3,11 +3,14 @@
     Remediation: set IntuneWipeClient Function App endpoint env vars.
 
 .DESCRIPTION
-    Sets both machine-scope env vars to the values pinned below:
-        INTUNE_WIPE_API_URL       = $ExpectedApiUrl
-        INTUNE_WIPE_FUNCTION_KEY  = $ExpectedFunctionKey
+    Sets the machine-scope env vars to the values pinned below, using the
+    capability-neutral INTUNE_ACTIONS_* namespace and, in lockstep, the legacy
+    INTUNE_WIPE_* names for backward compatibility with client scripts not yet
+    migrated:
+        INTUNE_ACTIONS_API_URL      (+ legacy INTUNE_WIPE_API_URL)      = $ExpectedApiUrl
+        INTUNE_ACTIONS_FUNCTION_KEY (+ legacy INTUNE_WIPE_FUNCTION_KEY) = $ExpectedFunctionKey
 
-    Keep these two constants in lockstep with Detect.ps1.
+    Keep these constants in lockstep with Detect.ps1.
 
 .NOTES
     Context: SYSTEM (Proactive Remediation), 64-bit.
@@ -33,11 +36,11 @@ $ExpectedCertSubjectLike = ''
 $ExpectedCertIssuerLike  = '*MSLABS-SUBCA01*'
 # =============================================================================
 
-$UrlVarName     = 'INTUNE_WIPE_API_URL'
-$KeyVarName     = 'INTUNE_WIPE_FUNCTION_KEY'
-$CertThumbVar   = 'INTUNE_WIPE_CERT_THUMBPRINT'
-$CertSubjectVar = 'INTUNE_WIPE_CERT_SUBJECT_LIKE'
-$CertIssuerVar  = 'INTUNE_WIPE_CERT_ISSUER_LIKE'
+$UrlVarNames     = @('INTUNE_ACTIONS_API_URL',           'INTUNE_WIPE_API_URL')
+$KeyVarNames     = @('INTUNE_ACTIONS_FUNCTION_KEY',      'INTUNE_WIPE_FUNCTION_KEY')
+$CertThumbVars   = @('INTUNE_ACTIONS_CERT_THUMBPRINT',   'INTUNE_WIPE_CERT_THUMBPRINT')
+$CertSubjectVars = @('INTUNE_ACTIONS_CERT_SUBJECT_LIKE', 'INTUNE_WIPE_CERT_SUBJECT_LIKE')
+$CertIssuerVars  = @('INTUNE_ACTIONS_CERT_ISSUER_LIKE',  'INTUNE_WIPE_CERT_ISSUER_LIKE')
 $LogDir         = Join-Path $env:ProgramData 'IntuneWipeClient\Logs'
 $LogFile        = Join-Path $LogDir 'intune-remediation-endpoint-remediate.log'
 
@@ -76,33 +79,39 @@ try {
         (Format-SafeValue $ExpectedCertThumbprint),
         (Format-SafeValue $ExpectedCertSubjectLike),
         (Format-SafeValue $ExpectedCertIssuerLike))
-    [Environment]::SetEnvironmentVariable($UrlVarName, $ExpectedApiUrl,      'Machine')
-    [Environment]::SetEnvironmentVariable($KeyVarName, $ExpectedFunctionKey, 'Machine')
-    Write-Log "Set $UrlVarName and $KeyVarName."
+    foreach ($n in $UrlVarNames) { [Environment]::SetEnvironmentVariable($n, $ExpectedApiUrl,      'Machine') }
+    foreach ($n in $KeyVarNames) { [Environment]::SetEnvironmentVariable($n, $ExpectedFunctionKey, 'Machine') }
+    Write-Log ("Set {0} and {1}." -f ($UrlVarNames -join '/'), ($KeyVarNames -join '/'))
 
     # For cert selectors: empty ExpectedX means "do not pin via env" — in
-    # that case we DELETE the env var so the wipe client falls back to
+    # that case we DELETE the env vars so the wipe client falls back to
     # config.json. This lets ops opt a selector out of remediation later
     # without leaving a stale value behind.
     foreach ($pair in @(
-        @{ Var = $CertThumbVar  ; Expected = $ExpectedCertThumbprint  },
-        @{ Var = $CertSubjectVar; Expected = $ExpectedCertSubjectLike },
-        @{ Var = $CertIssuerVar ; Expected = $ExpectedCertIssuerLike  }
+        @{ Vars = $CertThumbVars  ; Expected = $ExpectedCertThumbprint  },
+        @{ Vars = $CertSubjectVars; Expected = $ExpectedCertSubjectLike },
+        @{ Vars = $CertIssuerVars ; Expected = $ExpectedCertIssuerLike  }
     )) {
+        foreach ($n in $pair.Vars) {
+            if ($pair.Expected) {
+                [Environment]::SetEnvironmentVariable($n, $pair.Expected, 'Machine')
+            } else {
+                [Environment]::SetEnvironmentVariable($n, $null, 'Machine')
+            }
+        }
         if ($pair.Expected) {
-            [Environment]::SetEnvironmentVariable($pair.Var, $pair.Expected, 'Machine')
-            Write-Log "Set $($pair.Var)."
+            Write-Log ("Set {0}." -f ($pair.Vars -join '/'))
         } else {
-            [Environment]::SetEnvironmentVariable($pair.Var, $null, 'Machine')
-            Write-Log "Removed $($pair.Var) (empty expected value)."
+            Write-Log ("Removed {0} (empty expected value)." -f ($pair.Vars -join '/'))
         }
     }
 
-    $writtenUrl = [Environment]::GetEnvironmentVariable($UrlVarName, 'Machine')
-    $writtenKey = [Environment]::GetEnvironmentVariable($KeyVarName, 'Machine')
-    $writtenThumb = [Environment]::GetEnvironmentVariable($CertThumbVar, 'Machine')
-    $writtenSubject = [Environment]::GetEnvironmentVariable($CertSubjectVar, 'Machine')
-    $writtenIssuer = [Environment]::GetEnvironmentVariable($CertIssuerVar, 'Machine')
+    # Verify the canonical (first) names read back correctly.
+    $writtenUrl     = [Environment]::GetEnvironmentVariable($UrlVarNames[0], 'Machine')
+    $writtenKey     = [Environment]::GetEnvironmentVariable($KeyVarNames[0], 'Machine')
+    $writtenThumb   = [Environment]::GetEnvironmentVariable($CertThumbVars[0], 'Machine')
+    $writtenSubject = [Environment]::GetEnvironmentVariable($CertSubjectVars[0], 'Machine')
+    $writtenIssuer  = [Environment]::GetEnvironmentVariable($CertIssuerVars[0], 'Machine')
     Write-Log ("Read-back snapshot: URL='{0}', FunctionKey={1} {2}, Thumbprint={3}, SubjectLike={4}, IssuerLike={5}" -f `
         $writtenUrl,
         (Format-SafeValue $writtenKey -Secret),
@@ -111,15 +120,15 @@ try {
         (Format-SafeValue $writtenSubject),
         (Format-SafeValue $writtenIssuer))
     if ($writtenUrl -ne $ExpectedApiUrl) {
-        Write-Log "FAIL: $UrlVarName read-back '$writtenUrl' does not match expected."
+        Write-Log ("FAIL: {0} read-back '{1}' does not match expected." -f $UrlVarNames[0], $writtenUrl)
         exit 1
     }
     if ($writtenKey -ne $ExpectedFunctionKey) {
-        Write-Log "FAIL: $KeyVarName read-back length does not match expected length=$($ExpectedFunctionKey.Length)."
+        Write-Log ("FAIL: {0} read-back length does not match expected length={1}." -f $KeyVarNames[0], $ExpectedFunctionKey.Length)
         exit 1
     }
 
-    Write-Log "OK: URL + key + cert selectors written to Machine env."
+    Write-Log "OK: URL + key + cert selectors written to Machine env (INTUNE_ACTIONS_* + legacy INTUNE_WIPE_*)."
     exit 0
 } catch {
     Write-Log "ERROR: $($_.Exception.Message)"

@@ -91,6 +91,18 @@ function Get-DeviceCertificate {
     return $candidates | Sort-Object NotAfter -Descending | Select-Object -First 1
 }
 
+function Get-MachineEnvFirst {
+    # Returns the first non-empty machine-scope env var value from the
+    # capability-neutral INTUNE_ACTIONS_* name, then the legacy INTUNE_WIPE_*
+    # name. Also returns which name supplied the value (for logging).
+    param([string[]]$Names)
+    foreach ($n in $Names) {
+        $v = [Environment]::GetEnvironmentVariable($n, 'Machine')
+        if ($v -and $v.Trim()) { return [pscustomobject]@{ Name = $n; Value = $v.Trim() } }
+    }
+    return $null
+}
+
 try {
     # Always ensure data dir + log dir exist early so we can capture errors.
     if (-not [System.IO.Directory]::Exists($DataDir)) {
@@ -105,25 +117,25 @@ try {
     }
 
     $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-    $envApiUrl = [Environment]::GetEnvironmentVariable('INTUNE_WIPE_API_URL', 'Machine')
-    if ($envApiUrl -and $envApiUrl.Trim()) {
-        Write-Log ("ApiUrl override from machine env INTUNE_WIPE_API_URL: {0}" -f $envApiUrl)
-        $cfg | Add-Member -NotePropertyName ApiUrl -NotePropertyValue $envApiUrl.Trim() -Force
+    $envApiUrl = Get-MachineEnvFirst @('INTUNE_ACTIONS_API_URL', 'INTUNE_WIPE_API_URL')
+    if ($envApiUrl) {
+        Write-Log ("ApiUrl override from machine env {0}: {1}" -f $envApiUrl.Name, $envApiUrl.Value)
+        $cfg | Add-Member -NotePropertyName ApiUrl -NotePropertyValue $envApiUrl.Value -Force
     }
-    $envKey = [Environment]::GetEnvironmentVariable('INTUNE_WIPE_FUNCTION_KEY', 'Machine')
-    if ($envKey -and $envKey.Trim()) {
-        Write-Log "FunctionKey override from machine env INTUNE_WIPE_FUNCTION_KEY"
-        $cfg | Add-Member -NotePropertyName FunctionKey -NotePropertyValue $envKey.Trim() -Force
+    $envKey = Get-MachineEnvFirst @('INTUNE_ACTIONS_FUNCTION_KEY', 'INTUNE_WIPE_FUNCTION_KEY')
+    if ($envKey) {
+        Write-Log ("FunctionKey override from machine env {0}" -f $envKey.Name)
+        $cfg | Add-Member -NotePropertyName FunctionKey -NotePropertyValue $envKey.Value -Force
     }
     foreach ($pair in @(
-        @{ Env = 'INTUNE_WIPE_CERT_THUMBPRINT'  ; Prop = 'CertificateThumbprint'  },
-        @{ Env = 'INTUNE_WIPE_CERT_SUBJECT_LIKE'; Prop = 'CertificateSubjectLike' },
-        @{ Env = 'INTUNE_WIPE_CERT_ISSUER_LIKE' ; Prop = 'CertificateIssuerLike'  }
+        @{ Envs = @('INTUNE_ACTIONS_CERT_THUMBPRINT',   'INTUNE_WIPE_CERT_THUMBPRINT')  ; Prop = 'CertificateThumbprint'  },
+        @{ Envs = @('INTUNE_ACTIONS_CERT_SUBJECT_LIKE', 'INTUNE_WIPE_CERT_SUBJECT_LIKE'); Prop = 'CertificateSubjectLike' },
+        @{ Envs = @('INTUNE_ACTIONS_CERT_ISSUER_LIKE',  'INTUNE_WIPE_CERT_ISSUER_LIKE') ; Prop = 'CertificateIssuerLike'  }
     )) {
-        $v = [Environment]::GetEnvironmentVariable($pair.Env, 'Machine')
-        if ($v -and $v.Trim()) {
-            Write-Log ("{0} override from machine env {1}: {2}" -f $pair.Prop, $pair.Env, $v.Trim())
-            $cfg | Add-Member -NotePropertyName $pair.Prop -NotePropertyValue $v.Trim() -Force
+        $hit = Get-MachineEnvFirst $pair.Envs
+        if ($hit) {
+            Write-Log ("{0} override from machine env {1}: {2}" -f $pair.Prop, $hit.Name, $hit.Value)
+            $cfg | Add-Member -NotePropertyName $pair.Prop -NotePropertyValue $hit.Value -Force
         }
     }
     if (-not $cfg.ApiUrl) {
