@@ -7,7 +7,7 @@ con responsabilità nette:
 |---|---|---|---|
 | **Dashboard API** | `intune-wipe-api` (questo repo) — `src/Web/Functions/DashboardFunction.cs` + `src/Web/Dashboard/DashboardTelemetryService.cs` | Endpoint JSON readonly + 1 POST di remediation, ospitati sul Web Function App (`idactions-web-<suffix>`). Sorgenti: ServiceBus admin, Ledger blob enumeration, KQL su App Insights. | È quello che il portale consuma. mTLS + Function key + cert allow-list. |
 | **Operator portal (UI)** | **`intune-wipe-web`** (repo separato) — deployato su `idactions-portal` (App Service Linux B1, .NET 10) | Pagina HTML/JS che chiama gli endpoint qui sopra, mostra il "flusso di energia" stile Prius, timeline trace per correlationId, bottone Reset ledger. | Auth: Easy Auth / AAD. |
-| **Grafana** | `intune-wipe-api` — `infra/dashboard-grafana.bicep` + `infra/grafana/intunedeviceactions-dashboard.json` | Esplorazione storica + alerting time-series + condivisione via URL. | Risorsa Azure separata SKU Essentials (~$10/mo). |
+| **Grafana** | `intune-wipe-api` — `infra/dashboard-grafana.bicep` + `infra/grafana/intunedeviceactions-dashboard.json` | Esplorazione storica + alerting time-series + condivisione via URL. | Risorsa Azure separata, SKU Standard. |
 
 > **Storia**: una prima versione della dashboard era ospitata come pagina
 > HTML embedded nel Web Function App. È stata rimossa: il portale operatore
@@ -71,7 +71,7 @@ Implementato in `DashboardTelemetryService.Recommend()`. Schema:
 ## Opzione Grafana (analisi storica)
 
 Standalone — `infra/dashboard-grafana.bicep` crea
-`Microsoft.Dashboard/grafana@2024-10-01` SKU Essentials con role assignment
+`Microsoft.Dashboard/grafana@2024-10-01` SKU Standard (Grafana v12) con role assignment
 `Monitoring Reader` + `Reader` sull'intero **resource group** (più
 `Storage Blob Data Reader` sul ledger SA). Import dei JSON in `infra/grafana/`:
 

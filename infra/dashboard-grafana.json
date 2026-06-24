@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "13840828444128286436"
+      "templateHash": "4470491786473383331"
     }
   },
   "parameters": {
@@ -58,13 +58,12 @@
     },
     "grafanaSku": {
       "type": "string",
-      "defaultValue": "Essential",
+      "defaultValue": "Standard",
       "allowedValues": [
-        "Essential",
         "Standard"
       ],
       "metadata": {
-        "description": "SKU for the managed Grafana instance. Essentials is the cheapest paid SKU (~$10/mo)."
+        "description": "SKU for the managed Grafana instance. Azure currently only supports Standard."
       }
     }
   },
@@ -90,7 +89,7 @@
         "apiKey": "Disabled",
         "deterministicOutboundIP": "Disabled",
         "publicNetworkAccess": "Enabled",
-        "grafanaMajorVersion": "11",
+        "grafanaMajorVersion": "12",
         "zoneRedundancy": "Disabled"
       }
     },

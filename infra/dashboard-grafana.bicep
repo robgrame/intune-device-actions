@@ -47,12 +47,11 @@ param appInsightsName string
 @description('Storage account hosting the action-ledger blob container.')
 param ledgerStorageAccountName string
 
-@description('SKU for the managed Grafana instance. Essentials is the cheapest paid SKU (~$10/mo).')
+@description('SKU for the managed Grafana instance. Azure currently only supports Standard.')
 @allowed([
-  'Essential'
   'Standard'
 ])
-param grafanaSku string = 'Essential'
+param grafanaSku string = 'Standard'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resources
@@ -71,7 +70,7 @@ resource grafana 'Microsoft.Dashboard/grafana@2024-10-01' = {
     apiKey: 'Disabled'
     deterministicOutboundIP: 'Disabled'
     publicNetworkAccess: 'Enabled'
-    grafanaMajorVersion: '11'
+    grafanaMajorVersion: '12'
     zoneRedundancy: 'Disabled'
   }
 }
