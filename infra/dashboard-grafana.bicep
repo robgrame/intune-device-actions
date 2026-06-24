@@ -91,8 +91,35 @@ resource ledgerSa 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
 
 // Built-in role definition IDs.
 var roleMonitoringReader      = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '43d0d8ad-25c7-4714-9337-8ba259a9fe05')
+var roleReader                = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'acdd72a7-3385-48ef-bd42-f606fba81ae7')
 var roleStorageBlobDataReader = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')
 var roleGrafanaAdmin          = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '22926164-76b3-42b3-bc55-97df8dab3e41')
+
+// Grafana MSI → Monitoring Reader on the whole resource group. Required by the
+// "Infrastructure Health" dashboard, whose Azure Monitor panels query metrics
+// for every component in the stamp (Function Apps, Storage, Service Bus, App
+// Configuration, Event Grid, Automation). Scoped to the RG so adding a new
+// capability's resources needs no extra role assignment.
+resource raGrafanaRgMonitoring 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, grafana.id, 'MonitoringReader')
+  properties: {
+    principalId: grafana.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleMonitoringReader
+  }
+}
+
+// Grafana MSI → Reader on the resource group. Required by the Azure Resource
+// Graph panel (Public Network Access per storage account) which reads resource
+// properties, not metrics. Read-only.
+resource raGrafanaRgReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, grafana.id, 'Reader')
+  properties: {
+    principalId: grafana.identity.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: roleReader
+  }
+}
 
 // Grafana MSI → Monitoring Reader on the SB namespace (queue depth metrics)
 resource raGrafanaSb 'Microsoft.Authorization/roleAssignments@2022-04-01' = {

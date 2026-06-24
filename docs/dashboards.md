@@ -72,9 +72,37 @@ Implementato in `DashboardTelemetryService.Recommend()`. Schema:
 
 Standalone — `infra/dashboard-grafana.bicep` crea
 `Microsoft.Dashboard/grafana@2024-10-01` SKU Essentials con role assignment
-`Monitoring Reader` sul Service Bus + AI e `Storage Blob Data Reader` sul
-ledger SA. Import del JSON in `infra/grafana/` come standard pannelli SB
-backlog / ledger growth / poller success rate.
+`Monitoring Reader` + `Reader` sull'intero **resource group** (più
+`Storage Blob Data Reader` sul ledger SA). Import dei JSON in `infra/grafana/`:
+
+| Dashboard JSON | UID | Cosa mostra |
+|---|---|---|
+| `intunedeviceactions-dashboard.json` | _(assegnato all'import)_ | Cruscotto operativo: SB backlog, runner, ledger bloccati, intake HTTP, latenza Graph. |
+| `infrastructure-health-dashboard.json` | `idactions-infra-health` | **Salute infrastrutturale** di tutto lo stamp: Function App (response time, 5xx, requests, esecuzioni, memoria), Storage (availability, transactions, latenza, throttling, **PNA via Azure Resource Graph**), Service Bus (errori/throttle/throughput), App Configuration, Event Grid (publish/dead-letter), Automation (runbook jobs per stato), e disponibilità end-to-end (App Insights). |
+
+### Infrastructure Health dashboard
+
+Portabile tra stamp: nessun resource ID hardcoded. Quattro variabili `constant`
+(nascoste) parametrizzano tutto — `subscription`, `resourceGroup`, `prefix`
+(default `devact`), `suffix` (default `dev`). I `resourceUri` dei pannelli Azure
+Monitor sono costruiti per interpolazione (`${prefix}-web-${suffix}`,
+`${prefix}stw${suffix}`, …). Per un altro stamp basta cambiare le variabili in
+fase di import.
+
+> **Sorgente di verità**: non editare il JSON a mano. Modifica
+> `infra/grafana/gen_infra_dashboard.py` e rigeneralo con
+> `python infra/grafana/gen_infra_dashboard.py`. Quando aggiungi una capability,
+> aggiungi la sua entry in `WEB_SITES` / `STORAGE` nel generatore.
+
+Import:
+1. Deploy del modulo Grafana (vedi header di `infra/dashboard-grafana.bicep`).
+2. Nel portale Grafana aggiungi il data source **Azure Monitor** (auto via MSI).
+3. Importa il JSON; mappa `DS_AZURE` (metriche + Resource Graph) e `DS_AI`
+   (Log Analytics/App Insights) sul data source Azure Monitor.
+
+Il pannello **Public Network Access (PNA) per storage account** rispecchia lo
+scheduled check orario: se uno storage compare con `publicNetworkAccess =
+Disabled`, un job esterno l'ha disabilitato e va riabilitato.
 
 ## Path Event Grid (near-realtime)
 

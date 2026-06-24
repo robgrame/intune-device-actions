@@ -1,0 +1,2183 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "type": "dashboard",
+        "name": "Annotations & Alerts",
+        "enable": true,
+        "iconColor": "rgba(0, 211, 255, 1)"
+      }
+    ]
+  },
+  "description": "Infrastructure health for the IntuneDeviceActions stamp: Function Apps, Storage (incl. PNA), Service Bus, App Configuration, Event Grid, Automation runbooks and end-to-end availability.",
+  "editable": true,
+  "schemaVersion": 39,
+  "tags": [
+    "intunedeviceactions",
+    "infrastructure",
+    "health"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "subscription",
+        "type": "constant",
+        "label": "Subscription ID",
+        "description": "Azure subscription containing the stamp.",
+        "query": "b45c5b53-d8f3-4a4c-9fe5-5537818a9886",
+        "current": {
+          "selected": false,
+          "text": "b45c5b53-d8f3-4a4c-9fe5-5537818a9886",
+          "value": "b45c5b53-d8f3-4a4c-9fe5-5537818a9886"
+        },
+        "hide": 2
+      },
+      {
+        "name": "resourceGroup",
+        "type": "constant",
+        "label": "Resource group",
+        "description": "",
+        "query": "RG-INTUNE-DEVICEACTIONS",
+        "current": {
+          "selected": false,
+          "text": "RG-INTUNE-DEVICEACTIONS",
+          "value": "RG-INTUNE-DEVICEACTIONS"
+        },
+        "hide": 2
+      },
+      {
+        "name": "prefix",
+        "type": "constant",
+        "label": "Name prefix",
+        "description": "Resource name prefix used by the stamp (apps + storage).",
+        "query": "devact",
+        "current": {
+          "selected": false,
+          "text": "devact",
+          "value": "devact"
+        },
+        "hide": 2
+      },
+      {
+        "name": "suffix",
+        "type": "constant",
+        "label": "Name suffix",
+        "description": "Stamp suffix, e.g. dev / prod.",
+        "query": "dev",
+        "current": {
+          "selected": false,
+          "text": "dev",
+          "value": "dev"
+        },
+        "hide": 2
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "refresh": "5m",
+  "title": "IntuneDeviceActions \u2014 Infrastructure Health",
+  "uid": "idactions-infra-health",
+  "panels": [
+    {
+      "type": "row",
+      "title": "Overview \u2014 health at a glance",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Function Apps \u2014 HTTP 5xx (range)",
+      "description": "Server errors across all Function Apps. Should be 0.",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-web-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "web"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-proc-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "proc"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-wipe-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "wipe"
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-autopilot-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "autopilot"
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-bitlocker-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "bitlocker"
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-rename-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "rename"
+          }
+        },
+        {
+          "refId": "G",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-portal-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "portal"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Storage \u2014 min availability %",
+      "description": "Lowest availability across the storage accounts.",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stw${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "web (stw)"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stp${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "proc (stp)"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stwp${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "wipe (stwp)"
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stap${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "autopilot (stap)"
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stbl${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "bitlocker (stbl)"
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}strn${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "rename (strn)"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 3,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 99
+              },
+              {
+                "color": "green",
+                "value": 99.9
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Service Bus \u2014 dead-lettered messages",
+      "description": "Messages parked in any DLQ. Should be 0.",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.ServiceBus/namespaces/${prefix}-sb-${suffix}",
+            "metricNamespace": "Microsoft.ServiceBus/namespaces",
+            "metricName": "DeadletteredMessages",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "dead-letter"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 4,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Event Grid \u2014 publish failures (range)",
+      "description": "Audit topic publish failures.",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.EventGrid/topics/${prefix}-eg-audit-${suffix}",
+            "metricNamespace": "Microsoft.EventGrid/topics",
+            "metricName": "PublishFailCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "fail"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 5,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Function Apps (Web / Proc / capability hosts / portal)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 6,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP response time (avg)",
+      "description": "Average HTTP response time per app.",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-web-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "HttpResponseTime",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "web"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-proc-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "HttpResponseTime",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "proc"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-wipe-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "HttpResponseTime",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "wipe"
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-autopilot-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "HttpResponseTime",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "autopilot"
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-bitlocker-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "HttpResponseTime",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "bitlocker"
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-rename-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "HttpResponseTime",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "rename"
+          }
+        },
+        {
+          "refId": "G",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-portal-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "HttpResponseTime",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "portal"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "id": 7,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP 5xx",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-web-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "web"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-proc-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "proc"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-wipe-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "wipe"
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-autopilot-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "autopilot"
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-bitlocker-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "bitlocker"
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-rename-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "rename"
+          }
+        },
+        {
+          "refId": "G",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-portal-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Http5xx",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "portal"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "id": 8,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-web-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Requests",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "web"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-proc-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Requests",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "proc"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-wipe-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Requests",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "wipe"
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-autopilot-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Requests",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "autopilot"
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-bitlocker-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Requests",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "bitlocker"
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-rename-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Requests",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "rename"
+          }
+        },
+        {
+          "refId": "G",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-portal-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "Requests",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "portal"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 15
+      },
+      "id": 9,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Function execution count",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-web-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "FunctionExecutionCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "web"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-proc-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "FunctionExecutionCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "proc"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-wipe-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "FunctionExecutionCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "wipe"
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-autopilot-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "FunctionExecutionCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "autopilot"
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-bitlocker-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "FunctionExecutionCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "bitlocker"
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-rename-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "FunctionExecutionCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "rename"
+          }
+        },
+        {
+          "refId": "G",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-portal-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "FunctionExecutionCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "portal"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 15
+      },
+      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory working set (avg)",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-web-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "AverageMemoryWorkingSet",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "web"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-proc-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "AverageMemoryWorkingSet",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "proc"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-wipe-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "AverageMemoryWorkingSet",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "wipe"
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-autopilot-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "AverageMemoryWorkingSet",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "autopilot"
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-bitlocker-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "AverageMemoryWorkingSet",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "bitlocker"
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-rename-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "AverageMemoryWorkingSet",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "rename"
+          }
+        },
+        {
+          "refId": "G",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${prefix}-portal-${suffix}",
+            "metricNamespace": "Microsoft.Web/sites",
+            "metricName": "AverageMemoryWorkingSet",
+            "aggregation": "Average",
+            "timeGrain": "auto",
+            "alias": "portal"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 15
+      },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Storage accounts",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 12,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Availability %",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stw${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "web (stw)"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stp${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "proc (stp)"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stwp${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "wipe (stwp)"
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stap${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "autopilot (stap)"
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stbl${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "bitlocker (stbl)"
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}strn${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Availability",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "rename (strn)"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "id": 13,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Transactions",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stw${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "web (stw)"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stp${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "proc (stp)"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stwp${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "wipe (stwp)"
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stap${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "autopilot (stap)"
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stbl${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "bitlocker (stbl)"
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}strn${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "rename (strn)"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "id": 14,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "End-to-end latency (avg)",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stw${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "SuccessE2ELatency",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "web (stw)"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stp${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "SuccessE2ELatency",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "proc (stp)"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stwp${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "SuccessE2ELatency",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "wipe (stwp)"
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stap${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "SuccessE2ELatency",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "autopilot (stap)"
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stbl${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "SuccessE2ELatency",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "bitlocker (stbl)"
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}strn${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "SuccessE2ELatency",
+            "aggregation": "Average",
+            "timeGrain": "PT1M",
+            "alias": "rename (strn)"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
+      "id": 15,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Throttled transactions (ClientThrottlingError)",
+      "description": "Non-zero values indicate the account is being throttled.",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stw${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "web (stw)",
+            "dimensionFilters": [
+              {
+                "dimension": "ResponseType",
+                "operator": "eq",
+                "filters": [
+                  "ClientThrottlingError"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stp${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "proc (stp)",
+            "dimensionFilters": [
+              {
+                "dimension": "ResponseType",
+                "operator": "eq",
+                "filters": [
+                  "ClientThrottlingError"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stwp${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "wipe (stwp)",
+            "dimensionFilters": [
+              {
+                "dimension": "ResponseType",
+                "operator": "eq",
+                "filters": [
+                  "ClientThrottlingError"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "refId": "D",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stap${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "autopilot (stap)",
+            "dimensionFilters": [
+              {
+                "dimension": "ResponseType",
+                "operator": "eq",
+                "filters": [
+                  "ClientThrottlingError"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "refId": "E",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}stbl${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "bitlocker (stbl)",
+            "dimensionFilters": [
+              {
+                "dimension": "ResponseType",
+                "operator": "eq",
+                "filters": [
+                  "ClientThrottlingError"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "refId": "F",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${prefix}strn${suffix}",
+            "metricNamespace": "Microsoft.Storage/storageAccounts",
+            "metricName": "Transactions",
+            "aggregation": "Total",
+            "timeGrain": "PT1M",
+            "alias": "rename (strn)",
+            "dimensionFilters": [
+              {
+                "dimension": "ResponseType",
+                "operator": "eq",
+                "filters": [
+                  "ClientThrottlingError"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 16,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Public Network Access (PNA) per storage account",
+      "description": "PNA should be Enabled in dev (an external job periodically disables it). Mirrors the hourly PNA check/enable schedule.",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Resource Graph",
+          "subscriptions": [
+            "${subscription}"
+          ],
+          "azureResourceGraph": {
+            "query": "Resources | where type =~ 'microsoft.storage/storageaccounts' and resourceGroup =~ '${resourceGroup}' | project name, publicNetworkAccess = tostring(properties.publicNetworkAccess), location, sku = tostring(sku.name) | order by name asc",
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 17,
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "row",
+      "title": "Service Bus namespace",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "id": 18,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Server & user errors / throttled requests",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.ServiceBus/namespaces/${prefix}-sb-${suffix}",
+            "metricNamespace": "Microsoft.ServiceBus/namespaces",
+            "metricName": "ServerErrors",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "server errors"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.ServiceBus/namespaces/${prefix}-sb-${suffix}",
+            "metricNamespace": "Microsoft.ServiceBus/namespaces",
+            "metricName": "UserErrors",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "user errors"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.ServiceBus/namespaces/${prefix}-sb-${suffix}",
+            "metricNamespace": "Microsoft.ServiceBus/namespaces",
+            "metricName": "ThrottledRequests",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "throttled"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "id": 19,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Incoming / outgoing messages",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.ServiceBus/namespaces/${prefix}-sb-${suffix}",
+            "metricNamespace": "Microsoft.ServiceBus/namespaces",
+            "metricName": "IncomingMessages",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "incoming"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.ServiceBus/namespaces/${prefix}-sb-${suffix}",
+            "metricNamespace": "Microsoft.ServiceBus/namespaces",
+            "metricName": "OutgoingMessages",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "outgoing"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "id": 20,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "App Configuration \u00b7 Event Grid \u00b7 Automation",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
+      "id": 21,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "App Configuration \u2014 requests & throttling",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.AppConfiguration/configurationStores/${prefix}-appcfg-${suffix}",
+            "metricNamespace": "Microsoft.AppConfiguration/configurationStores",
+            "metricName": "HttpIncomingRequestCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "requests"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.AppConfiguration/configurationStores/${prefix}-appcfg-${suffix}",
+            "metricNamespace": "Microsoft.AppConfiguration/configurationStores",
+            "metricName": "ThrottledHttpRequestCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "throttled"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 50
+      },
+      "id": 22,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Event Grid (audit topic) \u2014 publish & dead-letter",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.EventGrid/topics/${prefix}-eg-audit-${suffix}",
+            "metricNamespace": "Microsoft.EventGrid/topics",
+            "metricName": "PublishSuccessCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "success"
+          }
+        },
+        {
+          "refId": "B",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.EventGrid/topics/${prefix}-eg-audit-${suffix}",
+            "metricNamespace": "Microsoft.EventGrid/topics",
+            "metricName": "PublishFailCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "fail"
+          }
+        },
+        {
+          "refId": "C",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.EventGrid/topics/${prefix}-eg-audit-${suffix}",
+            "metricNamespace": "Microsoft.EventGrid/topics",
+            "metricName": "DeadLetteredCount",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "dead-letter"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 50
+      },
+      "id": 23,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Automation \u2014 runbook jobs by status",
+      "description": "Wipe / Autopilot / BitLocker / Rename runbook executions, split by status.",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AZURE}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Monitor",
+          "azureMonitor": {
+            "resourceUri": "/subscriptions/${subscription}/resourceGroups/${resourceGroup}/providers/Microsoft.Automation/automationAccounts/${prefix}-aa-${suffix}",
+            "metricNamespace": "Microsoft.Automation/automationAccounts",
+            "metricName": "TotalJob",
+            "aggregation": "Total",
+            "timeGrain": "auto",
+            "alias": "jobs",
+            "dimensionFilters": [
+              {
+                "dimension": "Status",
+                "operator": "eq",
+                "filters": [
+                  "*"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 50
+      },
+      "id": 24,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "End-to-end availability (Application Insights)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      },
+      "id": 25,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Failed requests by role",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AI}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "azureLogAnalytics": {
+            "query": "requests | where timestamp > $__timeFrom() and timestamp < $__timeTo() | summarize failures = countif(success == false) by bin(timestamp, 5m), cloud_RoleName | order by timestamp asc",
+            "resultFormat": "time_series"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 59
+      },
+      "id": 26,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Exceptions by role",
+      "description": "",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${DS_AI}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "azureLogAnalytics": {
+            "query": "exceptions | where timestamp > $__timeFrom() and timestamp < $__timeTo() | summarize count() by bin(timestamp, 5m), cloud_RoleName | order by timestamp asc",
+            "resultFormat": "time_series"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 59
+      },
+      "id": 27,
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ]
+}
