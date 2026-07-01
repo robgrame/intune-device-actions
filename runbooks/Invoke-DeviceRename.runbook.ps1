@@ -12,11 +12,16 @@
         2. LOOKUP — GET the customer-internal CMDB / asset-management REST
            endpoint with the serial number; the response carries the
            canonical new name (`newName` JSON property by default).
-        3. Collision check — query Entra /devices?$filter=displayName eq …
-           (Entra does NOT enforce uniqueness on device displayName, unlike
-           on-prem AD). Behaviour controlled by Rename:OnCollision
-           Automation variable (block | warn). Skip when the resolved name
-           matches the device's current name.
+        3. Pre-rename directory cleanup (default) — DELETE via Graph the stale
+           directory duplicates that would block a hybrid rename BEFORE
+           setDeviceName:
+             * AD-name shadows — Entra objects with displayName == target name
+               whose trustType is an AD type (default ServerAd), excl. self;
+             * HWID duplicates — every Entra device sharing this machine's
+               [HWID], except the Entra ID Joined object (AzureAd) and self.
+           Then a non-destructive Intune deviceName collision guard (block |
+           warn). Set Rename:PreRenameCleanup=disabled to fall back to the
+           legacy Entra+Intune collision check that deletes nothing.
         4. POST Graph /deviceManagement/managedDevices/{id}/setDeviceName
            → Intune queues the rename for the next MDM sync. Windows
            requires a reboot to complete the change.
@@ -27,7 +32,19 @@
         - Rename:AuthHeaderName       — auth header name (default X-Api-Key)
         - Rename:AuthHeaderValue      — auth header value (recommend Key Vault reference)
         - Rename:NewNameJsonPath      — response property holding the new name (default newName)
-        - Rename:OnCollision          — block | warn (default block)
+        - Rename:OnCollision          — block | warn (default block; Intune/legacy collision)
+
+    Optional pre-rename cleanup variables (all default to the safe values shown):
+        - Rename:PreRenameCleanup        — enabled | disabled (default enabled)
+        - Rename:AdNameCleanup           — enabled | disabled (default enabled)
+        - Rename:HwidCleanup             — enabled | disabled (default enabled)
+        - Rename:AdNameCleanupTrustTypes — CSV of trustTypes to delete on name match (default ServerAd)
+        - Rename:MaxDeletePerCleanup     — guardrail cap on deletions (default 25)
+        - Rename:AllowLargeCleanup       — true | false — override the cap (default false)
+        - Rename:OnCleanupFailure        — block | warn — on permanent cleanup error (default block)
+
+    Graph permission: deleting device objects requires Device.ReadWrite.All on
+    the runbook / Automation identity (in addition to the setDeviceName scope).
 
     All helpers live in _lib/RunbookCore.ps1 which is concatenated in front
     of this file by tools/Deploy-IntuneDeviceActions.ps1 at publish time.
