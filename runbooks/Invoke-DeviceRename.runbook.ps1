@@ -12,13 +12,16 @@
         2. LOOKUP — GET the customer-internal CMDB / asset-management REST
            endpoint with the serial number; the response carries the
            canonical new name (`newName` JSON property by default).
-        3. Pre-rename directory cleanup (default) — DELETE via Graph the stale
-           directory duplicates that would block a hybrid rename BEFORE
-           setDeviceName:
-             * AD-name shadows — Entra objects with displayName == target name
-               whose trustType is an AD type (default ServerAd), excl. self;
+        3. Pre-rename directory cleanup (default) — remove the stale directory
+           duplicates that would block a hybrid rename BEFORE setDeviceName:
+             * AD-name — the on-prem AD computer object(s) named == target name.
+               In the default `queue` mode a delete-by-name message is published
+               to the ad-object-cleanup Service Bus queue for the on-prem hybrid
+               worker (see workers/AdObjectCleanup); in `graph` mode the Entra
+               ServerAd shadow object(s) are deleted directly via Graph instead.
              * HWID duplicates — every Entra device sharing this machine's
-               [HWID], except the Entra ID Joined object (AzureAd) and self.
+               [HWID], except the Entra ID Joined object (AzureAd) and self
+               (always via Graph).
            Then a non-destructive Intune deviceName collision guard (block |
            warn). Set Rename:PreRenameCleanup=disabled to fall back to the
            legacy Entra+Intune collision check that deletes nothing.
@@ -37,11 +40,18 @@
     Optional pre-rename cleanup variables (all default to the safe values shown):
         - Rename:PreRenameCleanup        — enabled | disabled (default enabled)
         - Rename:AdNameCleanup           — enabled | disabled (default enabled)
+        - Rename:AdNameCleanupMode       — queue | graph (default queue — enqueue to hybrid worker)
         - Rename:HwidCleanup             — enabled | disabled (default enabled)
-        - Rename:AdNameCleanupTrustTypes — CSV of trustTypes to delete on name match (default ServerAd)
+        - Rename:AdNameCleanupTrustTypes — CSV of trustTypes to delete on name match (graph mode; default ServerAd)
         - Rename:MaxDeletePerCleanup     — guardrail cap on deletions (default 25)
         - Rename:AllowLargeCleanup       — true | false — override the cap (default false)
         - Rename:OnCleanupFailure        — block | warn — on permanent cleanup error (default block)
+
+    Service Bus variables (required only when Rename:AdNameCleanupMode=queue):
+        - ServiceBus:NamespaceHost       — SB namespace FQDN (e.g. idactions-sb-dev.servicebus.windows.net)
+        - ServiceBus:AdCleanupQueue      — queue name (default ad-object-cleanup)
+      The Automation Account managed identity must hold "Azure Service Bus Data
+      Sender" on that queue.
 
     Graph permission: deleting device objects requires Device.ReadWrite.All on
     the runbook / Automation identity (in addition to the setDeviceName scope).
@@ -272,6 +282,11 @@ if ($cleanupMode -eq 'disabled') {
     $selfId      = [string]$ctx.EntraDeviceId
     $doAdName    = (((Get-AutomationVariable -Name 'Rename:AdNameCleanup' -ErrorAction SilentlyContinue) ?? 'enabled').ToLowerInvariant() -ne 'disabled')
     $doHwid      = (((Get-AutomationVariable -Name 'Rename:HwidCleanup'   -ErrorAction SilentlyContinue) ?? 'enabled').ToLowerInvariant() -ne 'disabled')
+    # AD-name cleanup mode: queue (default) = enqueue a delete-by-name message to
+    # the ad-object-cleanup queue for the on-prem hybrid worker; graph = legacy
+    # delete of the Entra ServerAd shadow object(s) directly via Graph.
+    $adNameMode  = ((Get-AutomationVariable -Name 'Rename:AdNameCleanupMode' -ErrorAction SilentlyContinue) ?? 'queue').ToLowerInvariant()
+    $adNameGraph = ($adNameMode -eq 'graph')
     $trustCsv    = ((Get-AutomationVariable -Name 'Rename:AdNameCleanupTrustTypes' -ErrorAction SilentlyContinue) ?? 'ServerAd')
     $trustTypes  = @($trustCsv -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($trustTypes.Count -eq 0) { $trustTypes = @('ServerAd') }
@@ -287,7 +302,7 @@ if ($cleanupMode -eq 'disabled') {
     $cleanupPermanentError = $false
 
     try {
-        if ($doAdName) {
+        if ($doAdName -and $adNameGraph) {
             $adFilter = [System.Uri]::EscapeDataString("displayName eq '$escaped'")
             $adSelect = [System.Uri]::EscapeDataString('id,deviceId,displayName,trustType,physicalIds,accountEnabled')
             $adUri    = "https://graph.microsoft.com/v1.0/devices?`$filter=$adFilter&`$select=$adSelect&`$top=100"
@@ -378,6 +393,60 @@ if ($cleanupMode -eq 'disabled') {
                 Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "cleanup-delete-failed:$($err.Message)" | Out-Null
                 Write-RbcTerminalStatus -Context $ctx -State 'failed:cleanup' -ManagedDeviceId $ctx.IntuneDeviceId
                 return
+            }
+        }
+
+        # AD-name cleanup in QUEUE mode: enqueue a delete-by-name request to the
+        # ad-object-cleanup queue so the on-prem hybrid worker deletes the real
+        # on-premises AD computer object(s). Requires the Automation Account MI to
+        # hold "Azure Service Bus Data Sender" on the queue. Transient send faults
+        # throw (whole runbook retries); permanent faults honour OnCleanupFailure.
+        if ($doAdName -and -not $adNameGraph) {
+            $sbHost  = [string]((Get-AutomationVariable -Name 'ServiceBus:NamespaceHost' -ErrorAction SilentlyContinue) ?? (Get-AutomationVariable -Name 'ServiceBus:Namespace' -ErrorAction SilentlyContinue))
+            $sbQueue = [string]((Get-AutomationVariable -Name 'ServiceBus:AdCleanupQueue' -ErrorAction SilentlyContinue) ?? 'ad-object-cleanup')
+            if ([string]::IsNullOrWhiteSpace($sbHost)) {
+                Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupFailed -Context $ctx -Level 'Error' -Props @{
+                    newName = $newName; phase = 'enqueue'; reason = 'missing-servicebus-namespace'
+                }
+                if ($onCleanupFailure -ne 'warn') {
+                    Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason 'cleanup-enqueue-misconfigured' | Out-Null
+                    Write-RbcTerminalStatus -Context $ctx -State 'failed:cleanup' -ManagedDeviceId $ctx.IntuneDeviceId
+                    return
+                }
+            } else {
+                try {
+                    $adMsg = [ordered]@{
+                        schemaVersion    = '1'
+                        correlationId    = [string]$ctx.CorrelationId
+                        targetName       = [string]$newName
+                        sourceDeviceName = [string]$ctx.DeviceName
+                        entraDeviceId    = [string]$ctx.EntraDeviceId
+                        intuneDeviceId   = [string]$ctx.IntuneDeviceId
+                        serialNumber     = [string]$serial
+                        requestedUtc     = (Get-Date).ToUniversalTime().ToString('o')
+                    }
+                    Send-RbcServiceBusMessage -NamespaceHost $sbHost -QueueName $sbQueue -Body $adMsg `
+                        -BrokerProperties @{ Label = 'ad-object-cleanup'; CorrelationId = [string]$ctx.CorrelationId; MessageId = "ad-object-cleanup:$($ctx.CorrelationId)" } `
+                        -ApplicationProperties @{ messageType = 'ad-object-cleanup'; schemaVersion = '1'; targetName = [string]$newName }
+                    Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupAdNameEnqueued -Context $ctx -Props @{
+                        newName = $newName; queue = $sbQueue
+                    }
+                } catch {
+                    $sendErr = $_
+                    Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupFailed -Context $ctx -Level 'Error' -Exception $sendErr.Exception -Props @{
+                        newName = $newName; phase = 'enqueue'
+                    }
+                    # Treat 5xx / timeout as transient (throw to retry); anything
+                    # else honours OnCleanupFailure.
+                    $status = $null
+                    if ($sendErr.Exception.Response) { $status = [int]$sendErr.Exception.Response.StatusCode }
+                    if (($null -eq $status) -or ($status -ge 500)) { throw }
+                    if ($onCleanupFailure -ne 'warn') {
+                        Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "cleanup-enqueue-failed:$($sendErr.Exception.Message)" | Out-Null
+                        Write-RbcTerminalStatus -Context $ctx -State 'failed:cleanup' -ManagedDeviceId $ctx.IntuneDeviceId
+                        return
+                    }
+                }
             }
         }
     }

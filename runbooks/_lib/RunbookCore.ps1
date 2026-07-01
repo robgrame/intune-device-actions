@@ -99,6 +99,7 @@ $script:RbcAudit = @{
     RenameCollisionBlocked           = 'rename.collision.blocked'
     RenameCollisionCheckFailed       = 'rename.collision.check-failed'
     RenameCleanupAdNameDeleted       = 'rename.cleanup.ad-name.deleted'
+    RenameCleanupAdNameEnqueued      = 'rename.cleanup.ad-name.enqueued'
     RenameCleanupHwidDeleted         = 'rename.cleanup.hwid.deleted'
     RenameCleanupSkipped             = 'rename.cleanup.skipped'
     RenameCleanupCompleted           = 'rename.cleanup.completed'
@@ -116,7 +117,7 @@ $script:RbcAudit = @{
 $script:RbcStorageApiVersion = '2020-12-06'
 
 # Token caches: avoid re-acquiring on every helper call.
-$script:RbcTokenCache = @{ Graph = $null; Storage = $null }
+$script:RbcTokenCache = @{ Graph = $null; Storage = $null; ServiceBus = $null }
 
 # ─── Diagnostics / output ───────────────────────────────────────────────────
 
@@ -174,6 +175,55 @@ function Get-RbcStorageToken {
     }
     $script:RbcTokenCache.Storage = $t
     return $t.Token
+}
+
+# Managed-identity AAD token for Azure Service Bus data-plane REST (send).
+# Resource: https://servicebus.azure.net. Requires the Automation Account
+# managed identity to hold "Azure Service Bus Data Sender" on the target queue.
+function Get-RbcServiceBusToken {
+    [OutputType([string])]
+    param()
+    $cached = $script:RbcTokenCache.ServiceBus
+    if ($cached -and ($cached.ExpiresOn -gt (Get-Date).AddSeconds(60))) {
+        return $cached.Token
+    }
+    $t = $null
+    try {
+        $t = Get-AzAccessToken -ResourceUrl 'https://servicebus.azure.net' -AsSecureString:$false -ErrorAction Stop
+    } catch [System.Management.Automation.ParameterBindingException] {
+        $t = Get-AzAccessToken -ResourceUrl 'https://servicebus.azure.net' -ErrorAction Stop
+    }
+    $script:RbcTokenCache.ServiceBus = $t
+    return $t.Token
+}
+
+# Sends a single JSON message to a Service Bus queue via the data-plane REST API
+# using the managed-identity Bearer token. Application properties are passed as
+# custom broker headers. Throws on non-2xx (caller decides retry vs terminal).
+function Send-RbcServiceBusMessage {
+    param(
+        [Parameter(Mandatory = $true)] [string] $NamespaceHost,   # e.g. idactions-sb-dev.servicebus.windows.net
+        [Parameter(Mandatory = $true)] [string] $QueueName,
+        [Parameter(Mandatory = $true)] $Body,                     # object -> JSON, or a pre-serialized string
+        [hashtable] $BrokerProperties,                            # e.g. @{ Label = 'ad-object-cleanup'; CorrelationId = '...' }
+        [hashtable] $ApplicationProperties                        # custom key=value headers
+    )
+    $host2 = $NamespaceHost
+    if ($host2 -notlike '*.*') { $host2 = "$host2.servicebus.windows.net" }
+    $uri = "https://$host2/$QueueName/messages"
+
+    $json = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 12 -Compress }
+
+    $headers = @{ Authorization = "Bearer $(Get-RbcServiceBusToken)" }
+    if ($BrokerProperties) {
+        $headers['BrokerProperties'] = ($BrokerProperties | ConvertTo-Json -Compress)
+    }
+    if ($ApplicationProperties) {
+        foreach ($k in $ApplicationProperties.Keys) { $headers[$k] = [string]$ApplicationProperties[$k] }
+    }
+
+    Invoke-WebRequest -Method Post -Uri $uri -Headers $headers -Body $json `
+        -ContentType 'application/json' -UseBasicParsing -TimeoutSec 30 | Out-Null
 }
 
 # ─── Error classification (mirrors GraphWipeService.Classify) ───────────────
