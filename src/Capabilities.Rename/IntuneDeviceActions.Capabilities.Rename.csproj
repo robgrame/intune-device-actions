@@ -9,10 +9,17 @@
   <ItemGroup>
     <ProjectReference Include="..\Shared\IntuneDeviceActions.Shared.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="IntuneDeviceActions.Capabilities.Rename.Tests" />
+  </ItemGroup>
   <!--
-    Customer-REST capability. Unlike Wipe/Autopilot/BitLocker this does NOT
-    talk to Microsoft Graph: the runner POSTs to a customer-internal HTTP
-    endpoint with the device serial number. The UAMI bound to the Rename
-    Function App therefore needs NO Graph app-role grants.
+    Customer-REST + Microsoft Graph capability. The runner LOOKS UP the new
+    name from a customer-internal HTTP endpoint (device serial), then uses
+    Microsoft Graph to (a) delete stale directory duplicates before the rename
+    (AD-name shadows + HWID duplicates) and (b) POST setDeviceName. The UAMI
+    bound to the Rename Function App therefore needs the Graph app-role grants:
+      - DeviceManagementManagedDevices.PrivilegedOperations.All  (setDeviceName)
+      - Device.ReadWrite.All                                     (delete device objects)
+    granted per-UAMI on the app registration (never in Bicep).
   -->
 </Project>

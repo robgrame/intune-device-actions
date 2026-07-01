@@ -30,6 +30,14 @@ public static class RenameAuditEvents
     public const string CollisionBlocked      = "rename.collision.blocked";
     public const string CollisionCheckFailed  = "rename.collision.check-failed";
 
+    // Pre-rename directory cleanup (delete stale AD-name shadows + HWID duplicates)
+    public const string CleanupAdNameDeleted   = "rename.cleanup.ad-name.deleted";
+    public const string CleanupHwidDeleted     = "rename.cleanup.hwid.deleted";
+    public const string CleanupSkipped         = "rename.cleanup.skipped";
+    public const string CleanupCompleted       = "rename.cleanup.completed";
+    public const string CleanupCapExceeded     = "rename.cleanup.cap-exceeded";
+    public const string CleanupFailed          = "rename.cleanup.failed";
+
     // Microsoft Graph setDeviceName action against the managed device
     public const string GraphSetNameIssued          = "rename.graph.setname.issued";
     public const string GraphSetNameFailedPermanent = "rename.graph.setname.failed-permanent";
