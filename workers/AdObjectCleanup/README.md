@@ -1,4 +1,11 @@
-# AD Object Cleanup — on-prem hybrid worker
+# AD Object Cleanup — on-prem hybrid worker (PowerShell, lightweight)
+
+> **Looking for the recommended production worker?** A first-class, event-driven
+> **.NET Worker Service** lives in
+> [`../AdObjectCleanup.Service`](../AdObjectCleanup.Service/README.md) — prefer
+> it for production (native Windows Service, `ServiceBusProcessor`,
+> Complete/Abandon/Dead-letter). This PowerShell script is a **lightweight
+> alternative** for boxes where installing a .NET service is undesirable.
 
 The Intune **rename** capability runs in Azure and cannot reach on-premises
 Active Directory. Before it issues an Intune `setDeviceName`, it must remove any
