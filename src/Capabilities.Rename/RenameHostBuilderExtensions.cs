@@ -57,6 +57,20 @@ public static class RenameHostBuilderExtensions
         services.AddHttpClient<ICustomerRenameClient, HttpCustomerRenameClient>();
         services.AddSingleton<GraphRenameService>();
 
+        // AD-object-cleanup queue sender (used only when
+        // Rename:AdNameCleanupMode=queue). Registered lazily behind a factory so
+        // the Service Bus client is NOT required when AD cleanup runs in
+        // 'graph'/'disabled' mode or when no worker is deployed.
+        services.EnsureServiceBusClient();
+        services.AddSingleton(sp =>
+        {
+            var cfg = sp.GetRequiredService<IConfiguration>();
+            var client = sp.GetRequiredService<ServiceBusClient>();
+            var queueName = cfg["ServiceBus:AdCleanupQueue"] ?? "ad-object-cleanup";
+            return new AdCleanupSender(client.CreateSender(queueName));
+        });
+        services.AddSingleton<Func<AdCleanupSender>>(sp => () => sp.GetRequiredService<AdCleanupSender>());
+
         services.AddSingleton<RenameActionRunner>();
         services.AddSingleton<IActionRunner>(sp => sp.GetRequiredService<RenameActionRunner>());
         return services;

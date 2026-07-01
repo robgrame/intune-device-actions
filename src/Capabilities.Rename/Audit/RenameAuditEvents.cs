@@ -32,6 +32,7 @@ public static class RenameAuditEvents
 
     // Pre-rename directory cleanup (delete stale AD-name shadows + HWID duplicates)
     public const string CleanupAdNameDeleted   = "rename.cleanup.ad-name.deleted";
+    public const string CleanupAdNameEnqueued  = "rename.cleanup.ad-name.enqueued";
     public const string CleanupHwidDeleted     = "rename.cleanup.hwid.deleted";
     public const string CleanupSkipped         = "rename.cleanup.skipped";
     public const string CleanupCompleted       = "rename.cleanup.completed";

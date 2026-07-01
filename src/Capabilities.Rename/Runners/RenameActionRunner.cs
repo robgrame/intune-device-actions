@@ -1,6 +1,9 @@
 using System.Text.Json;
+using Azure.Messaging.ServiceBus;
 using IntuneDeviceActions.Actions;
 using IntuneDeviceActions.Capabilities.Rename.Audit;
+using IntuneDeviceActions.Capabilities.Rename.Models;
+using IntuneDeviceActions.Capabilities.Rename.Senders;
 using IntuneDeviceActions.Capabilities.Rename.Services;
 using IntuneDeviceActions.Models;
 using IntuneDeviceActions.Services;
@@ -43,11 +46,13 @@ public sealed class RenameActionRunner : IActionRunner
     private readonly ActionIdempotencyService _ledger;
     private readonly AuditService _audit;
     private readonly ActionStatusTracker _statusTracker;
+    private readonly Func<AdCleanupSender> _adCleanupSenderFactory;
     private readonly IConfiguration _cfg;
     private readonly ILogger<RenameActionRunner> _log;
 
     public RenameActionRunner(ICustomerRenameClient customer, GraphRenameService graph,
         ActionIdempotencyService ledger, AuditService audit, ActionStatusTracker statusTracker,
+        Func<AdCleanupSender> adCleanupSenderFactory,
         IConfiguration cfg, ILogger<RenameActionRunner> log)
     {
         _customer = customer;
@@ -55,6 +60,7 @@ public sealed class RenameActionRunner : IActionRunner
         _ledger = ledger;
         _audit = audit;
         _statusTracker = statusTracker;
+        _adCleanupSenderFactory = adCleanupSenderFactory;
         _cfg = cfg;
         _log = log;
     }
@@ -357,6 +363,14 @@ public sealed class RenameActionRunner : IActionRunner
 
         var doAdName = !string.Equals((_cfg["Rename:AdNameCleanup"] ?? "enabled").Trim(), "disabled", StringComparison.OrdinalIgnoreCase);
         var doHwid   = !string.Equals((_cfg["Rename:HwidCleanup"]   ?? "enabled").Trim(), "disabled", StringComparison.OrdinalIgnoreCase);
+        // AD-name cleanup mode:
+        //   queue (default) — publish an AdCleanupMessage to the ad-object-cleanup
+        //                      queue; the on-prem hybrid worker deletes the real
+        //                      on-premises AD computer object(s) named == newName.
+        //   graph           — legacy: delete the Entra ServerAd shadow objects
+        //                      directly via Graph (Function App cannot reach LDAP).
+        var adNameMode = (_cfg["Rename:AdNameCleanupMode"] ?? "queue").Trim().ToLowerInvariant();
+        var adNameGraphMode = adNameMode == "graph";
         var trustTypes = RenameCleanupPlanner.ParseTrustTypes(_cfg["Rename:AdNameCleanupTrustTypes"]);
         var maxDelete = int.TryParse(_cfg["Rename:MaxDeletePerCleanup"], out var m) && m > 0 ? m : 25;
         var allowLarge = string.Equals((_cfg["Rename:AllowLargeCleanup"] ?? "false").Trim(), "true", StringComparison.OrdinalIgnoreCase);
@@ -368,7 +382,7 @@ public sealed class RenameActionRunner : IActionRunner
 
         try
         {
-            if (doAdName)
+            if (doAdName && adNameGraphMode)
             {
                 var matches = await _graph.FindDevicesByDisplayNameAsync(newName, ct);
                 adDeletions = RenameCleanupPlanner.PlanAdNameDeletions(matches, selfDeviceId, trustTypes).ToList();
@@ -488,11 +502,52 @@ public sealed class RenameActionRunner : IActionRunner
             return false;
         }
 
+        // AD-name cleanup in QUEUE mode: publish a delete-by-name request to the
+        // ad-object-cleanup queue. The on-prem hybrid worker performs the real
+        // Remove-ADComputer. Transient Service Bus faults throw (whole action
+        // retries); permanent faults honour Rename:OnCleanupFailure.
+        var adEnqueued = false;
+        if (doAdName && !adNameGraphMode)
+        {
+            try
+            {
+                await EnqueueAdCleanupAsync(msg, newName, ct);
+                adEnqueued = true;
+            }
+            catch (ServiceBusException sbex) when (sbex.IsTransient)
+            {
+                _audit.TrackEvent(RenameAuditEvents.CleanupFailed, sbex, new Dictionary<string, string>
+                {
+                    [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+                    [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+                    ["newName"]                       = newName,
+                    ["phase"]                         = "enqueue",
+                }, LogLevel.Warning);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _audit.TrackEvent(RenameAuditEvents.CleanupFailed, ex, new Dictionary<string, string>
+                {
+                    [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+                    [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+                    ["newName"]                       = newName,
+                    ["phase"]                         = "enqueue",
+                }, LogLevel.Error);
+                if (onFailure == "warn") return await IntuneCollisionCheckAsync(msg, newName, ct);
+                await _ledger.MarkFailedAsync(msg.IntuneDeviceId, msg.CorrelationId, $"cleanup-enqueue-failed:{ex.Message}", ct);
+                await _statusTracker.RecordTerminalAsync(msg, Type, "failed:cleanup", ct, msg.IntuneDeviceId);
+                return false;
+            }
+        }
+
         _audit.TrackEvent(RenameAuditEvents.CleanupCompleted, new Dictionary<string, string>
         {
             [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
             [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
             ["newName"]                       = newName,
+            ["adMode"]                        = adNameGraphMode ? "graph" : "queue",
+            ["adEnqueued"]                    = adEnqueued.ToString(),
             ["adDeleted"]                     = adDeleted.ToString(),
             ["hwidDeleted"]                   = hwidDeleted.ToString(),
             ["hwid"]                          = hwid ?? "(none)",
@@ -501,6 +556,51 @@ public sealed class RenameActionRunner : IActionRunner
         // Still block on an Intune-side managedDevice name collision (deleting
         // Intune records is intentionally out of scope for the cleanup).
         return await IntuneCollisionCheckAsync(msg, newName, ct);
+    }
+
+    /// <summary>
+    /// Publishes a single <see cref="AdCleanupMessage"/> to the
+    /// <c>ad-object-cleanup</c> Service Bus queue so the on-prem hybrid worker
+    /// deletes the real on-premises AD computer object(s) named
+    /// <paramref name="newName"/>. The <c>messageType</c> application property is
+    /// stamped so the worker can assert the contract; the correlation id and
+    /// serial ride along for auditing.
+    /// </summary>
+    private async Task EnqueueAdCleanupAsync(ActionRequestMessage msg, string newName, CancellationToken ct)
+    {
+        var payload = new AdCleanupMessage
+        {
+            CorrelationId    = msg.CorrelationId,
+            TargetName       = newName,
+            SourceDeviceName = msg.DeviceName,
+            EntraDeviceId    = msg.EntraDeviceId,
+            IntuneDeviceId   = msg.IntuneDeviceId,
+            SerialNumber     = RenamePayloadExtractor.TryRead(msg)?.SerialNumber,
+            RequestedUtc     = DateTimeOffset.UtcNow,
+        };
+
+        var sender = _adCleanupSenderFactory().Sender;
+        var sb = new ServiceBusMessage(BinaryData.FromObjectAsJson(payload))
+        {
+            ContentType   = "application/json",
+            CorrelationId = msg.CorrelationId,
+            Subject       = AdCleanupMessage.MessageType,
+            MessageId     = $"{AdCleanupMessage.MessageType}:{msg.CorrelationId}",
+        };
+        sb.ApplicationProperties["messageType"]   = AdCleanupMessage.MessageType;
+        sb.ApplicationProperties["schemaVersion"] = AdCleanupMessage.CurrentSchemaVersion;
+        sb.ApplicationProperties["targetName"]    = newName;
+
+        await sender.SendMessageAsync(sb, ct);
+
+        _audit.TrackEvent(RenameAuditEvents.CleanupAdNameEnqueued, new Dictionary<string, string>
+        {
+            [AuditEvents.Prop.CorrelationId]  = msg.CorrelationId,
+            [AuditEvents.Prop.IntuneDeviceId] = msg.IntuneDeviceId,
+            [AuditEvents.Prop.DeviceName]     = msg.DeviceName,
+            ["newName"]                       = newName,
+            ["queue"]                         = _cfg["ServiceBus:AdCleanupQueue"] ?? "ad-object-cleanup",
+        });
     }
 
     /// <summary>
