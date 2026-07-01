@@ -227,14 +227,148 @@ try {
     }
 }
 
-# ─── 3) Collision check — Entra + Intune ────────────────────────────────────
+# ─── 3) Pre-rename directory cleanup (default) OR legacy collision check ─────
 # Entra does NOT enforce uniqueness on device displayName (unlike on-prem AD).
-# Probe BOTH directories — Entra (devices?$filter=displayName eq ...) AND
-# Intune (managedDevices?$filter=deviceName eq ...) — because in-flight renames
-# applied via another channel (manual portal action, a parallel runner instance
-# that already issued setDeviceName, an Autopilot deployment profile rename)
-# may live on the Intune side before propagating up to Entra at the next MDM sync.
-$escaped       = $newName.Replace("'", "''")
+# Default behaviour DELETES, via Microsoft Graph, the stale directory duplicates
+# that would block a hybrid rename BEFORE issuing setDeviceName:
+#   * AD-name shadows  — Entra objects with displayName == target name whose
+#                        trustType is an AD type (default ServerAd), excl. self;
+#   * HWID duplicates  — every Entra device sharing this machine's [HWID],
+#                        except the Entra ID Joined object (AzureAd) and self.
+# Set Rename:PreRenameCleanup=disabled to fall back to the non-destructive
+# collision block/warn behaviour (probes Entra + Intune, deletes nothing).
+# Requires Device.ReadWrite.All on the runbook identity.
+$escaped     = $newName.Replace("'", "''")
+$cleanupMode = ((Get-AutomationVariable -Name 'Rename:PreRenameCleanup' -ErrorAction SilentlyContinue) ?? 'enabled').ToLowerInvariant()
+
+if ($cleanupMode -eq 'disabled') {
+    $checkEntraToo = $true
+} elseif ([string]::IsNullOrWhiteSpace([string]$ctx.EntraDeviceId)) {
+    # Without the device's own Entra deviceId we cannot safely exclude "self"
+    # from the delete set — skip cleanup, fall through to Intune-only check.
+    Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupSkipped -Context $ctx -Level 'Warning' -Props @{
+        newName = $newName; reason = 'missing-entra-device-id'
+    }
+    $checkEntraToo = $false
+} else {
+    $checkEntraToo = $false
+    $selfId      = [string]$ctx.EntraDeviceId
+    $doAdName    = (((Get-AutomationVariable -Name 'Rename:AdNameCleanup' -ErrorAction SilentlyContinue) ?? 'enabled').ToLowerInvariant() -ne 'disabled')
+    $doHwid      = (((Get-AutomationVariable -Name 'Rename:HwidCleanup'   -ErrorAction SilentlyContinue) ?? 'enabled').ToLowerInvariant() -ne 'disabled')
+    $trustCsv    = ((Get-AutomationVariable -Name 'Rename:AdNameCleanupTrustTypes' -ErrorAction SilentlyContinue) ?? 'ServerAd')
+    $trustTypes  = @($trustCsv -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($trustTypes.Count -eq 0) { $trustTypes = @('ServerAd') }
+    $maxDelete   = 25
+    [void][int]::TryParse(((Get-AutomationVariable -Name 'Rename:MaxDeletePerCleanup' -ErrorAction SilentlyContinue)), [ref]$maxDelete)
+    if ($maxDelete -le 0) { $maxDelete = 25 }
+    $allowLarge  = (((Get-AutomationVariable -Name 'Rename:AllowLargeCleanup' -ErrorAction SilentlyContinue) ?? 'false').ToLowerInvariant() -eq 'true')
+    $onCleanupFailure = ((Get-AutomationVariable -Name 'Rename:OnCleanupFailure' -ErrorAction SilentlyContinue) ?? 'block').ToLowerInvariant()
+
+    $adDeletions   = @()
+    $hwidDeletions = @()
+    $hwidToken     = $null
+    $cleanupPermanentError = $false
+
+    try {
+        if ($doAdName) {
+            $adFilter = [System.Uri]::EscapeDataString("displayName eq '$escaped'")
+            $adSelect = [System.Uri]::EscapeDataString('id,deviceId,displayName,trustType,physicalIds,accountEnabled')
+            $adUri    = "https://graph.microsoft.com/v1.0/devices?`$filter=$adFilter&`$select=$adSelect&`$top=100"
+            $adPage   = Invoke-RbcGraphApi -Method GET -Uri $adUri
+            foreach ($d in @($adPage.value)) {
+                if ($selfId -and $d.deviceId -and ([string]::Equals([string]$d.deviceId, $selfId, [System.StringComparison]::OrdinalIgnoreCase))) { continue }
+                if ($d.trustType -and ($trustTypes -contains [string]$d.trustType)) { $adDeletions += $d }
+            }
+        }
+        if ($doHwid) {
+            $selfFilter = [System.Uri]::EscapeDataString("deviceId eq '$($selfId.Replace("'","''"))'")
+            $selfSelect = [System.Uri]::EscapeDataString('id,deviceId,physicalIds')
+            $selfUri    = "https://graph.microsoft.com/v1.0/devices?`$filter=$selfFilter&`$select=$selfSelect&`$top=1"
+            $selfPage   = Invoke-RbcGraphApi -Method GET -Uri $selfUri
+            $selfDev    = @($selfPage.value)[0]
+            if ($selfDev) {
+                $hwidToken = @($selfDev.physicalIds) | Where-Object { $_ -and ([string]$_).StartsWith('[HWID]:', [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+            }
+            if ($hwidToken) {
+                $sharedFilter = [System.Uri]::EscapeDataString("physicalIds/any(p:p eq '$(([string]$hwidToken).Replace("'","''"))')")
+                $sharedSelect = [System.Uri]::EscapeDataString('id,deviceId,displayName,trustType,physicalIds,accountEnabled')
+                $sharedUri    = "https://graph.microsoft.com/v1.0/devices?`$filter=$sharedFilter&`$select=$sharedSelect&`$count=true&`$top=100"
+                $sharedPage   = Invoke-RbcGraphApi -Method GET -Uri $sharedUri -ConsistencyEventual
+                $adIds = @($adDeletions | ForEach-Object { [string]$_.id })
+                foreach ($d in @($sharedPage.value)) {
+                    $isSelf   = ($selfId -and $d.deviceId -and ([string]::Equals([string]$d.deviceId, $selfId, [System.StringComparison]::OrdinalIgnoreCase)))
+                    $isJoined = ([string]::Equals([string]$d.trustType, 'AzureAd', [System.StringComparison]::OrdinalIgnoreCase))
+                    if ($isSelf -or $isJoined) { continue }
+                    if ($adIds -contains [string]$d.id) { continue }
+                    $hwidDeletions += $d
+                }
+            } else {
+                Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupSkipped -Context $ctx -Props @{ newName = $newName; reason = 'no-hwid-on-self' }
+            }
+        }
+    } catch [RbcGraphError] {
+        $err = $_.Exception
+        Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupFailed -Context $ctx -Level 'Warning' -Exception $err -Props @{ newName = $newName; phase = 'plan' }
+        if ($err.Kind -eq 'Transient') { throw }
+        $cleanupPermanentError = $true
+    }
+
+    if ($cleanupPermanentError -and $onCleanupFailure -ne 'warn') {
+        Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason 'cleanup-plan-failed' | Out-Null
+        Write-RbcTerminalStatus -Context $ctx -State 'failed:cleanup' -ManagedDeviceId $ctx.IntuneDeviceId
+        return
+    }
+
+    if (-not $cleanupPermanentError) {
+        $totalToDelete = $adDeletions.Count + $hwidDeletions.Count
+        if ($totalToDelete -gt $maxDelete -and -not $allowLarge) {
+            Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupCapExceeded -Context $ctx -Level 'Error' -Props @{
+                newName = $newName; plannedDeletions = $totalToDelete; maxDelete = $maxDelete
+            }
+            Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "cleanup-cap-exceeded:$totalToDelete>$maxDelete" | Out-Null
+            Write-RbcTerminalStatus -Context $ctx -State 'denied:cleanup-cap' -ManagedDeviceId $ctx.IntuneDeviceId
+            return
+        }
+
+        $adDeleted = 0; $hwidDeleted = 0
+        try {
+            foreach ($d in $adDeletions) {
+                Invoke-RbcGraphApi -Method DELETE -Uri "https://graph.microsoft.com/v1.0/devices/$([System.Uri]::EscapeDataString([string]$d.id))" | Out-Null
+                $adDeleted++
+                Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupAdNameDeleted -Context $ctx -Props @{
+                    newName = $newName; deletedObjectId = [string]$d.id; deletedDeviceId = [string]$d.deviceId
+                    deletedDisplayName = [string]$d.displayName; deletedTrustType = ([string]$d.trustType ?? '(none)')
+                }
+            }
+            foreach ($d in $hwidDeletions) {
+                Invoke-RbcGraphApi -Method DELETE -Uri "https://graph.microsoft.com/v1.0/devices/$([System.Uri]::EscapeDataString([string]$d.id))" | Out-Null
+                $hwidDeleted++
+                Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupHwidDeleted -Context $ctx -Props @{
+                    hwid = ([string]$hwidToken ?? '(unknown)'); deletedObjectId = [string]$d.id; deletedDeviceId = [string]$d.deviceId
+                    deletedDisplayName = [string]$d.displayName; deletedTrustType = ([string]$d.trustType ?? '(none)')
+                }
+            }
+            Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupCompleted -Context $ctx -Props @{
+                newName = $newName; adDeleted = $adDeleted; hwidDeleted = $hwidDeleted; hwid = ([string]$hwidToken ?? '(none)')
+            }
+        } catch [RbcGraphError] {
+            $err = $_.Exception
+            Write-RbcAudit -EventName $script:RbcAudit.RenameCleanupFailed -Context $ctx -Level 'Warning' -Exception $err -Props @{
+                newName = $newName; phase = 'delete'; adDeleted = $adDeleted; hwidDeleted = $hwidDeleted
+            }
+            if ($err.Kind -eq 'Transient') { throw }
+            if ($onCleanupFailure -ne 'warn') {
+                Set-RbcLedgerOutcome -Context $ctx -IntuneDeviceId $ctx.IntuneDeviceId -CorrelationId $ctx.CorrelationId -Outcome 'Failed' -FailureReason "cleanup-delete-failed:$($err.Message)" | Out-Null
+                Write-RbcTerminalStatus -Context $ctx -State 'failed:cleanup' -ManagedDeviceId $ctx.IntuneDeviceId
+                return
+            }
+        }
+    }
+}
+
+# Collision guard — always probes Intune (deviceName); probes Entra
+# (displayName) too only in the legacy no-cleanup path. Deleting Intune
+# managedDevice records is intentionally out of scope.
 $entraFilter   = [System.Uri]::EscapeDataString("displayName eq '$escaped'")
 $entraSelect   = [System.Uri]::EscapeDataString('id,deviceId,displayName,accountEnabled')
 $entraColUri   = "https://graph.microsoft.com/v1.0/devices?`$filter=$entraFilter&`$select=$entraSelect&`$top=25"
@@ -244,16 +378,18 @@ $intuneColUri  = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevic
 
 $collisions = @()
 try {
-    $entraPage = Invoke-RbcGraphApi -Method GET -Uri $entraColUri
-    foreach ($d in @($entraPage.value)) {
-        if ($ctx.EntraDeviceId -and $d.deviceId -and ([string]::Equals([string]$d.deviceId, [string]$ctx.EntraDeviceId, [System.StringComparison]::OrdinalIgnoreCase))) {
-            continue
-        }
-        $collisions += [pscustomobject]@{
-            source         = 'entra'
-            displayName    = $d.displayName
-            id             = $d.deviceId
-            accountEnabled = $d.accountEnabled
+    if ($checkEntraToo) {
+        $entraPage = Invoke-RbcGraphApi -Method GET -Uri $entraColUri
+        foreach ($d in @($entraPage.value)) {
+            if ($ctx.EntraDeviceId -and $d.deviceId -and ([string]::Equals([string]$d.deviceId, [string]$ctx.EntraDeviceId, [System.StringComparison]::OrdinalIgnoreCase))) {
+                continue
+            }
+            $collisions += [pscustomobject]@{
+                source         = 'entra'
+                displayName    = $d.displayName
+                id             = $d.deviceId
+                accountEnabled = $d.accountEnabled
+            }
         }
     }
     $intunePage = Invoke-RbcGraphApi -Method GET -Uri $intuneColUri

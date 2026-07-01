@@ -98,6 +98,12 @@ $script:RbcAudit = @{
     RenameCollisionDetected          = 'rename.collision.detected'
     RenameCollisionBlocked           = 'rename.collision.blocked'
     RenameCollisionCheckFailed       = 'rename.collision.check-failed'
+    RenameCleanupAdNameDeleted       = 'rename.cleanup.ad-name.deleted'
+    RenameCleanupHwidDeleted         = 'rename.cleanup.hwid.deleted'
+    RenameCleanupSkipped             = 'rename.cleanup.skipped'
+    RenameCleanupCompleted           = 'rename.cleanup.completed'
+    RenameCleanupCapExceeded         = 'rename.cleanup.cap-exceeded'
+    RenameCleanupFailed              = 'rename.cleanup.failed'
     RenameSetNameIssued              = 'rename.graph.setname.issued'
     RenameSetNameFailedPermanent     = 'rename.graph.setname.failed-permanent'
     RenameSetNameTransientError      = 'rename.graph.setname.transient-error'
@@ -226,12 +232,14 @@ function Invoke-RbcGraphApi {
     param(
         [Parameter(Mandatory)] [string]$Method,
         [Parameter(Mandatory)] [string]$Uri,
-        [object]$Body
+        [object]$Body,
+        [switch]$ConsistencyEventual
     )
     $headers = @{
         Authorization = "Bearer $(Get-RbcGraphToken)"
         Accept        = 'application/json'
     }
+    if ($ConsistencyEventual) { $headers['ConsistencyLevel'] = 'eventual' }
     $bodyJson = $null
     if ($null -ne $Body) {
         $bodyJson = if ($Body -is [string]) { $Body } else { ($Body | ConvertTo-Json -Depth 16 -Compress) }
